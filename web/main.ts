@@ -8,12 +8,14 @@ import type {
   CommandResult,
   EntitySnapshot,
   EntityTypeDef,
+  EnvironmentState,
   ForceId,
   Formation,
   Graphic,
   GraphicKind,
   Plan,
   PlanStatement,
+  Precipitation,
   Roe,
   Role,
   SimEvent,
@@ -189,6 +191,7 @@ class App {
     this.map.setState(s);
     this.view3d?.setState(s);
     $('#sim-time').textContent = fmtTime(s.time);
+    this.renderEnvironment(s.environment);
     $('#scenario-name').textContent = s.scenarioName;
     const run = $('#btn-run');
     run.textContent = s.running ? '⏸ Pause' : '▶ Run';
@@ -378,6 +381,7 @@ class App {
       }
     });
     $('#btn-run').addEventListener('click', () => this.cmd({ cmd: this.state?.running ? 'pause' : 'run' }));
+    $('#env-chip').addEventListener('click', () => void this.settingsDialog());
     $('#btn-step').addEventListener('click', () => this.cmd({ cmd: 'step', seconds: 1 }));
     $('#btn-rewind').addEventListener('click', () => {
       if (confirm('Rewind to the scenario as it was last loaded or saved? Changes since then will be lost.')) this.cmd({ cmd: 'rewind' });
@@ -450,9 +454,30 @@ class App {
     this.renderTree();
   }
 
-  /** Optional model parts (and, later, the environment) for the current scenario. */
+  private renderEnvironment(env: EnvironmentState | undefined): void {
+    const chip = $('#env-chip');
+    chip.classList.toggle('hidden', !env);
+    if (!env) return;
+    const icon = env.period === 'day' ? '☀' : env.period === 'twilight' ? '◐' : '☾';
+    const wx = (env.visibility < 5000 ? ' ≋' : '') + (env.precipitation === 'snow' ? ' ❄' : env.precipitation !== 'none' ? ' ☂' : '');
+    chip.textContent = `${icon} ${env.localTime}${wx}`;
+    chip.classList.toggle('night', env.period !== 'day');
+    chip.title = `${env.localDate} ${env.localTime} local · ${env.period}${env.precipitation !== 'none' ? ` · ${PRECIPITATION_LABELS[env.precipitation]}` : ''} · sun ${env.sunAltitude}° · light ${Math.round(env.light * 100)}% · visibility ${env.visibility >= 1000 ? `${env.visibility / 1000} km` : `${env.visibility} m`}${env.windSpeed ? ` · wind ${env.windSpeed} m/s from ${env.windFrom}°` : ''}. Click to change.`;
+  }
+
+  /** Optional model parts and the environment for the current scenario. */
   private async settingsDialog(): Promise<void> {
     const rules = await this.api.v1<Record<string, boolean>>('GET', '/simulation/rules');
+    const env = await this.api.v1<EnvironmentState>('GET', '/simulation/environment');
+    const hh = Math.floor(env.time);
+    const mm = Math.round((env.time - hh) * 60);
+    const field = (label: string, input: HTMLElement) => [h('label', { text: label }), input];
+    const date = h('input', { type: 'date', value: env.date }) as HTMLInputElement;
+    const time = h('input', { type: 'time', value: `${String(hh).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}` }) as HTMLInputElement;
+    const visibility = h('input', { type: 'number', min: '50', max: '100000', step: '50', value: String(env.visibility) }) as HTMLInputElement;
+    const precipitation = h('select', {}, Object.entries(PRECIPITATION_LABELS).map(([v, t]) => h('option', { value: v, text: t || 'None', selected: v === env.precipitation }))) as HTMLSelectElement;
+    const windSpeed = h('input', { type: 'number', min: '0', max: '40', step: '1', value: String(env.windSpeed) }) as HTMLInputElement;
+    const windFrom = h('input', { type: 'number', min: '0', max: '360', step: '10', value: String(env.windFrom) }) as HTMLInputElement;
     const box = (key: string, label: string, hint: string) =>
       h('label', { class: 'setting' }, h('input', { type: 'checkbox', checked: rules[key] !== false, 'data-rule': key }), h('span', {}, h('strong', { text: label }), h('small', { text: hint })));
     let close = () => {};
@@ -463,6 +488,18 @@ class App {
       h('h4', { text: 'Models' }),
       box('suppression', 'Suppression', 'Incoming fire makes targets less accurate, slower to fire and spot; infantry get pinned down'),
       box('morale', 'Morale', 'Units become shaken and break under losses and fire, then rally'),
+      h('h4', { text: 'Time and weather (at the scenario start)' }),
+      h(
+        'div',
+        { class: 'env-grid' },
+        ...field('Date', date),
+        ...field('Time of day', time),
+        ...field('Visibility (m)', visibility),
+        ...field('Precipitation', precipitation),
+        ...field('Wind (m/s)', windSpeed),
+        ...field('Wind from (°)', windFrom),
+      ),
+      h('small', { class: 'hint', text: `Now ${env.localTime} on ${env.localDate}. Night cuts eyes and binoculars to under 10% of their range; night-vision goggles keep 60%; thermal sights are unaffected by darkness. Fog cuts every optical sensor (thermals see about 3× further); rain and snow slow vehicles off roads; wind drifts smoke.` }),
       h(
         'div',
         { class: 'row' },
@@ -473,7 +510,19 @@ class App {
             const next: Record<string, boolean> = {};
             for (const el of body.querySelectorAll<HTMLInputElement>('[data-rule]')) next[el.dataset.rule!] = el.checked;
             const r = await this.cmd({ cmd: 'setRules', rules: next });
-            if (r.ok) close();
+            const [th, tm] = time.value.split(':').map(Number);
+            const e = await this.cmd({
+              cmd: 'setEnvironment',
+              environment: {
+                date: date.value || env.date,
+                time: Number.isFinite(th) ? th + (tm || 0) / 60 : env.time,
+                visibility: Number(visibility.value),
+                precipitation: precipitation.value as Precipitation,
+                windSpeed: Number(windSpeed.value),
+                windFrom: Number(windFrom.value) % 360,
+              },
+            });
+            if (r.ok && e.ok) close();
           },
         }),
         h('button', { text: 'Cancel', onclick: () => close() }),
@@ -1852,3 +1901,5 @@ const GRAPHIC_HINTS: Record<GraphicKind, string> = {
   minefield: 'Vehicles and troops crossing it may set off mines (density: chance per 100 m driven). Forces avoid it once they know it is there. Select engineers, then right-click it to breach a lane.',
   obstacle: 'Vehicles cannot cross it; infantry climb through slowly. Select engineers, then right-click it to breach a lane.',
 };
+
+const PRECIPITATION_LABELS: Record<Precipitation, string> = { none: '', rain: 'rain', heavyRain: 'heavy rain', snow: 'snow' };

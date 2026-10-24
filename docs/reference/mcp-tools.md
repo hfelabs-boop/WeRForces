@@ -190,6 +190,19 @@ Turn optional parts of the model on or off for this scenario (all are on by defa
 | `suppression` | boolean |  |  |
 | `morale` | boolean |  |  |
 
+## `set_environment` _(idempotent)_
+
+Set the time of day and weather. Darkness cuts the range of eyes and binoculars (night-vision goggles keep about 60%, thermal sights are unaffected); fog and precipitation cut every optical sensor; rain and snow slow movement off roads; wind drifts smoke. Fields left out keep their values. Returns the current environment (local time, sun altitude, light level).
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `date` | string |  | date at the scenario start |
+| `time` | number (0–24) |  | local solar time at the scenario start, in hours (e.g. 4.5 = 04:30) |
+| `visibility` | number (50–100000) |  | metres; fog is a few hundred, clear is 20000+ |
+| `precipitation` | `"none"` \| `"rain"` \| `"heavyRain"` \| `"snow"` |  |  |
+| `windSpeed` | number (0–40) |  | m/s |
+| `windFrom` | number (0–360) |  | degrees the wind blows from |
+
 ## `set_reactions` _(idempotent)_
 
 Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out; callForFire makes it request fire missions from idle friendly artillery in range on hostiles it sees (not within 150 m of friendly troops).

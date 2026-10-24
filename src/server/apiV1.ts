@@ -168,6 +168,7 @@ export class ApiV1 {
         note: 'Local coordinates are metres: x east, y north, from the south-west corner (0,0) to (size,size).',
         towns: t.towns,
       },
+      environment: { localTime: this.engine.env.localTime, period: this.engine.env.period, light: this.engine.env.light, visibility: this.engine.env.visibility, precipitation: this.engine.env.precipitation },
       dis: s.dis ?? { enabled: false },
       lastEventSeq: this.engine.eventsSince(0).at(-1)?.seq ?? 0,
     };
@@ -198,6 +199,11 @@ export class ApiV1 {
     r.put(`${P}/simulation/rules`, (req) => {
       this.run({ cmd: 'setRules', rules: obj(req.body) as never });
       return { json: this.engine.rules };
+    });
+    r.get(`${P}/simulation/environment`, () => ({ json: this.engine.env }));
+    r.put(`${P}/simulation/environment`, (req) => {
+      this.run({ cmd: 'setEnvironment', environment: obj(req.body) as never });
+      return { json: this.engine.env };
     });
     r.put(`${P}/simulation/time-scale`, (req) => {
       this.run({ cmd: 'setTimeScale', scale: num(obj(req.body).scale, 'scale') });

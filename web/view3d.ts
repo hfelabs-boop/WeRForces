@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { TerrainGrid } from '../src/shared/terrainGrid.js';
-import type { EntitySnapshot, ForceId, Graphic, SimEvent, SmokeCloud, SimState, SymbolKind, TerrainData, Vec2 } from '../src/shared/types.js';
+import type { EntitySnapshot, ForceId, EnvironmentState, Graphic, SimEvent, SmokeCloud, SimState, SymbolKind, TerrainData, Vec2 } from '../src/shared/types.js';
 
 export interface View3DCallbacks {
   select(id: string | null): void;
@@ -196,10 +196,9 @@ export class View3D {
 
     const sky = 0xa9c8e8;
     this.scene.background = new THREE.Color(sky);
-    this.scene.add(new THREE.HemisphereLight(0xe8f2ff, 0x4f5b3c, 1.3));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.7);
-    sun.position.set(-1, 1.6, -0.8);
-    this.scene.add(sun, this.graphicsGroup, this.entityGroup);
+    this.scene.add(this.hemi);
+    this.sun.position.set(-1, 1.6, -0.8);
+    this.scene.add(this.sun, this.graphicsGroup, this.entityGroup);
 
     this.buildOverlay();
     this.bindPointer();
@@ -225,8 +224,34 @@ export class View3D {
     for (const o of this.entities.values()) this.entityGroup.remove(o.group);
     this.entities.clear();
     this.resetCamera();
-    const fogFar = data.spec.size * 3;
-    this.scene.fog = new THREE.Fog(0xa9c8e8, data.spec.size * 0.9, fogFar);
+    this.scene.fog = new THREE.Fog(0xa9c8e8, data.spec.size * 0.9, data.spec.size * 3);
+    this.envKey = '';
+  }
+
+  private hemi = new THREE.HemisphereLight(0xe8f2ff, 0x4f5b3c, 1.3);
+  private sun = new THREE.DirectionalLight(0xffffff, 1.7);
+  private envKey = '';
+
+  /** Dim the scene at night and close in the fog for poor visibility. */
+  private syncEnvironment(env: EnvironmentState | undefined): void {
+    if (!this.data || !env) return;
+    const key = `${env.light}|${env.visibility}|${env.precipitation}`;
+    if (key === this.envKey) return;
+    this.envKey = key;
+    const size = this.data.spec.size;
+    // Keep night scenes readable: dim, but never black.
+    const l = 0.25 + 0.75 * env.light;
+    const day = new THREE.Color(env.precipitation === 'none' ? 0xa9c8e8 : 0x9aa6b2);
+    const sky = day.clone().lerp(new THREE.Color(0x0b1424), 1 - l);
+    (this.scene.background as THREE.Color).copy(sky);
+    this.hemi.intensity = 1.3 * l;
+    this.sun.intensity = 1.7 * Math.max(0.1, env.light);
+    // Haze in proportion to the visibility, but never so thick that the overview disappears.
+    const k = Math.max(0.2, Math.min(1, env.visibility / 10000));
+    const fog = this.scene.fog as THREE.Fog;
+    fog.color.copy(sky);
+    fog.far = size * (1.2 + 1.8 * k);
+    fog.near = fog.far * 0.3 * k;
   }
 
   setState(state: SimState): void {
@@ -234,6 +259,7 @@ export class View3D {
     if (!this.data) return;
     this.syncGraphics(state.graphics);
     this.syncSmoke(state.smoke ?? []);
+    this.syncEnvironment(state.environment);
     this.syncEntities(state.entities);
   }
 

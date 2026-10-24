@@ -1,6 +1,6 @@
 // Remote-control command dispatcher shared by the REST and WebSocket APIs.
 
-import type { Command, CommandResult, Condition, ForceId, Formation, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
+import type { Command, CommandResult, Condition, Environment, ForceId, Formation, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
 import type { SimRunner } from './runner.js';
 
 const FORCES = new Set([0, 1, 2, 3]);
@@ -279,6 +279,10 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         engine.setRules(r as SimulationRules);
         return;
       }
+      case 'setEnvironment': {
+        engine.setEnvironment(validateEnvironment(c.environment));
+        return;
+      }
       case 'embark': {
         engine.embarkNow(str(c.passengerId, 'passengerId'), str(c.carrierId, 'carrierId'));
         return;
@@ -341,4 +345,31 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         throw new ValidationError(`unknown command ${String((c as { cmd?: unknown }).cmd)}`);
     }
   });
+}
+
+const PRECIPITATION = new Set(['none', 'rain', 'heavyRain', 'snow']);
+
+function validateEnvironment(v: unknown): Environment {
+  if (!v || typeof v !== 'object') throw new ValidationError('environment must be an object');
+  const e = v as Record<string, unknown>;
+  const out: Environment = {};
+  if (e.date !== undefined) {
+    if (typeof e.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(e.date) || Number.isNaN(Date.parse(e.date))) throw new ValidationError('date must be YYYY-MM-DD');
+    out.date = e.date;
+  }
+  const n = (k: 'time' | 'visibility' | 'windSpeed' | 'windFrom', min: number, max: number) => {
+    if (e[k] === undefined) return;
+    const x = e[k];
+    if (typeof x !== 'number' || !Number.isFinite(x) || x < min || x > max) throw new ValidationError(`${k} must be a number from ${min} to ${max}`);
+    out[k] = x;
+  };
+  n('time', 0, 24);
+  n('visibility', 50, 100000);
+  n('windSpeed', 0, 40);
+  n('windFrom', 0, 360);
+  if (e.precipitation !== undefined) {
+    if (!PRECIPITATION.has(e.precipitation as string)) throw new ValidationError('precipitation must be none, rain, heavyRain or snow');
+    out.precipitation = e.precipitation as Environment['precipitation'];
+  }
+  return out;
 }

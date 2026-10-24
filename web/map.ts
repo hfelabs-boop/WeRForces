@@ -394,6 +394,7 @@ export class MapView {
     if (this.layers.grid) this.drawGrid(size);
     this.drawRoads();
     this.drawTowns();
+    this.drawNight();
     this.drawSmoke();
     this.drawGraphics();
     this.drawSelectionOverlays();
@@ -556,6 +557,14 @@ export class MapView {
       }
     }
     ctx.restore();
+  }
+
+  /** Shade the map at night and in twilight (graphics and symbols stay bright). */
+  private drawNight(): void {
+    const light = this.state?.environment?.light ?? 1;
+    if (light >= 1) return;
+    this.ctx.fillStyle = `rgba(8, 14, 36, ${(0.55 * (1 - light)).toFixed(3)})`;
+    this.ctx.fillRect(0, 0, this.width, this.height);
   }
 
   private drawSmoke(): void {

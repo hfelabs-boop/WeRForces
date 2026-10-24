@@ -4,10 +4,13 @@
 import { angleDiff, bearing, clamp } from '../shared/math.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
+import { sensorRange } from './environment.js';
 import { spotFactor } from './morale.js';
 
 export const SENSOR_INTERVAL = 1;
 const CONTACT_TIMEOUT = 15;
+/** Light level at which a muzzle flash can be seen (fraction of daylight range). */
+const FLASH_LIGHT = 0.5;
 
 /** Probability that one sensor scan detects a target. */
 export function detectionProbability(engine: Engine, observer: Entity, target: Entity, range: number, maxRange: number, radar: boolean): number {
@@ -29,9 +32,14 @@ export function updateSensors(engine: Engine, observer: Entity): void {
   const now = engine.time;
   if (observer.alive && !observer.remote && !observer.embarkedIn && observer.type.sensors.length > 0) {
     const eye = observer.eye;
-    const sensors = observer.type.sensors.map((sid) => engine.catalog.sensors.get(sid)!);
+    // Muzzle flashes give away a shooter at night further than the dark would allow.
+    const flashEnv = engine.env.light < FLASH_LIGHT ? { ...engine.env, light: FLASH_LIGHT } : engine.env;
+    const sensors = observer.type.sensors.map((sid) => {
+      const s = engine.catalog.sensors.get(sid)!;
+      return { s, range: sensorRange(s, engine.env), flashRange: sensorRange(s, flashEnv) };
+    });
     let reach = 0;
-    for (const s of sensors) reach = Math.max(reach, s.maxRange);
+    for (const { flashRange } of sensors) reach = Math.max(reach, flashRange);
     engine.spatial.build(engine.entities.values(), engine.time);
     for (const target of engine.spatial.query(observer.x, observer.y, reach, observer.force)) {
       if (target === observer || target.destroyed || target.embarkedIn) continue;
@@ -41,15 +49,17 @@ export function updateSensors(engine: Engine, observer: Entity): void {
       const range2 = dx * dx + dy * dy + dz * dz;
       if (range2 > reach * reach) continue;
       const range = Math.sqrt(range2);
-      for (const s of sensors) {
-        if (range > s.maxRange || !s.detects.includes(target.domain)) continue;
+      const flash = now - target.lastFiredAt < 5;
+      for (const { s, range: dark, flashRange } of sensors) {
+        const maxRange = flash ? flashRange : dark;
+        if (range > maxRange || !s.detects.includes(target.domain)) continue;
         if (s.fov < Math.PI * 2 - 1e-6) {
           const off = Math.abs(angleDiff(observer.heading, bearing(observer, target)));
           if (off > s.fov / 2) continue;
         }
         const aim = { x: target.x, y: target.y, z: target.z + Math.min(2, target.type.sensorHeight || 2) };
         if (!engine.lineOfSight(eye, aim, !!s.radar)) continue;
-        if (!engine.rng.chance(detectionProbability(engine, observer, target, range, s.maxRange, !!s.radar))) continue;
+        if (!engine.rng.chance(detectionProbability(engine, observer, target, range, maxRange, !!s.radar))) continue;
         recordContact(engine, observer, target, now);
         break;
       }

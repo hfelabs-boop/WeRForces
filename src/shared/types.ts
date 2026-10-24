@@ -109,6 +109,10 @@ export interface SensorDef {
   detects: Domain[];
   /** Ignores forest concealment and terrain masking only for air targets (radar). */
   radar?: boolean;
+  /** Thermal imager: unaffected by darkness, less affected by haze. */
+  thermal?: boolean;
+  /** Image intensifier (night-vision goggles): keeps much of its range at night. */
+  nightVision?: boolean;
 }
 
 export interface EntityTypeDef {
@@ -415,6 +419,8 @@ export interface ScenarioFile {
   rngState?: number;
   /** Which optional models are on (all default to on). */
   rules?: SimulationRules;
+  /** Time of day and weather at the start. */
+  environment?: Environment;
 }
 
 /** Optional parts of the model, for comparison runs. Missing fields mean on. */
@@ -426,6 +432,35 @@ export interface SimulationRules {
 }
 
 export type MoraleState = 'steady' | 'shaken' | 'broken';
+
+export type Precipitation = 'none' | 'rain' | 'heavyRain' | 'snow';
+
+/** Time of day and weather. Missing fields keep their defaults (midsummer noon, clear, calm). */
+export interface Environment {
+  /** Date at the scenario's start, YYYY-MM-DD. */
+  date?: string;
+  /** Local solar time at the scenario's start, in hours (0-24). */
+  time?: number;
+  /** Meteorological visibility in metres (fog: a few hundred; clear: 20 km or more). */
+  visibility?: number;
+  precipitation?: Precipitation;
+  /** Wind speed in m/s; drifts smoke. */
+  windSpeed?: number;
+  /** Direction the wind blows from, degrees clockwise from north. */
+  windFrom?: number;
+}
+
+/** The environment now: settings plus the current clock and light. */
+export interface EnvironmentState extends Required<Environment> {
+  localDate: string;
+  /** HH:MM local solar time. */
+  localTime: string;
+  /** Degrees above the horizon (negative: below). */
+  sunAltitude: number;
+  /** Fraction of daylight range left to the naked eye (1 by day, under 0.1 at night). */
+  light: number;
+  period: 'day' | 'twilight' | 'night';
+}
 
 // ---------------------------------------------------------------- runtime snapshots
 
@@ -530,6 +565,7 @@ export interface SimState {
   graphics: Graphic[];
   /** Smoke clouds on the battlefield. */
   smoke?: SmokeCloud[];
+  environment?: EnvironmentState;
   dis?: DisStatus;
 }
 
@@ -588,6 +624,7 @@ export type Command =
   | { cmd: 'disembark'; carrierId: string }
   /** Turn optional model parts (suppression, morale, …) on or off. */
   | { cmd: 'setRules'; rules: SimulationRules }
+  | { cmd: 'setEnvironment'; environment: Environment }
   | { cmd: 'setFormation'; unitId: string; formation: Formation }
   | { cmd: 'rename'; id: string; name: string }
   | { cmd: 'createGraphic'; kind: GraphicKind; name?: string; points: Vec2[]; force?: ForceId; density?: number }

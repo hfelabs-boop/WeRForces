@@ -1035,3 +1035,21 @@ body.player [data-controller-only] {
   display: block;
   color: var(--muted);
 }
+
+.env-chip {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.env-chip.night {
+  background: #18223d;
+  border-color: #33437a;
+}
+.settings .env-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}

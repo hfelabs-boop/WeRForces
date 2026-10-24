@@ -87,6 +87,22 @@ export function buildOpenApi(baseUrl: string): Schema {
           }),
         }),
       },
+      '/api/v1/simulation/environment': {
+        get: op('Simulation', 'Time of day and weather: the settings, plus the current local time, sun altitude and light level'),
+        put: op('Simulation', 'Change the time of day and weather (fields left out keep their values)', {
+          ...body({
+            type: 'object',
+            properties: {
+              date: { type: 'string', description: 'date at the scenario start, YYYY-MM-DD' },
+              time: { type: 'number', minimum: 0, maximum: 24, description: 'local solar time at the scenario start, hours' },
+              visibility: { type: 'number', minimum: 50, maximum: 100000, description: 'meteorological visibility in metres (fog: a few hundred)' },
+              precipitation: { type: 'string', enum: ['none', 'rain', 'heavyRain', 'snow'] },
+              windSpeed: { type: 'number', minimum: 0, maximum: 40, description: 'm/s; drifts smoke' },
+              windFrom: { type: 'number', minimum: 0, maximum: 360, description: 'degrees the wind blows from' },
+            },
+          }),
+        }),
+      },
       '/api/v1/recording': { get: op('Recording', 'Recording summary: time span, frames, bookmarks, live or reviewing a loaded recording') },
       '/api/v1/recording/data': { get: op('Recording', 'The whole recording (frames, events, bookmarks) as JSON, for saving or replaying elsewhere') },
       '/api/v1/recording/report': { get: op('Recording', 'After-action report: strength per force, losses, kills with killer and weapon, rounds fired, strength over time') },

@@ -24,11 +24,18 @@ export class Smoke {
     return c;
   }
 
-  /** Remove clouds that have dispersed. */
-  expire(): void {
+  /** Remove clouds that have dispersed, and drift the rest with the wind (called once a second). */
+  expire(wind: Vec2 = { x: 0, y: 0 }): void {
     const n = this.clouds.length;
     this.clouds = this.clouds.filter((c) => c.until > this.engine.time);
     if (this.clouds.length !== n) this.version++;
+    if (this.clouds.length && (wind.x || wind.y)) {
+      for (const c of this.clouds) {
+        c.x = Math.round((c.x + wind.x) * 10) / 10;
+        c.y = Math.round((c.y + wind.y) * 10) / 10;
+      }
+      this.version++;
+    }
   }
 
   restore(clouds: SmokeCloud[]): void {

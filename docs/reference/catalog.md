@@ -14,7 +14,7 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | --- | --- | --- | --- | --- | --- | --- |
 | `us-m1a2` | M1A2 Abrams — US main battle tank | 65 / 40 km/h | armored | 120mm M256 smoothbore (APFSDS)<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.1.1.3.0 |
 | `us-m2a3` | M2A3 Bradley — US infantry fighting vehicle | 61 / 40 km/h | light | 25mm M242 Bushmaster (burst)<br>BGM-71 TOW ATGM<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.2.1.3.0 |
-| `us-hmmwv` | M1151 HMMWV — US light utility vehicle with heavy machine gun | 112 / 65 km/h | soft | 12.7mm heavy machine gun (burst) | Binoculars | 1.1.225.6.1.1.0 |
+| `us-hmmwv` | M1151 HMMWV — US light utility vehicle with heavy machine gun | 112 / 65 km/h | soft | 12.7mm heavy machine gun (burst) | Binoculars<br>Night-vision goggles | 1.1.225.6.1.1.0 |
 | `ru-t72b3` | T-72B3 — Russian main battle tank | 58 / 36 km/h | armored | 125mm 2A46 smoothbore<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.222.1.2.6.0 |
 | `ru-bmp2` | BMP-2 — Russian infantry fighting vehicle | 65 / 40 km/h | light | 30mm 2A42 autocannon (burst)<br>9M113 Konkurs ATGM<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.222.2.2.0.0 |
 | `ru-brdm2` | BRDM-2 — Russian amphibious scout car | 94 / 58 km/h | light | 12.7mm heavy machine gun (burst) | Binoculars | 1.1.222.3.1.0.0 |
@@ -29,14 +29,14 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 
 | Id | Name | Max / cruise speed | Armour class | Weapons | Sensors | DIS type |
 | --- | --- | --- | --- | --- | --- | --- |
-| `us-rifleman` | US Rifleman — Dismounted infantry with rifle and AT4 | 14 / 6 km/h | lifeform | 5.56mm rifle<br>AT4 84mm anti-armor | Binoculars | 3.1.225.1.1.0.0 |
-| `us-stinger-team` | Stinger Team — US MANPADS air-defense team | 13 / 5 km/h | lifeform | FIM-92 Stinger<br>5.56mm rifle | Binoculars | 3.1.225.1.3.0.0 |
+| `us-rifleman` | US Rifleman — Dismounted infantry with rifle and AT4 | 14 / 6 km/h | lifeform | 5.56mm rifle<br>AT4 84mm anti-armor | Binoculars<br>Night-vision goggles | 3.1.225.1.1.0.0 |
+| `us-stinger-team` | Stinger Team — US MANPADS air-defense team | 13 / 5 km/h | lifeform | FIM-92 Stinger<br>5.56mm rifle | Binoculars<br>Night-vision goggles | 3.1.225.1.3.0.0 |
 | `ru-rifleman` | Russian Rifleman — Dismounted infantry with rifle and RPG | 14 / 6 km/h | lifeform | 5.45mm rifle<br>RPG-7 | Binoculars | 3.1.222.1.1.0.0 |
 | `us-mortar-team` | 81mm Mortar Team — US dismounted 81mm mortar team | 11 / 5 km/h | lifeform | 81mm M252 mortar (M821 HE)<br>5.56mm rifle | Unaided eye | 3.1.225.1.6.0.0 |
 | `us-fo-team` | Forward Observer Team — US forward observers; call for fire on enemies they see | 14 / 6 km/h | lifeform | 5.56mm rifle | Observer optics (thermal, laser rangefinder) | 3.1.225.1.7.0.0 |
 | `ru-mortar-team` | 120mm Mortar Team — Russian dismounted 120mm 2B11 mortar team | 11 / 4 km/h | lifeform | 120mm 2B11 mortar (OF-843 HE)<br>5.45mm rifle | Unaided eye | 3.1.222.1.6.0.0 |
 | `ru-artillery-observer` | Artillery Observer — Russian artillery reconnaissance team; calls for fire on enemies it sees | 14 / 6 km/h | lifeform | 5.45mm rifle | Observer optics (thermal, laser rangefinder) | 3.1.222.1.7.0.0 |
-| `us-engineer` | US Combat Engineer — Sapper: breaches minefields and obstacles (about 4 minutes per lane) | 14 / 6 km/h | lifeform | 5.56mm rifle | Binoculars | 3.1.225.1.8.0.0 |
+| `us-engineer` | US Combat Engineer — Sapper: breaches minefields and obstacles (about 4 minutes per lane) | 14 / 6 km/h | lifeform | 5.56mm rifle | Binoculars<br>Night-vision goggles | 3.1.225.1.8.0.0 |
 | `ru-sapper` | RU Sapper — Russian combat engineer: breaches minefields and obstacles (about 4 minutes per lane) | 14 / 6 km/h | lifeform | 5.45mm rifle | Binoculars | 3.1.222.1.8.0.0 |
 | `civ-person` | Civilian — Neutral civilian pedestrian | 11 / 5 km/h | lifeform | — | — | 3.1.0.0.0.0.0 |
 
@@ -97,6 +97,7 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | --- | --- | --- | --- | --- | --- |
 | `eye` | Unaided eye | 1500 m | 360° | ground, lifeform, surface, air | no |
 | `binoculars` | Binoculars | 3000 m | 360° | ground, lifeform, surface, air | no |
+| `nvg` | Night-vision goggles | 1000 m | 40° | ground, lifeform, surface, air | no |
 | `thermal-sight` | Vehicle thermal sight | 4500 m | 120° | ground, lifeform, surface, air | no |
 | `mast-sight` | Mast-mounted sight | 8000 m | 360° | ground, lifeform, surface, air | no |
 | `eo-turret` | EO/IR turret | 10000 m | 360° | ground, lifeform, surface | no |

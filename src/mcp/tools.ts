@@ -408,6 +408,21 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'set_environment',
+    'Set the time of day and weather. Darkness cuts the range of eyes and binoculars (night-vision goggles keep about 60%, thermal sights are unaffected); fog and precipitation cut every optical sensor; rain and snow slow movement off roads; wind drifts smoke. Fields left out keep their values. Returns the current environment (local time, sun altitude, light level).',
+    {
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('date at the scenario start'),
+      time: z.number().min(0).max(24).optional().describe('local solar time at the scenario start, in hours (e.g. 4.5 = 04:30)'),
+      visibility: z.number().min(50).max(100000).optional().describe('metres; fog is a few hundred, clear is 20000+'),
+      precipitation: z.enum(['none', 'rain', 'heavyRain', 'snow']).optional(),
+      windSpeed: z.number().min(0).max(40).optional().describe('m/s'),
+      windFrom: z.number().min(0).max(360).optional().describe('degrees the wind blows from'),
+    },
+    async (env) => api('PUT', '/api/v1/simulation/environment', env),
+    { idempotentHint: true },
+  );
+
+  tool(
     'set_reactions',
     'Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out; callForFire makes it request fire missions from idle friendly artillery in range on hostiles it sees (not within 150 m of friendly troops).',
     {

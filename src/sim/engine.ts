@@ -23,6 +23,8 @@ import type {
   SimState,
   TaskSpec,
   SimulationRules,
+  Environment,
+  EnvironmentState,
   TerrainData,
   TerrainSpec,
   UnitSnapshot,
@@ -34,6 +36,7 @@ import type {
 import { CatalogIndex, DEFAULT_CATALOG } from './catalog.js';
 import { applyBlast, applyDamage, type Detonation, effectivePk, resolveImpact, type Shot, updateCombat } from './combat.js';
 import { Entity } from './entity.js';
+import { DEFAULT_ENVIRONMENT, environmentAt, groundFactor, normalizeEnvironment, windVector } from './environment.js';
 import { checkCallsForFire } from './fires.js';
 import { decaySuppression, isPinned, updateMorale } from './morale.js';
 import { stepMovement } from './movement.js';
@@ -144,6 +147,10 @@ export class Engine {
 
   /** Optional model parts (see SimulationRules); all on unless a scenario turns them off. */
   rules: Required<SimulationRules> = { ...DEFAULT_RULES };
+  /** Time of day and weather at the scenario's start (time 0). */
+  environment: Required<Environment> = { ...DEFAULT_ENVIRONMENT };
+  /** The environment now (clock and light), updated once a simulated second. */
+  env: EnvironmentState = environmentAt(DEFAULT_ENVIRONMENT, 0, 0);
   /** Loads imported terrain datasets by name (set by the server from its terrains folder). */
   terrainLoader?: (name: string) => TerrainData;
 
@@ -795,6 +802,16 @@ export class Engine {
     if (!this.rules.suppression) for (const e of this.entities.values()) e.suppression = 0;
   }
 
+  /** Change the time of day and weather. `time` is the time of day at the scenario's start. */
+  setEnvironment(env: Environment): void {
+    this.environment = normalizeEnvironment(env, this.environment);
+    this.updateEnvironment();
+  }
+
+  private updateEnvironment(): void {
+    this.env = environmentAt(this.environment, this.terrain.spec.origin.lat, this.time);
+  }
+
   /** Give an entity a task without changing what was assigned to it (internal behaviours). */
   assignTaskInternal(e: Entity, spec: TaskSpec): void {
     this.setEntityTask(e, createTask(spec));
@@ -911,16 +928,17 @@ export class Engine {
       }
     }
 
+    const ground = groundFactor(this.env);
     let hasObstacles = false;
     for (const g of this.graphics.values()) if (g.kind === 'minefield' || g.kind === 'obstacle') hasObstacles = true;
     for (const e of this.entities.values()) {
       if (!e.embarkedIn) {
         if (hasObstacles && !e.remote && !e.destroyed && (e.domain === 'ground' || e.domain === 'lifeform')) {
           const prev = { x: e.x, y: e.y };
-          stepMovement(e, this.terrain, dt);
+          stepMovement(e, this.terrain, dt, ground);
           this.obstacles.afterMove(e, prev);
         } else {
-          stepMovement(e, this.terrain, dt);
+          stepMovement(e, this.terrain, dt, ground);
         }
         continue;
       }
@@ -938,7 +956,8 @@ export class Engine {
       }
     }
     if (Math.round(this.time * 10) % 10 === 0) {
-      this.smoke.expire();
+      this.updateEnvironment();
+      this.smoke.expire(windVector(this.env));
       checkCallsForFire(this);
       updateMorale(this);
     }
@@ -1007,10 +1026,12 @@ export class Engine {
     this.rng = new Rng(spec.seed);
     this.rules = { ...DEFAULT_RULES };
     this.setRules(s.rules ?? {});
+    this.environment = normalizeEnvironment(s.environment);
     this.events = [];
     this.scenarioName = s.name;
     this.description = s.description ?? '';
     this.time = s.startTime ?? 0;
+    this.updateEnvironment();
     this.setHostilities(s.hostilities ?? [[1, 2]]);
     for (const g of s.graphics ?? []) this.addGraphic(g.kind, g.points, g.name, g.force, g.id);
     for (const r of s.entities ?? []) {
@@ -1226,6 +1247,7 @@ export class Engine {
       })),
       rngState: this.time === 0 ? undefined : this.rng.state,
       rules: Object.values(this.rules).every((v) => v) ? undefined : { ...this.rules },
+      environment: JSON.stringify(this.environment) === JSON.stringify(DEFAULT_ENVIRONMENT) ? undefined : { ...this.environment },
       smoke: this.smoke.clouds.length ? this.smoke.clouds.map((c) => ({ ...c })) : undefined,
     };
   }
@@ -1309,6 +1331,7 @@ export class Engine {
       units,
       graphics: [...this.graphics.values()],
       smoke: this.smoke.clouds.length ? this.smoke.clouds : undefined,
+      environment: this.env,
     };
   }
 
