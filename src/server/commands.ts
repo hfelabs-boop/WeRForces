@@ -162,6 +162,13 @@ export function validatePlan(v: unknown): Plan {
 }
 
 export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
+  const result = runCommand(runner, raw);
+  // Keep the recording's current frame in step with edits made while paused.
+  if (result.ok) runner.recorder?.touch();
+  return result;
+}
+
+function runCommand(runner: SimRunner, raw: unknown): CommandResult {
   const engine = runner.engine;
   return engine.safely(() => {
     if (!raw || typeof raw !== 'object') throw new ValidationError('command must be an object');

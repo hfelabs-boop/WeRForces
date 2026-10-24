@@ -29,6 +29,7 @@ import { $, clear, fmtDeg, fmtGrid, fmtLatLon, fmtTime, h } from './dom.js';
 import { MapView } from './map.js';
 import { symbolCanvas } from './symbols.js';
 import type { View3D } from './view3d.js';
+import { AarPlayer } from './aar.js';
 import type { CotStatus as CotView } from '../src/integrations/cot.js';
 import type { Webhook as WebhookView } from '../src/integrations/webhooks.js';
 
@@ -86,6 +87,10 @@ class App {
   private treeSignature = '';
   private lastTree = 0;
   private logFilter = new Set<string>();
+  readonly aar: AarPlayer;
+  /** Live state and log kept aside while replaying. */
+  private liveState: SimState | null = null;
+  private liveEvents: SimEvent[] = [];
 
   constructor() {
     this.api = new Api({
@@ -103,11 +108,24 @@ class App {
       select: (id) => this.select(id),
       contextMenu: (w, c, hit) => this.contextMenu(w, c, hit),
       hover: (w) => this.hover(w),
-      dragEntity: (id, w) => this.cmd({ cmd: 'moveEntity', id, x: w.x, y: w.y }),
+      dragEntity: (id, w) => (this.aar.active ? undefined : this.cmd({ cmd: 'moveEntity', id, x: w.x, y: w.y })),
       modeChanged: (m) => {
         if (m.kind !== 'place') this.disarm();
       },
     });
+    this.aar = new AarPlayer(
+      {
+        api: this.api,
+        surface: (x, y) => this.grid?.surfaceHeight(x, y) ?? 0,
+        show: (state, fresh, log) => this.showReplay(state, fresh, log),
+        exited: () => this.leaveReplay(),
+        toast: (m, info) => this.toast(m, info),
+        modal: (c) => this.modal(c),
+        graphics: () => this.liveState?.graphics ?? this.state?.graphics ?? [],
+        weaponName: (id) => this.catalog?.weapons.find((w) => w.id === id)?.name ?? id,
+      },
+      $('#log-wrap'),
+    );
     this.bindToolbar();
     this.bindLeft();
     this.bindLog();
@@ -136,6 +154,8 @@ class App {
   }
 
   private onState(s: SimState): void {
+    this.liveState = s;
+    if (this.aar.active) return;
     this.state = s;
     this.map.setState(s);
     this.view3d?.setState(s);
@@ -174,6 +194,10 @@ class App {
   }
 
   private onEvents(evs: SimEvent[]): void {
+    if (this.aar.active) {
+      this.liveEvents.push(...evs);
+      return;
+    }
     // A scenario load starts a fresh log.
     let start = 0;
     for (let i = evs.length - 1; i >= 0; i--) {
@@ -291,6 +315,7 @@ class App {
       if (action === 'import') ($('#file-input') as HTMLInputElement).click();
       if (action === 'export') this.exportScenario();
       if (action === 'save-server') this.saveOnServer();
+      if (action === 'review-recording') void this.reviewRecordingDialog();
     });
     ($('#file-input') as HTMLInputElement).addEventListener('change', async (e) => {
       const input = e.target as HTMLInputElement;
@@ -346,6 +371,104 @@ class App {
         if (r.ok && r.id) this.select(r.id);
       },
     });
+  }
+
+  // ------------------------------------------------------------ after-action review
+
+  private async enterReplay(): Promise<void> {
+    if (this.liveState?.running) await this.cmd({ cmd: 'pause' });
+    this.liveEvents = this.events;
+    this.inspectorFor = '\u0000';
+    await this.aar.enter();
+    $('#btn-aar').classList.toggle('active', this.aar.active);
+    if (!this.aar.active) this.inspectorFor = null;
+  }
+
+  private showReplay(state: SimState, fresh: SimEvent[], log: SimEvent[]): void {
+    this.state = state;
+    this.map.setState(state);
+    this.view3d?.setState(state);
+    if (fresh.length) {
+      this.map.addEvents(fresh);
+      this.view3d?.addEvents(fresh);
+    }
+    $('#sim-time').textContent = fmtTime(state.time);
+    $('#scenario-name').textContent = state.scenarioName;
+    if (log.length || fresh.length) {
+      this.events = log.length ? log.slice(-LOG_LIMIT) : this.events;
+      this.renderLog();
+    }
+    if (this.selectedId && !this.exists(this.selectedId)) this.select(null);
+    this.updateInspector();
+    this.renderTree();
+  }
+
+  private async reviewRecordingDialog(): Promise<void> {
+    const list = await this.api.v1<{ name: string; bytes: number; modified: string }[]>('GET', '/recordings').catch(() => []);
+    let close = () => {};
+    const cards = list.map((r) =>
+      h(
+        'div',
+        {
+          class: 'scenario-card',
+          onclick: async () => {
+            close();
+            try {
+              if (this.aar.active) this.aar.exit();
+              await this.api.v1('POST', `/recordings/${encodeURIComponent(r.name)}/load`);
+              await this.enterReplay();
+            } catch (err) {
+              this.toast(String((err as Error).message));
+            }
+          },
+        },
+        h('strong', { text: r.name }),
+        h('p', { text: `${(r.bytes / 1e6).toFixed(1)} MB · saved ${new Date(r.modified).toLocaleString()}` }),
+      ),
+    );
+    close = this.modal(
+      h(
+        'div',
+        {},
+        h('h3', { text: 'Review saved recording' }),
+        cards.length ? cards : h('p', { class: 'hint', text: 'No saved recordings yet. Use Save… in the AAR bar.' }),
+        h('div', { class: 'row' }, h('button', { text: 'Cancel', onclick: () => close() })),
+      ),
+    );
+  }
+
+  private leaveReplay(): void {
+    // Leaving a loaded recording resumes live recording.
+    void this.api.v1<{ live: boolean }>('GET', '/recording').then((s) => (s.live ? undefined : this.api.v1('POST', '/recording/clear'))).catch(() => undefined);
+    $('#btn-aar').classList.remove('active');
+    this.events = this.liveEvents;
+    this.liveEvents = [];
+    this.inspectorFor = '\u0000';
+    this.renderLog();
+    if (this.liveState) this.onState(this.liveState);
+  }
+
+  /** Read-only inspector while replaying. */
+  private buildReplayInspector(el: HTMLElement, id: string): void {
+    const e = this.entity(id);
+    const u = this.unit(id);
+    if (e) {
+      el.append(
+        h('h3', {}, symbolCanvas(e.force, e.domain, e.symbol, 24), ` ${e.name}`),
+        h('div', { class: 'sub', text: `${this.types.get(e.typeId)?.name ?? e.typeId} · ${FORCE_NAMES[e.force]} · ${e.id} · replay` }),
+        h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Altitude', this.bind('alt'), 'Heading', this.bind('heading'), 'Speed', this.bind('speed'), 'Damage', this.bind('damage')),
+        h('div', { class: 'section' }, h('h4', { text: 'Status' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
+      );
+    } else if (u) {
+      el.append(
+        h('h3', { text: u.name }),
+        h('div', { class: 'sub', text: `${u.echelon} · ${FORCE_NAMES[u.force]} · ${u.id} · replay` }),
+        h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Strength', this.bind('strength'), 'Leader', this.bind('leader')),
+        h('div', { class: 'section' }, h('h4', { text: 'Status' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
+        h('div', { class: 'section' }, h('h4', { text: 'Members' }), h('div', { 'data-bind': 'members' })),
+      );
+    }
+    el.append(h('p', { class: 'hint', text: 'After-action review: positions and damage as recorded. Exit the AAR to give orders.' }));
   }
 
   private modal(content: HTMLElement): () => void {
@@ -442,6 +565,7 @@ class App {
   private bindViews(): void {
     document.querySelectorAll<HTMLButtonElement>('#view-seg button').forEach((b) => b.addEventListener('click', () => void this.setView(b.dataset.view as '2d')));
     $('#btn-integrations').addEventListener('click', () => this.integrationsDialog());
+    $('#btn-aar').addEventListener('click', () => (this.aar.active ? this.aar.exit() : this.enterReplay()));
   }
 
   async setView(view: '2d' | '3d' | 'split'): Promise<void> {
@@ -704,6 +828,7 @@ class App {
   }
 
   private arm(key: string, label: string): void {
+    if (this.aar.active) return this.toast('Replaying: exit the AAR to add objects', true);
     this.armed = key;
     document.querySelectorAll('.palette-item').forEach((b) => b.classList.toggle('armed', (b as HTMLElement).dataset.key === key));
     const force = this.force;
@@ -845,6 +970,7 @@ class App {
   // ------------------------------------------------------------ context menu
 
   private contextMenu(world: Vec2, client: { x: number; y: number }, hit: string | null): void {
+    if (this.aar.active) return this.toast('Replaying: exit the AAR to give orders', true);
     const menu = $('#context-menu');
     clear(menu);
     const items: (HTMLElement | null)[] = [];
@@ -952,7 +1078,8 @@ class App {
       const e = this.entity(id);
       const u = this.unit(id);
       const g = this.graphic(id);
-      if (e) this.buildEntityInspector(el, e);
+      if (this.aar.active && (e || u)) this.buildReplayInspector(el, id);
+      else if (e) this.buildEntityInspector(el, e);
       else if (u) this.buildUnitInspector(el, u);
       else if (g) this.buildGraphicInspector(el, g);
     }

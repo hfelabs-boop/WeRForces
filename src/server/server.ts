@@ -35,6 +35,8 @@ export interface ServerOptions {
   host: string;
   webRoot: string;
   scenarioDir: string;
+  /** Saved recordings folder (default: "recordings" next to scenarioDir). */
+  recordingDir?: string;
   /** State broadcasts per second. */
   stateRate?: number;
   /** When set, every /api, /ws and /mcp request must present this key. */
@@ -99,7 +101,7 @@ export class SimServer {
   ) {
     this.lastTerrainVersion = runner.engine.terrainVersion;
     this.integrations = new IntegrationHub(runner, opts.integrations);
-    this.api = new ApiV1({ runner, integrations: this.integrations, scenarioDir: opts.scenarioDir });
+    this.api = new ApiV1({ runner, integrations: this.integrations, scenarioDir: opts.scenarioDir, recordingDir: opts.recordingDir });
     this.docs = opts.docsDir ? new DocsSite(opts.docsDir, opts.repoBlobUrl) : null;
     this.http = http.createServer((req, res) => {
       this.handle(req, res).catch((err) => {

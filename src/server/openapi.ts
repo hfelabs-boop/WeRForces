@@ -48,7 +48,7 @@ export function buildOpenApi(baseUrl: string): Schema {
     },
     servers: [{ url: baseUrl || '/' }],
     security: [{ bearer: [] }, { apiKey: [] }],
-    tags: ['Simulation', 'Scenario', 'Catalog', 'Entities', 'Units', 'Graphics', 'Events', 'Terrain', 'Integrations', 'Export'].map((name) => ({ name })),
+    tags: ['Simulation', 'Scenario', 'Recording', 'Catalog', 'Entities', 'Units', 'Graphics', 'Events', 'Terrain', 'Integrations', 'Export'].map((name) => ({ name })),
     paths: {
       '/api/v1/simulation': { get: op('Simulation', 'Status, strength per force, terrain and towns', {}, ok(ref('Simulation'))) },
       '/api/v1/simulation/run': { post: op('Simulation', 'Run in real time', {}, ok(ref('Simulation'))) },
@@ -73,6 +73,25 @@ export function buildOpenApi(baseUrl: string): Schema {
         put: op('Scenario', 'Save the current state under a name', { parameters: [idParam('name')] }),
       },
       '/api/v1/scenarios/{name}/load': { post: op('Scenario', 'Load a stored scenario', { parameters: [idParam('name')] }) },
+      '/api/v1/recording': { get: op('Recording', 'Recording summary: time span, frames, bookmarks, live or reviewing a loaded recording') },
+      '/api/v1/recording/data': { get: op('Recording', 'The whole recording (frames, events, bookmarks) as JSON, for saving or replaying elsewhere') },
+      '/api/v1/recording/report': { get: op('Recording', 'After-action report: strength per force, losses, kills with killer and weapon, rounds fired, strength over time') },
+      '/api/v1/recording/state': {
+        get: op('Recording', 'Recorded positions and damage of every entity and unit at a past time (interpolated)', {
+          parameters: [{ name: 'time', in: 'query', schema: { type: 'number' }, description: 'simulation time in seconds (default: end of the recording)' }],
+        }),
+      },
+      '/api/v1/recording/bookmarks': {
+        post: op('Recording', 'Add a bookmark (note) to the recording', {
+          ...body({ type: 'object', required: ['text'], properties: { text: { type: 'string' }, time: { type: 'number', description: 'default: now' } } }),
+        }),
+      },
+      '/api/v1/recording/bookmarks/{id}': { delete: { tags: ['Recording'], summary: 'Remove a bookmark', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } } },
+      '/api/v1/recording/clear': { post: op('Recording', 'Discard the recording (or stop reviewing a loaded one) and record live from now') },
+      '/api/v1/recording/load': { post: op('Recording', 'Review a recording sent in the body (live recording is suspended until clear)', { ...body({ type: 'object' }) }) },
+      '/api/v1/recordings': { get: op('Recording', 'Saved recordings on the server') },
+      '/api/v1/recordings/{name}': { put: op('Recording', 'Save the current recording under a name', { parameters: [idParam('name')] }) },
+      '/api/v1/recordings/{name}/load': { post: op('Recording', 'Review a saved recording', { parameters: [idParam('name')] }) },
       '/api/v1/catalog': { get: op('Catalog', 'Full simulation object model') },
       '/api/v1/catalog/entity-types': { get: op('Catalog', 'Entity types (summary)') },
       '/api/v1/catalog/unit-templates': { get: op('Catalog', 'Unit templates') },

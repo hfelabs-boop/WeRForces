@@ -190,6 +190,30 @@ Automatic behaviours that run alongside tasks: onContact "halt" makes the entity
 | `withdrawTo` | {x, y, lat, lon, town} |  | Location as {x,y}, {lat,lon} or {town} |
 | `callForFire` | boolean |  |  |
 
+## `after_action_report` _(read-only)_
+
+After-action review of the run so far (or of a loaded recording): strength and losses per force, every kill with killer, weapon and time, rounds fired per weapon, bookmarks.
+
+No parameters.
+
+## `replay_state` _(read-only)_
+
+Where everything was at a past simulation time, from the recording: entity positions (grid, lat/lon), damage and units.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `time` | number | yes | simulation time in seconds |
+| `force` | integer (0–3) |  |  |
+
+## `add_bookmark`
+
+Add a note to the recording at the current (or a given) simulation time, for the after-action review.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `text` | string | yes |  |
+| `time` | number |  |  |
+
 ## `control_simulation`
 
 Run (real time), pause, rewind to the scenario start, or set the real-time multiplier.

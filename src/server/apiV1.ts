@@ -1,6 +1,6 @@
 // Versioned, resource-oriented REST API (/api/v1). The same routes back the MCP server.
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { entitiesGeoJSON, frameFor, graphicsGeoJSON, liveKML, sceneKML } from '../integrations/gis.js';
 import type { IntegrationHub } from '../integrations/hub.js';
@@ -16,6 +16,8 @@ export interface ApiContext {
   runner: SimRunner;
   integrations: IntegrationHub;
   scenarioDir: string;
+  /** Where saved recordings go (default: a "recordings" folder next to scenarioDir). */
+  recordingDir?: string;
 }
 
 const SCENARIO_NAME = /^[A-Za-z0-9_-]{1,64}$/;
@@ -173,6 +175,58 @@ export class ApiV1 {
       // Rewind now returns to what was just saved.
       this.engine.markRewindPoint();
       return { json: { saved: name } };
+    });
+
+    // ---------------------------------------------------------------- recording & AAR
+    const rec = () => {
+      if (!this.ctx.runner.recorder) throw new HttpError(409, 'recording is disabled (--record-interval 0)');
+      return this.ctx.runner.recorder;
+    };
+    r.get(`${P}/recording`, () => ({ json: rec().summary() }));
+    r.get(`${P}/recording/data`, () => ({ json: rec().toJSON() }));
+    r.get(`${P}/recording/report`, () => ({ json: rec().report() }));
+    r.get(`${P}/recording/state`, (req) => {
+      const s = rec().summary();
+      const t = req.query.get('time') === null ? s.end : num(req.query.get('time'), 'time');
+      const st = rec().stateAt(t);
+      return { json: { time: st.time, entities: st.entities.map((e) => this.entityView(e)), units: st.units.map((u) => this.unitView(u)) } };
+    });
+    r.post(`${P}/recording/bookmarks`, (req) => {
+      const b = obj(req.body);
+      if (typeof b.text !== 'string' || !b.text.trim()) throw new HttpError(400, 'text is required');
+      return { status: 201, json: rec().addBookmark(b.text.trim(), b.time === undefined ? undefined : num(b.time, 'time')) };
+    });
+    r.delete(`${P}/recording/bookmarks/{id}`, (req) => {
+      if (!rec().removeBookmark(req.params.id)) throw new HttpError(404, `unknown bookmark ${req.params.id}`);
+      return { status: 204 };
+    });
+    r.post(`${P}/recording/clear`, () => (rec().clear(), { json: rec().summary() }));
+    r.post(`${P}/recording/load`, (req) => {
+      try {
+        rec().load(obj(req.body) as never);
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+      return { json: rec().summary() };
+    });
+    r.get(`${P}/recordings`, () => ({ json: this.listRecordings() }));
+    r.put(`${P}/recordings/{name}`, (req) => {
+      const name = req.params.name;
+      if (!SCENARIO_NAME.test(name)) throw new HttpError(400, 'invalid recording name');
+      mkdirSync(this.recordingDir, { recursive: true });
+      writeFileSync(path.join(this.recordingDir, `${name}.json`), JSON.stringify(rec().toJSON()));
+      return { json: { saved: name } };
+    });
+    r.post(`${P}/recordings/{name}/load`, (req) => {
+      const name = req.params.name;
+      const file = path.join(this.recordingDir, `${name}.json`);
+      if (!SCENARIO_NAME.test(name) || !existsSync(file)) throw new HttpError(404, `unknown recording ${name}`);
+      try {
+        rec().load(JSON.parse(readFileSync(file, 'utf8')));
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+      return { json: rec().summary() };
     });
 
     // ---------------------------------------------------------------- catalog
@@ -498,6 +552,22 @@ export class ApiV1 {
     const r = { ...obj(body) };
     if (r.withdrawTo && typeof r.withdrawTo === 'object') r.withdrawTo = this.point(r.withdrawTo, 'withdrawTo');
     return r;
+  }
+
+  private get recordingDir(): string {
+    return this.ctx.recordingDir ?? path.join(path.dirname(this.ctx.scenarioDir), 'recordings');
+  }
+
+  private listRecordings() {
+    const dir = this.recordingDir;
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => {
+        const name = f.replace(/\.json$/, '');
+        const st = statSync(path.join(dir, f));
+        return { name, bytes: st.size, modified: st.mtime.toISOString() };
+      });
   }
 
   private listScenarios() {

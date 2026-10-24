@@ -4,6 +4,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import type { AarReport } from '../shared/recording.js';
 
 export interface ApiResult {
   status: number;
@@ -410,6 +411,50 @@ export function createMcpServer(call: ApiCaller): McpServer {
       return { name: r.name, reactions: r.reactions ?? {} };
     },
     { idempotentHint: true },
+  );
+
+  // ---------------------------------------------------------------- after-action review
+
+  tool(
+    'after_action_report',
+    'After-action review of the run so far (or of a loaded recording): strength and losses per force, every kill with killer, weapon and time, rounds fired per weapon, bookmarks.',
+    {},
+    async () => {
+      const r = await api<AarReport>('GET', '/api/v1/recording/report');
+      const name = (f: number) => ['Other', 'Blue', 'Red', 'Neutral'][f] ?? String(f);
+      const lines = [`AAR: ${r.scenarioName}, ${fmtTime(r.start)} to ${fmtTime(r.end)}`];
+      for (const f of r.forces) lines.push(`${name(f.force)}: ${f.end}/${f.start} remaining, ${f.losses} lost, ${f.kills} kills, ${f.shots} rounds fired`);
+      if (r.kills.length) lines.push('Kills:', ...r.kills.map((k) => `  ${fmtTime(k.time)} ${k.victim} (${name(k.victimForce)}) by ${k.killer ?? 'unknown'}${k.weaponId ? ` with ${k.weaponId}` : ''}`));
+      if (r.bookmarks.length) lines.push('Bookmarks:', ...r.bookmarks.map((b) => `  ${fmtTime(b.time)} ${b.text}`));
+      return lines.join('\n');
+    },
+    { readOnlyHint: true },
+  );
+
+  tool(
+    'replay_state',
+    'Where everything was at a past simulation time, from the recording: entity positions (grid, lat/lon), damage and units.',
+    { time: z.number().describe('simulation time in seconds'), force: z.number().int().min(0).max(3).optional() },
+    async ({ time, force }) => {
+      const s = await api<{ time: number; entities: { id: string; name: string; force: number; damage: string; lat: number; lon: number; embarkedIn?: string }[] }>('GET', `/api/v1/recording/state?time=${time}`);
+      return {
+        time: s.time,
+        entities: s.entities
+          .filter((e) => force === undefined || e.force === force)
+          .map((e) => ({ id: e.id, name: e.name, force: e.force, damage: e.damage, lat: e.lat, lon: e.lon, mounted: e.embarkedIn })),
+      };
+    },
+    { readOnlyHint: true },
+  );
+
+  tool(
+    'add_bookmark',
+    'Add a note to the recording at the current (or a given) simulation time, for the after-action review.',
+    { text: z.string().min(1).max(200), time: z.number().optional() },
+    async ({ text, time }) => {
+      const b = await api<{ id: string; time: number }>('POST', '/api/v1/recording/bookmarks', { text, time });
+      return `bookmark ${b.id} at ${fmtTime(b.time)}`;
+    },
   );
 
   // ---------------------------------------------------------------- time & scenarios

@@ -53,6 +53,8 @@ export interface EngineListeners {
   detonation: Listener<Detonation>[];
   removed: Listener<Entity>[];
   reset: Listener<void>[];
+  /** After every simulation step. */
+  step: Listener<number>[];
 }
 
 export interface CreateEntityOptions {
@@ -117,7 +119,7 @@ export class Engine {
   /** Grid of entity positions for neighbourhood queries, rebuilt on demand each tick. */
   readonly spatial = new SpatialIndex();
   readonly graphics = new Map<string, Graphic>();
-  readonly listeners: EngineListeners = { event: [], fire: [], detonation: [], removed: [], reset: [] };
+  readonly listeners: EngineListeners = { event: [], fire: [], detonation: [], removed: [], reset: [], step: [] };
 
   private hostilities = new Set<string>(['1-2']);
   private shots: Shot[] = [];
@@ -829,6 +831,7 @@ export class Engine {
     if (Math.round(this.time * 10) % 10 === 0) checkCallsForFire(this);
     for (const e of this.entities.values()) updateCombat(this, e);
     this.processImpacts();
+    for (const fn of this.listeners.step) fn(this.time);
   }
 
   /** Advance the simulation by `seconds` of simulated time in fixed steps. */

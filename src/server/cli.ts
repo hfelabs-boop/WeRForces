@@ -36,6 +36,7 @@ Options:
       --cot <url>             Stream Cursor-on-Target to TAK: udp://239.2.3.1:6969 or tcp://host:8087
       --cot-interval <s>      Seconds between CoT position reports (default 2)
       --webhook <url>         POST simulation events to a URL (Slack/Discord URLs get chat formatting); repeatable
+      --record-interval <s>   Seconds of simulated time between recorded frames for playback/AAR (default 1, 0 = off)
       --headless              No web server; run the scenario and print events
       --duration <s>          Headless only: simulated seconds to run as fast as possible
   -h, --help                  Show this help
@@ -98,6 +99,7 @@ async function main(): Promise<void> {
       cors: { type: 'string', multiple: true },
       cot: { type: 'string' },
       'cot-interval': { type: 'string', default: '2' },
+      'record-interval': { type: 'string', default: '1' },
       webhook: { type: 'string', multiple: true },
       headless: { type: 'boolean', default: false },
       duration: { type: 'string' },
@@ -137,7 +139,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  const runner = new SimRunner(engine);
+  const recordInterval = Number(values['record-interval']);
+  if (!Number.isFinite(recordInterval) || recordInterval < 0) throw new Error('--record-interval must be a number of seconds (0 = off)');
+  const runner = new SimRunner(engine, undefined, undefined, recordInterval);
   runner.setTimeScale(Number(values['time-scale']));
   if (values.dis) {
     const port = Number(values['dis-port']);
