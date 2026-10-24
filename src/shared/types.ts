@@ -423,6 +423,8 @@ export interface EntityState {
   /** Supply vehicles: loads left. */
   supplies?: number;
   prepared?: 'dugIn' | 'hullDown';
+  /** A background civilian (pattern of life), managed by the engine. */
+  ambient?: boolean;
 }
 
 export interface UnitRecord {
@@ -482,8 +484,16 @@ export interface ScenarioFile {
   orders?: PendingOrder[];
   /** Checkpoint only: codewords sent so far. */
   codewords?: { force: ForceId; codeword: string; time: number }[];
+  /** Background civilians to keep on the map. */
+  patternOfLife?: PatternOfLife;
   /** Global plans: one synchronization matrix per force (with, in checkpoints, which phases started). */
   syncMatrices?: (SyncMatrix & { started?: Record<string, number> })[];
+}
+
+/** Background civilians: cars on the roads and people in the towns (neutral, force 3). */
+export interface PatternOfLife {
+  vehicles?: number;
+  pedestrians?: number;
 }
 
 /** Optional parts of the model, for comparison runs. Missing fields mean on. */
@@ -703,6 +713,8 @@ export interface EntitySnapshot {
   prepared?: 'dugIn' | 'hullDown';
   /** Moving along a planned path: what is left of it and when it should arrive. */
   travel?: Travel;
+  /** A background civilian (pattern of life). */
+  ambient?: boolean;
 }
 
 /** Estimate for a move: distance left on the planned path, and simulation time of arrival. */
@@ -851,6 +863,8 @@ export type Command =
   | { cmd: 'setRoe'; targetId: string; roe: Roe }
   /** Acknowledge an alert, or all of them (players: their own force's). */
   | { cmd: 'ackAlert'; id?: string; all?: boolean }
+  /** Background civilians to keep on the map (0 for none). */
+  | { cmd: 'setPatternOfLife'; vehicles?: number; pedestrians?: number }
   /** Replace a force's synchronization matrix (an empty list of phases removes it). */
   | { cmd: 'setSyncMatrix'; force: ForceId; phases: Phase[] }
   /** Start a phase now, whatever its trigger. */

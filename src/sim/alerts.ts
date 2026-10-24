@@ -115,7 +115,7 @@ export class Alerts {
   private owners(): Owner[] {
     const out: Owner[] = [];
     for (const u of this.engine.units.values()) out.push({ id: u.id, name: u.name, force: u.force, members: u.alive(), unit: u });
-    for (const e of this.engine.entities.values()) if (!e.unit && !e.remote && e.alive) out.push({ id: e.id, name: e.name, force: e.force, members: [e], entity: e });
+    for (const e of this.engine.entities.values()) if (!e.unit && !e.remote && !e.ambient && e.alive) out.push({ id: e.id, name: e.name, force: e.force, members: [e], entity: e });
     return out;
   }
 

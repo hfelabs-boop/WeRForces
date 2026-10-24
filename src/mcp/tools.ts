@@ -507,6 +507,13 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'set_pattern_of_life',
+    'Fill the map with background civilians: cars driving between towns along the roads and people walking about the towns (neutral, force 3). They run from shots and blasts nearby; any killed are logged. Set both to 0 to remove them.',
+    { vehicles: z.number().int().min(0).max(300).optional(), pedestrians: z.number().int().min(0).max(300).optional() },
+    async (a) => api('PUT', '/api/v1/simulation/pattern-of-life', a),
+  );
+
+  tool(
     'set_environment',
     'Set the time of day and weather. Darkness cuts the range of eyes and binoculars (night-vision goggles keep about 60%, thermal sights are unaffected); fog and precipitation cut every optical sensor; rain and snow slow movement off roads; wind drifts smoke. Fields left out keep their values. Returns the current environment (local time, sun altitude, light level).',
     {

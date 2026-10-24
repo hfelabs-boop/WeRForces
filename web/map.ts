@@ -833,14 +833,16 @@ export class MapView {
           ctx.lineWidth = e.pinned ? 3 : 2;
           ctx.stroke();
         }
-        drawSymbol(ctx, p.x, p.y, symSize, e.force, e.domain, e.symbol, {
+        // Background civilians: small, faint and unlabelled unless selected.
+        const bg = e.ambient && e.id !== this.selectedId;
+        drawSymbol(ctx, p.x, p.y, bg ? symSize * 0.6 : symSize, e.force, e.domain, e.symbol, {
           selected: e.id === this.selectedId || this.selectedIds.has(e.id) || (this.selectedIds.size > 1 && !!e.unitId && this.selectedIds.has(e.unitId)),
           destroyed: e.damage === 'destroyed',
           damaged: e.damage === 'mobility' || e.damage === 'firepower',
           remote: e.remote,
           sidc: this.sidcOf(e.typeId),
           // Fog of war: contacts fade as they go stale.
-          alpha: e.contactAge !== undefined ? (e.contactAge > 5 ? 0.45 : 0.8) : inSelUnit || !selUnit ? 1 : 0.9,
+          alpha: bg ? 0.6 : e.contactAge !== undefined ? (e.contactAge > 5 ? 0.45 : 0.8) : inSelUnit || !selUnit ? 1 : 0.9,
         });
         if (inSelUnit) {
           ctx.beginPath();
@@ -849,7 +851,7 @@ export class MapView {
           ctx.lineWidth = 1;
           ctx.stroke();
         }
-        if (this.layers.labels && (!agg || e.id === this.selectedId || this.metresPerPixel < 6)) {
+        if (this.layers.labels && !bg && (!agg || e.id === this.selectedId || this.metresPerPixel < 6)) {
           label(ctx, e.passengers ? `${e.name} +${e.passengers.length}` : e.name, p.x + symSize * 1.5, p.y + 4, FORCE_COLORS[e.force].text, '11px system-ui');
           if (e.domain === 'air') label(ctx, `${Math.round(e.agl)}m`, p.x + symSize * 1.5, p.y + 16, '#ddd', '10px system-ui');
         }

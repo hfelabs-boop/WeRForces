@@ -3,6 +3,7 @@
 import type { Command, CommandResult, Condition, Environment, ForceId, Formation, Phase, PhaseOrder, PhaseTrigger, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
 import { FORCE_NAMES } from '../shared/types.js';
 import type { Engine } from '../sim/engine.js';
+import { MAX_AMBIENT } from '../sim/life.js';
 import type { SimRunner } from './runner.js';
 
 const FORCES = new Set([0, 1, 2, 3]);
@@ -439,6 +440,17 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
       case 'setReactions':
         engine.setReactions(str(c.targetId, 'targetId'), validateReactions(c.reactions));
         return;
+      case 'setPatternOfLife': {
+        const n = (v: unknown, what: string) => {
+          if (v === undefined) return undefined;
+          const x = num(v, what);
+          if (x < 0 || x > MAX_AMBIENT) throw new ValidationError(`${what} must be 0-${MAX_AMBIENT}`);
+          return Math.round(x);
+        };
+        const cur = engine.life.settings;
+        engine.life.set({ vehicles: n(c.vehicles, 'vehicles') ?? cur.vehicles, pedestrians: n(c.pedestrians, 'pedestrians') ?? cur.pedestrians });
+        return;
+      }
       case 'setRules': {
         const r = (c.rules ?? {}) as Record<string, unknown>;
         if (typeof r !== 'object' || Object.values(r).some((v) => typeof v !== 'boolean')) throw new ValidationError('rules must be an object of booleans');

@@ -56,6 +56,7 @@ import { formationOffset, perMemberTask, splitOrder, Unit } from './units.js';
 import { Alerts } from './alerts.js';
 import { TravelCache } from './eta.js';
 import { SyncPlans } from './sync.js';
+import { Life } from './life.js';
 
 export const DEFAULT_DT = 0.1;
 export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
@@ -86,6 +87,8 @@ export interface CreateEntityOptions {
   /** Altitude above ground for aircraft. */
   altitude?: number;
   id?: string;
+  /** No "created" event (background civilians). */
+  quiet?: boolean;
 }
 
 export interface RemoteEntityUpdate {
@@ -149,6 +152,8 @@ export class Engine {
   private readonly travel = new TravelCache(this);
   /** Global plans: a synchronization matrix per force. */
   readonly sync = new SyncPlans(this);
+  /** Pattern of life: civilian traffic and pedestrians. */
+  readonly life = new Life(this);
 
   private hostilities = new Set<string>(['1-2']);
   private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
@@ -266,7 +271,7 @@ export class Engine {
     }
     this.entities.set(id, e);
     this.sensorDue.set(id, this.time + this.rng.range(0, SENSOR_INTERVAL));
-    this.log('created', `${name} created`, id);
+    if (!opts.quiet) this.log('created', `${name} created`, id);
     return e;
   }
 
@@ -515,7 +520,12 @@ export class Engine {
     return g;
   }
 
-  deleteObject(id: string): void {
+  /** Remove an entity without a "deleted" event (background civilians). */
+  removeEntity(id: string): void {
+    this.deleteObject(id, true);
+  }
+
+  deleteObject(id: string, quiet = false): void {
     const e = this.entities.get(id);
     if (e) {
       e.task?.cancel(e);
@@ -526,7 +536,7 @@ export class Engine {
       this.sensorDue.delete(id);
       for (const other of this.entities.values()) other.contacts.delete(id);
       for (const fn of this.listeners.removed) fn(e);
-      this.log('deleted', `${e.name} deleted`, id);
+      if (!quiet) this.log('deleted', `${e.name} deleted`, id);
       return;
     }
     const u = this.units.get(id);
@@ -1166,6 +1176,7 @@ export class Engine {
       checkCallsForFire(this);
       updateMorale(this);
       updateResupply(this);
+      this.life.update();
       this.alerts.update();
       this.sync.update();
     }
@@ -1191,6 +1202,7 @@ export class Engine {
     this.pendingOrders = [];
     this.codewords.clear();
     this.sync.clear();
+    this.life.clear();
     this.sensorDue.clear();
     this.losMemo.clear();
     this.smoke.clear();
@@ -1279,6 +1291,7 @@ export class Engine {
     this.pendingOrders = (s.orders ?? []).filter((o) => this.entities.has(o.targetId) || this.units.has(o.targetId)).map((o) => ({ ...o }));
     for (const c of s.codewords ?? []) this.codewords.set(`${c.force}|${c.codeword.toUpperCase()}`, c.time);
     for (const m of s.syncMatrices ?? []) this.sync.set({ force: m.force, phases: m.phases }, m.started);
+    this.life.set(s.patternOfLife ?? {});
     // Tasks and plans last, since they can reference any object. Checkpoints resume them part-way.
     for (const r of s.entities ?? []) {
       const e = this.entities.get(r.id)!;
@@ -1351,6 +1364,7 @@ export class Engine {
     if (st.fuel !== undefined) e.fuel = st.fuel;
     if (st.prepared) e.prepared = st.prepared;
     if (st.supplies !== undefined) e.supplies = st.supplies;
+    if (st.ambient) this.life.adopt(e);
   }
 
   private authoredState(e: Entity): EntityRecord['state'] {
@@ -1403,6 +1417,7 @@ export class Engine {
         moraleState: e.moraleState !== 'steady' ? e.moraleState : undefined,
         fuel: e.fuel < 1 ? e.fuel : undefined,
         prepared: e.prepared,
+        ambient: e.ambient || undefined,
         supplies: e.type.supply && e.supplies !== e.type.supply.capacity ? e.supplies : undefined,
       },
     };
@@ -1446,7 +1461,8 @@ export class Engine {
    * so loading it continues the run. Route planning restarts from current positions.
    */
   toScenario(): ScenarioFile {
-    const local = [...this.entities.values()].filter((e) => !e.remote);
+    // Background civilians are made afresh from the settings, except in checkpoints.
+    const local = [...this.entities.values()].filter((e) => !e.remote && !(e.ambient && this.time === 0));
     return {
       format: 'werforces-scenario',
       version: 1,
@@ -1493,6 +1509,7 @@ export class Engine {
       })),
       rngState: this.time === 0 ? undefined : this.rng.state,
       rules: JSON.stringify(this.rules) === JSON.stringify(DEFAULT_RULES) ? undefined : { ...this.rules },
+      patternOfLife: this.life.settings.vehicles || this.life.settings.pedestrians ? { ...this.life.settings } : undefined,
       orders: this.pendingOrders.length ? this.pendingOrders.map((o) => ({ ...o })) : undefined,
       syncMatrices: this.sync.all().length ? this.sync.states().map((m) => ({ force: m.force, phases: m.phases, ...(this.time > 0 && Object.keys(m.started).length ? { started: m.started } : {}) })) : undefined,
       codewords: this.codewords.size ? [...this.codewords].map(([k, time]) => ({ force: Number(k.split('|')[0]) as ForceId, codeword: k.slice(k.indexOf('|') + 1), time })) : undefined,
@@ -1543,6 +1560,7 @@ export class Engine {
       supplies: e.type.supply ? Math.round(e.supplies * 100) / 100 : undefined,
       prepared: e.prepared,
       travel: !e.unit || e.unit.leader === e ? this.travel.get(e) : undefined,
+      ambient: e.ambient || undefined,
     };
   }
 

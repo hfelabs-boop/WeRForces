@@ -749,6 +749,9 @@ class App {
   /** Optional model parts and the environment for the current scenario. */
   private async settingsDialog(): Promise<void> {
     const rules = await this.api.v1<Record<string, boolean>>('GET', '/simulation/rules');
+    const life = await this.api.v1<{ vehicles: number; pedestrians: number }>('GET', '/simulation/pattern-of-life').catch(() => ({ vehicles: 0, pedestrians: 0 }));
+    const cars = h('input', { type: 'number', min: '0', max: '300', step: '1', value: String(life.vehicles) }) as HTMLInputElement;
+    const people = h('input', { type: 'number', min: '0', max: '300', step: '1', value: String(life.pedestrians) }) as HTMLInputElement;
     const env = await this.api.v1<EnvironmentState>('GET', '/simulation/environment');
     const hh = Math.floor(env.time);
     const mm = Math.round((env.time - hh) * 60);
@@ -783,6 +786,9 @@ class App {
         ...field('Wind from (°)', windFrom),
       ),
       h('small', { class: 'hint', text: `Now ${env.localTime} on ${env.localDate}. Night cuts eyes and binoculars to under 10% of their range; night-vision goggles keep 60%; thermal sights are unaffected by darkness. Fog cuts every optical sensor (thermals see about 3× further); rain and snow slow vehicles off roads; wind drifts smoke.` }),
+      h('h4', { text: 'Civilians (pattern of life)' }),
+      h('div', { class: 'env-grid' }, ...field('Cars', cars), ...field('People', people)),
+      h('small', { class: 'hint', text: 'Neutral background traffic: cars drive between the towns along the roads, people walk about the towns. They run from shots and blasts nearby, and any killed are logged.' }),
       h(
         'div',
         { class: 'row' },
@@ -793,6 +799,7 @@ class App {
             const next: Record<string, boolean> = {};
             for (const el of body.querySelectorAll<HTMLInputElement>('[data-rule]')) next[el.dataset.rule!] = el.checked;
             const r = await this.cmd({ cmd: 'setRules', rules: next });
+            await this.cmd({ cmd: 'setPatternOfLife', vehicles: Number(cars.value) || 0, pedestrians: Number(people.value) || 0 });
             const [th, tm] = time.value.split(':').map(Number);
             const e = await this.cmd({
               cmd: 'setEnvironment',

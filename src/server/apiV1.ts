@@ -273,6 +273,12 @@ export class ApiV1 {
       this.run({ cmd: 'setRules', rules: obj(req.body) as never });
       return { json: this.engine.rules };
     });
+    r.get(`${P}/simulation/pattern-of-life`, () => ({ json: this.engine.life.settings }));
+    r.put(`${P}/simulation/pattern-of-life`, (req) => {
+      const b = obj(req.body);
+      this.run({ cmd: 'setPatternOfLife', vehicles: b.vehicles as number | undefined, pedestrians: b.pedestrians as number | undefined });
+      return { json: this.engine.life.settings };
+    });
     r.get(`${P}/simulation/environment`, () => ({ json: this.engine.env }));
     r.put(`${P}/simulation/environment`, (req) => {
       this.run({ cmd: 'setEnvironment', environment: obj(req.body) as never });

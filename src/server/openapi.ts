@@ -77,6 +77,12 @@ export function buildOpenApi(baseUrl: string): Schema {
       '/api/v1/scenarios/{name}/load': { post: op('Scenario', 'Load a stored scenario', { parameters: [idParam('name')] }) },
       '/api/v1/terrains': { get: op('Terrain', 'Imported real-world terrain datasets (use one with POST /scenario/new {"terrain":{"dataset":name}})') },
       '/api/v1/terrains/{name}': { put: op('Terrain', 'Upload a terrain dataset made with werforces-terrain', { parameters: [idParam('name')], ...body({ type: 'object' }) }) },
+      '/api/v1/simulation/pattern-of-life': {
+        get: op('Simulation', 'How many background civilians the simulation keeps on the map'),
+        put: op('Simulation', 'Set the number of civilian cars (driving between towns along the roads) and pedestrians (walking about the towns), 0-300 each. They are neutral, run from shots and blasts nearby, and are kept topped up', {
+          ...body({ type: 'object', properties: { vehicles: { type: 'integer', minimum: 0, maximum: 300 }, pedestrians: { type: 'integer', minimum: 0, maximum: 300 } } }),
+        }),
+      },
       '/api/v1/simulation/rules': {
         get: op('Simulation', 'Which optional models are on'),
         put: op('Simulation', 'Turn optional models on or off', {
