@@ -47,6 +47,10 @@ interface Effect {
 }
 
 const AGGREGATE_MPP = 14; // metres per pixel above which units are drawn aggregated
+/** More symbols than this in view are drawn as dots. */
+const MAX_SYMBOLS = 2500;
+/** More labels than this in view are not drawn (they could not be read anyway); zoom in to see them. */
+const MAX_LABELS = 400;
 
 export class MapView {
   readonly canvas: HTMLCanvasElement;
@@ -835,32 +839,78 @@ export class MapView {
     const agg = this.aggregated();
     const selUnit = this.selectedId ? this.unitById.get(this.selectedId) : undefined;
     const selEntityUnit = this.selectedId ? this.entityById.get(this.selectedId)?.unitId : undefined;
+    // Cull to the view first; thousands of symbols can be off screen.
+    const shown: { sym: ReturnType<MapView['visibleSymbols']>[number]; x: number; y: number }[] = [];
+    const k = this.scale;
+    const ox = this.width / 2 - this.cx * k;
+    const oy = this.height / 2 + this.cy * k;
     for (const sym of this.visibleSymbols()) {
-      const p = this.toScreen(sym.pos);
-      if (p.x < -40 || p.y < -40 || p.x > this.width + 40 || p.y > this.height + 40) continue;
+      const x = sym.pos.x * k + ox;
+      const y = oy - sym.pos.y * k;
+      if (x < -40 || y < -40 || x > this.width + 40 || y > this.height + 40) continue;
+      shown.push({ sym, x, y });
+    }
+    // Thousands of overlapping symbols cannot be told apart: draw entities as dots in their
+    // force's colour (the selection keeps its symbols) until zoomed in.
+    if (shown.length > MAX_SYMBOLS) {
+      const dots = new Map<string, number[]>();
+      const keep: typeof shown = [];
+      for (const it of shown) {
+        const e = it.sym.entity;
+        if (!e || e.id === this.selectedId || this.selectedIds.has(e.id) || (selUnit && e.unitId === selUnit.id)) {
+          keep.push(it);
+          continue;
+        }
+        const color = e.damage === 'destroyed' ? '#555' : FORCE_COLORS[e.force].fill;
+        let list = dots.get(color);
+        if (!list) dots.set(color, (list = []));
+        list.push(Math.round(it.x) - 2, Math.round(it.y) - 2);
+      }
+      for (const [color, xy] of dots) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        for (let i = 0; i < xy.length; i += 2) ctx.rect(xy[i], xy[i + 1], 4, 4);
+        ctx.fill();
+      }
+      shown.length = 0;
+      shown.push(...keep);
+    }
+    // Labels only while they can be read: with too many symbols in view, zoom in to see them.
+    let labelled = 0;
+    if (this.layers.labels) {
+      for (const { sym } of shown) {
+        if (sym.unit || (!sym.entity!.ambient && (!agg || this.metresPerPixel < 6))) labelled++;
+      }
+    }
+    const labels = this.layers.labels && labelled <= MAX_LABELS;
+    // Heading lines in one path, under the symbols.
+    ctx.beginPath();
+    for (const { sym, x, y } of shown) {
+      const e = sym.entity ?? (sym.unit?.leaderId ? this.entityById.get(sym.unit.leaderId) : undefined);
+      if (!e || e.speed <= 0.5 || (sym.entity && e.damage === 'destroyed')) continue;
+      const y0 = sym.unit ? y + symSize * 1.1 : y;
+      const len = (sym.unit ? symSize * 2 : symSize * 1.2) + Math.min(40, e.speed * 0.6);
+      ctx.moveTo(x, y0);
+      ctx.lineTo(x + Math.sin(e.heading) * len, y0 - Math.cos(e.heading) * len);
+    }
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    for (const { sym, x, y } of shown) {
       if (sym.entity) {
         const e = sym.entity;
-        if (e.speed > 0.5 && e.damage !== 'destroyed') {
-          const len = symSize * 1.2 + Math.min(40, e.speed * 0.6);
-          ctx.beginPath();
-          ctx.moveTo(p.x, p.y);
-          ctx.lineTo(p.x + Math.sin(e.heading) * len, p.y - Math.cos(e.heading) * len);
-          ctx.strokeStyle = '#000';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-        }
         const inSelUnit = (selUnit && e.unitId === selUnit.id) || (selEntityUnit && e.unitId === selEntityUnit && e.id !== this.selectedId);
         if (e.suppression && e.suppression >= 0.15 && e.damage !== 'destroyed') {
           // Red halo: how hard the entity is being suppressed.
           ctx.beginPath();
-          ctx.arc(p.x, p.y, symSize * 1.35, 0, Math.PI * 2);
+          ctx.arc(x, y, symSize * 1.35, 0, Math.PI * 2);
           ctx.strokeStyle = `rgba(255,70,50,${Math.min(0.9, e.suppression)})`;
           ctx.lineWidth = e.pinned ? 3 : 2;
           ctx.stroke();
         }
         // Background civilians: small, faint and unlabelled unless selected.
         const bg = e.ambient && e.id !== this.selectedId;
-        drawSymbol(ctx, p.x, p.y, bg ? symSize * 0.6 : symSize, e.force, e.domain, e.symbol, {
+        drawSymbol(ctx, x, y, bg ? symSize * 0.6 : symSize, e.force, e.domain, e.symbol, {
           selected: e.id === this.selectedId || this.selectedIds.has(e.id) || (this.selectedIds.size > 1 && !!e.unitId && this.selectedIds.has(e.unitId)),
           destroyed: e.damage === 'destroyed',
           damaged: e.damage === 'mobility' || e.damage === 'firepower',
@@ -871,35 +921,27 @@ export class MapView {
         });
         if (inSelUnit) {
           ctx.beginPath();
-          ctx.arc(p.x, p.y, symSize * 1.7, 0, Math.PI * 2);
+          ctx.arc(x, y, symSize * 1.7, 0, Math.PI * 2);
           ctx.strokeStyle = 'rgba(255,255,255,0.55)';
           ctx.lineWidth = 1;
           ctx.stroke();
         }
-        if (this.layers.labels && !bg && (!agg || e.id === this.selectedId || this.metresPerPixel < 6)) {
-          label(ctx, e.passengers ? `${e.name} +${e.passengers.length}` : e.name, p.x + symSize * 1.5, p.y + 4, FORCE_COLORS[e.force].text, '11px system-ui');
-          if (e.domain === 'air') label(ctx, `${Math.round(e.agl)}m`, p.x + symSize * 1.5, p.y + 16, '#ddd', '10px system-ui');
+        if (this.layers.labels && (labels || e.id === this.selectedId) && !bg && (!agg || e.id === this.selectedId || this.metresPerPixel < 6)) {
+          label(ctx, e.passengers ? `${e.name} +${e.passengers.length}` : e.name, x + symSize * 1.5, y + 4, FORCE_COLORS[e.force].text, '11px system-ui');
+          if (e.domain === 'air') label(ctx, `${Math.round(e.agl)}m`, x + symSize * 1.5, y + 16, '#ddd', '10px system-ui');
         }
       } else if (sym.unit) {
         const u = sym.unit;
         const leader = u.leaderId ? this.entityById.get(u.leaderId) : undefined;
-        const alive = u.memberIds.filter((id) => this.entityById.get(id)?.damage !== 'destroyed').length;
-        drawSymbol(ctx, p.x, p.y, symSize * 1.25, u.force, leader?.domain ?? 'ground', leader?.symbol ?? 'generic', {
+        let alive = 0;
+        for (const id of u.memberIds) if (this.entityById.get(id)?.damage !== 'destroyed') alive++;
+        drawSymbol(ctx, x, y, symSize * 1.25, u.force, leader?.domain ?? 'ground', leader?.symbol ?? 'generic', {
           selected: u.id === this.selectedId || this.selectedIds.has(u.id),
           destroyed: alive === 0,
           echelon: u.echelon,
           sidc: leader ? this.sidcOf(leader.typeId) : undefined,
         });
-        if (leader && leader.speed > 0.5) {
-          const len = symSize * 2 + Math.min(40, leader.speed * 0.6);
-          ctx.beginPath();
-          ctx.moveTo(p.x, p.y + symSize * 1.1);
-          ctx.lineTo(p.x + Math.sin(leader.heading) * len, p.y + symSize * 1.1 - Math.cos(leader.heading) * len);
-          ctx.strokeStyle = '#000';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-        }
-        if (this.layers.labels) label(ctx, `${u.name} (${alive}/${u.memberIds.length})`, p.x + symSize * 2, p.y + 4, FORCE_COLORS[u.force].text, 'bold 11px system-ui');
+        if (this.layers.labels && (labels || u.id === this.selectedId)) label(ctx, `${u.name} (${alive}/${u.memberIds.length})`, x + symSize * 2, y + 4, FORCE_COLORS[u.force].text, 'bold 11px system-ui');
       }
     }
   }

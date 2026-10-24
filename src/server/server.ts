@@ -111,9 +111,8 @@ export class Session {
   private terrainCache: { version: number; json: string } | null = null;
   private lastTerrainVersion: number;
   private pendingEvents: SimEvent[] = [];
-  private frameCount = 0;
-  /** Frame at which the next state broadcast is due. */
-  private nextStateFrame = 0;
+  /** When the next state broadcast is due (performance.now() milliseconds). */
+  private nextStateAt = 0;
   private wsRoles = new WeakMap<WebSocket, Role>();
   readonly created = new Date().toISOString();
 
@@ -130,7 +129,8 @@ export class Session {
     this.wss = new WebSocketServer({ noServer: true, maxPayload: MAX_BODY });
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
     runner.engine.on('event', (ev) => this.pendingEvents.push(ev));
-    const every = Math.max(1, Math.round(1000 / runner.frameMs / (opts.stateRate ?? 10)));
+    // Half a frame early, so ten a second at 20 frames a second is every other frame.
+    const interval = 1000 / (opts.stateRate ?? 10) - runner.frameMs / 2;
     runner.onFrame(() => {
       if (this.runner.engine.terrainVersion !== this.lastTerrainVersion) {
         this.lastTerrainVersion = this.runner.engine.terrainVersion;
@@ -141,13 +141,13 @@ export class Session {
         this.pendingEvents = [];
         this.broadcastPerRole((role) => ({ type: 'events', events: role.kind === 'player' ? filterEvents(this.runner.engine, events, role.force) : events }));
       }
-      if (++this.frameCount >= this.nextStateFrame && this.wss.clients.size > 0) {
-        const t0 = performance.now();
+      const t0 = performance.now();
+      if (t0 >= this.nextStateAt && this.wss.clients.size > 0) {
         this.broadcastState();
         // Big scenarios: building and sending the state may take at most STATE_BUDGET of the
         // server's time, so clients get fewer updates instead of the simulation falling behind.
         const ms = performance.now() - t0;
-        this.nextStateFrame = this.frameCount + Math.max(every, Math.ceil(ms / STATE_BUDGET / runner.frameMs));
+        this.nextStateAt = t0 + Math.max(interval, ms / STATE_BUDGET);
       }
     });
   }

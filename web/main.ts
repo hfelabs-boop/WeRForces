@@ -34,7 +34,7 @@ import { FORCE_NAMES } from '../src/shared/types.js';
 import { Api, BASE } from './api.js';
 import { $, clear, fmtDeg, fmtGrid, fmtLatLon, fmtTime, h } from './dom.js';
 import { MapView } from './map.js';
-import { setSymbolStyle, type SymbolStyle, symbolCanvas } from './symbols.js';
+import { setSymbolStyle, type SymbolStyle, symbolCanvas, symbolIcon } from './symbols.js';
 import type { View3D } from './view3d.js';
 import { AarPlayer } from './aar.js';
 import { Timeline } from './timeline.js';
@@ -80,6 +80,9 @@ function moraleText(m: number | undefined, state: string | undefined): string {
   if (m === undefined) return 'off';
   return `${Math.round(m * 100)}% · ${state ?? 'steady'}`;
 }
+
+/** Above this many entities the object tree lists units, and members only on demand. */
+const TREE_FULL = 1500;
 
 class App {
   readonly api: Api;
@@ -409,11 +412,27 @@ class App {
   }
 
   entity(id: string | null | undefined): EntitySnapshot | undefined {
-    return id ? this.state?.entities.find((e) => e.id === id) : undefined;
+    return id ? this.indexed().entities.get(id) : undefined;
   }
 
   unit(id: string | null | undefined): UnitSnapshot | undefined {
-    return id ? this.state?.units.find((u) => u.id === id) : undefined;
+    return id ? this.indexed().units.get(id) : undefined;
+  }
+
+  /** Entities and units of the current state by id (looked up thousands of times per update in big scenarios). */
+  private stateIndex: { state: SimState | null; entities: Map<string, EntitySnapshot>; units: Map<string, UnitSnapshot> } = { state: null, entities: new Map(), units: new Map() };
+
+  private indexed(): { entities: Map<string, EntitySnapshot>; units: Map<string, UnitSnapshot> } {
+    const st = this.state;
+    if (this.stateIndex.state !== st) {
+      const entities = new Map<string, EntitySnapshot>();
+      const units = new Map<string, UnitSnapshot>();
+      // The first of a duplicated id wins, as a search from the start would find.
+      for (const e of st?.entities ?? []) if (!entities.has(e.id)) entities.set(e.id, e);
+      for (const u of st?.units ?? []) if (!units.has(u.id)) units.set(u.id, u);
+      this.stateIndex = { state: st, entities, units };
+    }
+    return this.stateIndex;
   }
 
   graphic(id: string | null | undefined): Graphic | undefined {
@@ -1379,6 +1398,12 @@ class App {
     const el = $('#objects');
     clear(el);
     const match = (s: string) => !filter || s.toLowerCase().includes(filter);
+    // A big scenario lists its units; members only for the selected unit or a name filter,
+    // and background civilians only when filtered for.
+    const big = st.entities.length > TREE_FULL;
+    const sel = this.selectedId ? (this.unit(this.selectedId) ?? this.unit(this.entity(this.selectedId)?.unitId)) : undefined;
+    const open = (u: UnitSnapshot) => !big || !!filter || u === sel;
+    if (big) el.append(h('div', { class: 'tree-note', text: `${st.entities.length} entities: select a unit or filter by name to list its members.` }));
     // Under its parent, a name that repeats the parent's ("A Coy 1st Platoon" under "A Coy") shows only the rest; the full name is the tooltip.
     const item = (id: string, name: string, icon: HTMLElement | null, dead = false, parent?: string) =>
       h(
@@ -1401,17 +1426,23 @@ class App {
         if (!matches(u)) return;
         const members = membersOf(u);
         const lead = members[0];
-        into.append(item(u.id, `${u.name}`, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon, this.sidc(lead.typeId)) : null, false, parent));
+        into.append(item(u.id, `${u.name}`, lead ? symbolIcon(f, lead.domain, lead.symbol, 18, u.echelon, this.sidc(lead.typeId)) : null, false, parent));
         const kids = h('div', { class: 'tree-children' });
         for (const sub of subsOf(u)) renderUnit(sub, kids, u.name);
-        kids.append(...members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolCanvas(f, m.domain, m.symbol, 16, undefined, this.sidc(m.typeId)), m.damage === 'destroyed', u.name)));
+        if (open(u)) kids.append(...members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolIcon(f, m.domain, m.symbol, 16, undefined, this.sidc(m.typeId)), m.damage === 'destroyed', u.name)));
         into.append(kids);
       };
       for (const u of units) if (!u.parentId || !byId.has(u.parentId)) renderUnit(u, el);
+      let hidden = 0;
       for (const e of loose) {
         if (!match(e.name)) continue;
-        el.append(item(e.id, `${e.name}${e.remote ? ' (remote)' : ''}`, symbolCanvas(f, e.domain, e.symbol, 16, undefined, this.sidc(e.typeId)), e.damage === 'destroyed'));
+        if (big && e.ambient && !filter && e.id !== this.selectedId) {
+          hidden++;
+          continue;
+        }
+        el.append(item(e.id, `${e.name}${e.remote ? ' (remote)' : ''}`, symbolIcon(f, e.domain, e.symbol, 16, undefined, this.sidc(e.typeId)), e.damage === 'destroyed'));
       }
+      if (hidden) el.append(h('div', { class: 'tree-note', text: `${hidden} civilians (pattern of life)` }));
     }
     const graphics = st.graphics.filter((g) => match(g.name));
     if (graphics.length) {

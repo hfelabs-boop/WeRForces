@@ -489,6 +489,12 @@ aside {
   margin-left: 16px;
 }
 
+.tree-note {
+  margin: 4px 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .tree-head {
   margin: 10px 0 2px;
   font-size: 11px;
