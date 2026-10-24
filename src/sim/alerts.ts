@@ -26,6 +26,8 @@ const SEVERITY: Record<AlertKind, Alert['severity']> = {
   underFire: 'info',
   contact: 'info',
   jammed: 'warning',
+  gnssDenied: 'warning',
+  apsSpent: 'warning',
 };
 
 /** A unit, or an entity that is not in one: what the operator gives orders to. */
@@ -189,6 +191,14 @@ export class Alerts {
       const by = lead ? engine.ew.radioJammedBy(lead) : undefined;
       if (by) this.raiseOnce('jammed', o, `${o.name}: radio jammed`);
       else this.resolve('jammed', o.id);
+      // GNSS jammed: navigating by inertial (a spoofed navigator does not know, so no alert).
+      const lost = o.members.filter((e) => e.alive && e.nav && !e.nav.spoofedBy).length;
+      if (lost) this.raiseOnce('gnssDenied', o, o.unit ? `${o.name}: ${lost} of ${o.members.length} without GNSS` : `${o.name}: GNSS jammed, navigating by inertial`);
+      else this.resolve('gnssDenied', o.id);
+      // Active protection used up.
+      const spent = o.members.filter((e) => e.alive && e.type.aps && e.apsLeft <= 0).length;
+      if (spent) this.raiseOnce('apsSpent', o, o.unit ? `${o.name}: ${spent} with active protection spent` : `${o.name}: active protection spent`);
+      else this.resolve('apsSpent', o.id);
       // Leader lost.
       if (o.unit) {
         const lead = o.unit.leader;

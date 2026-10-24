@@ -3,7 +3,10 @@
 // cannot take orders on time (they arrive late), share contacts with the unit, call for
 // fire or hear codewords; a jammed radar sees only part of its range, burning through as it
 // closes on the jammer. What a lost datalink or GNSS means for a platform is up to the
-// unmanned-systems and navigation models; this only says who is denied what.
+// unmanned-systems and navigation models; this only says who is denied what. A GNSS
+// jammer that spoofs gives receivers a false fix instead of none (see navigation.ts).
+// Emission control is honoured here too: a unit keeping radio silence cannot use its
+// radio any more than a jammed one, and a radar switched off sees nothing.
 
 import type { JamBand } from '../shared/types.js';
 import type { Entity } from './entity.js';
@@ -83,10 +86,15 @@ export class Ew {
     return this.jammed.get(e.id)?.radio;
   }
 
-  /** The unit's leader (or the entity itself) cannot talk on the radio. */
+  /** The unit's leader (or the entity itself) cannot talk on the radio: jammed, or keeping radio silence. */
   radioJammed(e: Entity): boolean {
     const who = e.unit?.leader ?? e;
-    return !!this.jammed.get(who.id)?.radio || !!this.jammed.get(e.id)?.radio;
+    return !!this.jammed.get(who.id)?.radio || !!this.jammed.get(e.id)?.radio || who.radioSilent || e.radioSilent;
+  }
+
+  /** Keeping radio silence (emission control), as opposed to being jammed. */
+  radioSilent(e: Entity): boolean {
+    return (e.unit?.leader ?? e).radioSilent || e.radioSilent;
   }
 
   /** The jammer cutting this unmanned system's control datalink, if any (only `rf` links can be jammed). */
@@ -107,8 +115,15 @@ export class Ew {
     return !!this.jammed.get(e.id)?.gnss;
   }
 
-  /** Multiplier on a radar's range (1 when not jammed). */
+  /** The spoofer giving this entity a false satellite fix, if the GNSS jammer denying it spoofs. */
+  gnssSpoofedBy(e: Entity): string | undefined {
+    const id = this.jammed.get(e.id)?.gnss;
+    return id && this.engine.entities.get(id)?.type.jammer?.spoof ? id : undefined;
+  }
+
+  /** Multiplier on a radar's range (1 when not jammed, 0 when switched off by emission control). */
   radarFactor(e: Entity): number {
+    if (e.radarOff) return 0;
     return this.jammed.get(e.id)?.radar ?? 1;
   }
 
