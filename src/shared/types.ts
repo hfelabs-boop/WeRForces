@@ -38,6 +38,7 @@ export type SymbolKind =
   | 'air-defense'
   | 'artillery'
   | 'engineer'
+  | 'supply'
   | 'rotary'
   | 'fixed-wing'
   | 'uav'
@@ -150,6 +151,10 @@ export interface EntityTypeDef {
   smokeGrenades?: number;
   /** Engineers: seconds to breach a lane through a minefield or obstacle. */
   breachTime?: number;
+  /** How far a full tank goes (vehicles, km) or how long it lasts (aircraft, hours). Missing: no fuel model. */
+  endurance?: { km?: number; hours?: number };
+  /** Supply vehicles: how many full loads (fuel and ammunition) of other vehicles they carry. */
+  supply?: { capacity: number };
   /** Reactions that new entities of this type start with (e.g. observers call for fire). */
   reactions?: Reactions;
 }
@@ -188,6 +193,8 @@ export type TaskSpec =
   | { type: 'fireMission'; target: Vec2; rounds?: number; radius?: number; weaponId?: string; smoke?: boolean }
   /** Engineers: go to a minefield or obstacle and breach a 30 m lane through it. */
   | { type: 'breach'; graphicId: string }
+  /** Go to a friendly supply vehicle (the nearest, or the one given), halt beside it and take on fuel and ammunition. */
+  | { type: 'resupply'; supplierId?: string }
   /** Infantry walk to a carrier (entity, or any member of a unit with free seats) and board it. */
   | { type: 'mount'; carrierId: string }
   /** A carrier stops and lets all its passengers out. */
@@ -202,7 +209,11 @@ export type Condition =
   /** A hostile (to the plan's owner) entity is inside the area. */
   | { type: 'enemyInArea'; areaId: string }
   /** Fraction of the owner's members still alive is below `fraction` (0..1). */
-  | { type: 'strengthBelow'; fraction: number };
+  | { type: 'strengthBelow'; fraction: number }
+  /** Average fuel of the owner's vehicles is below `fraction`. */
+  | { type: 'fuelBelow'; fraction: number }
+  /** Average ammunition (fraction of full loads) of the owner's members is below `fraction`. */
+  | { type: 'ammoBelow'; fraction: number };
 
 /** Automatic behaviours that run alongside tasks and plans. */
 export interface Reactions {
@@ -368,6 +379,9 @@ export interface EntityState {
   suppression?: number;
   morale?: number;
   moraleState?: MoraleState;
+  fuel?: number;
+  /** Supply vehicles: loads left. */
+  supplies?: number;
 }
 
 export interface UnitRecord {
@@ -429,6 +443,8 @@ export interface SimulationRules {
   suppression?: boolean;
   /** Units lose cohesion with losses and suppression, and can break and fall back. */
   morale?: boolean;
+  /** Vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down. */
+  fuel?: boolean;
 }
 
 export type MoraleState = 'steady' | 'shaken' | 'broken';
@@ -506,6 +522,10 @@ export interface EntitySnapshot {
   /** Morale of an entity that is not in a unit. */
   morale?: number;
   moraleState?: MoraleState;
+  /** 0..1 fuel left (types with a fuel model). */
+  fuel?: number;
+  /** Supply vehicles: full loads of fuel and ammunition left to hand out. */
+  supplies?: number;
 }
 
 export interface UnitSnapshot {

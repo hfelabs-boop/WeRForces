@@ -83,6 +83,7 @@ export function buildOpenApi(baseUrl: string): Schema {
             properties: {
               suppression: { type: 'boolean', description: 'incoming fire suppresses: less accurate, slower, worse at spotting; infantry get pinned' },
               morale: { type: 'boolean', description: 'units become shaken and break under losses and fire' },
+              fuel: { type: 'boolean', description: 'vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down' },
             },
           }),
         }),
@@ -281,6 +282,12 @@ export function buildOpenApi(baseUrl: string): Schema {
               description: 'Engineers: move to a minefield or obstacle line and breach a 30 m lane through it.',
               properties: { type: { const: 'breach' }, graphicId: { type: 'string' } },
             },
+            {
+              type: 'object',
+              required: ['type'],
+              description: 'Drive to a friendly supply vehicle (the nearest with stock, or supplierId), halt beside it and take on fuel and ammunition. Units send every member that needs it.',
+              properties: { type: { const: 'resupply' }, supplierId: { type: 'string' } },
+            },
           ],
         },
         PlanStatement: {
@@ -299,7 +306,7 @@ export function buildOpenApi(baseUrl: string): Schema {
                 condition: {
                   type: 'object',
                   properties: {
-                    type: { enum: ['simTime', 'inArea', 'enemyInArea', 'enemyDetected', 'underFire', 'strengthBelow', 'entityDestroyed'] },
+                    type: { enum: ['simTime', 'inArea', 'enemyInArea', 'enemyDetected', 'underFire', 'strengthBelow', 'fuelBelow', 'ammoBelow', 'entityDestroyed'] },
                     time: { type: 'number' },
                     areaId: { type: 'string' },
                     entityId: { type: 'string' },

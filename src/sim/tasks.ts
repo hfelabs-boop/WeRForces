@@ -6,6 +6,7 @@ import type { TaskSpec, Vec2, WeaponDef } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import { fireIndirect } from './combat.js';
 import type { Entity } from './entity.js';
+import { needsSupply, RESUPPLY_RANGE, suppliersFor } from './supply.js';
 
 export type TaskStatus = 'running' | 'done' | 'failed';
 
@@ -605,6 +606,69 @@ export class BreachTask extends Task {
   }
 }
 
+/** Go to a friendly supply vehicle, halt beside it and take on fuel and ammunition. */
+export class ResupplyTask extends Task {
+  private path = new PathFollower();
+  private replanIn = 0;
+  private plannedTo?: Vec2;
+
+  constructor(private supplierId?: string) {
+    super({ type: 'resupply', supplierId });
+  }
+
+  protected override start({ engine, entity }: TaskContext): void {
+    if (entity.domain === 'air' || entity.domain === 'surface') {
+      this.fail('only ground vehicles and troops resupply in the field');
+    } else if (this.supplierId) {
+      const s = engine.entities.get(this.supplierId);
+      if (!s || !s.type.supply) this.fail('not a supply vehicle');
+      else if (s.force !== entity.force) this.fail('not a friendly supply vehicle');
+    } else {
+      // The nearest supply vehicle with something left.
+      let best: Entity | undefined;
+      for (const s of suppliersFor(engine, entity)) if (s !== entity && (!best || dist2d(entity, s) < dist2d(entity, best))) best = s;
+      if (best) this.supplierId = best.id;
+      else this.fail('no supply vehicle with stock left');
+    }
+  }
+
+  protected tick({ engine, entity, dt }: TaskContext): TaskStatus {
+    if (!needsSupply(engine, entity)) return 'done';
+    const s = this.supplierId ? engine.entities.get(this.supplierId) : undefined;
+    if (!s || s.destroyed) return this.fail('supply vehicle lost');
+    if (s.supplies <= 1e-6) return this.fail(`${s.name} has run out of supplies`);
+    const d = dist2d(entity, s);
+    if (d <= RESUPPLY_RANGE * 0.6) {
+      // Close enough: halt; supplies flow once both have stopped.
+      entity.steer = { x: entity.x, y: entity.y, speed: 0, arrive: true };
+      return 'running';
+    }
+    // Pull up 20 m short, on this side of it.
+    const goal = { x: s.x + ((entity.x - s.x) / d) * 20, y: s.y + ((entity.y - s.y) / d) * 20 };
+    this.replanIn -= dt;
+    if (this.replanIn <= 0 || !this.plannedTo || dist2d(this.plannedTo, goal) > 30) {
+      this.replanIn = 15;
+      this.plannedTo = goal;
+      if (!this.path.plan(entity, engine, goal)) return this.fail('no route to the supply vehicle');
+    }
+    this.path.step(entity, engine, dt, entity.cruiseSpeed, true);
+    return 'running';
+  }
+
+  describe(engine: Engine): string {
+    const s = this.supplierId ? engine.entities.get(this.supplierId) : undefined;
+    return `Resupply${s ? ` from ${s.name}` : ''}`;
+  }
+
+  override resumeSpec(): TaskSpec {
+    return { type: 'resupply', supplierId: this.supplierId };
+  }
+
+  override get remainingPath(): Vec2[] {
+    return this.path.remaining;
+  }
+}
+
 export function createTask(spec: TaskSpec): Task {
   switch (spec.type) {
     case 'moveTo':
@@ -631,5 +695,7 @@ export function createTask(spec: TaskSpec): Task {
       return new DismountTask();
     case 'breach':
       return new BreachTask(spec.graphicId);
+    case 'resupply':
+      return new ResupplyTask(spec.supplierId);
   }
 }

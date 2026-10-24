@@ -52,6 +52,7 @@ export function cotType(e: Pick<EntitySnapshot, 'force' | 'domain' | 'symbol'>):
       'air-defense': 'G-U-C-D',
       artillery: 'G-U-C-F',
       engineer: 'G-U-C-E',
+      supply: 'G-U-U-S',
       wheeled: 'G-E-V',
     };
     fn = ground[e.symbol] ?? 'G';

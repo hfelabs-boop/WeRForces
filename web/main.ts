@@ -54,6 +54,15 @@ function suppressionBar(v: number): HTMLElement {
   );
 }
 
+/** A fuel-gauge style meter: green when full, red when nearly empty. */
+function levelBar(v: number): HTMLElement {
+  return h(
+    'span',
+    { class: 'meter', title: `${Math.round(v * 100)}%` },
+    h('span', { style: `width:${Math.round(v * 100)}%;background:${v <= 0.2 ? 'var(--bad)' : v <= 0.4 ? 'var(--warn)' : 'var(--good, #3fb950)'}` }),
+  );
+}
+
 function moraleText(m: number | undefined, state: string | undefined): string {
   if (m === undefined) return 'off';
   return `${Math.round(m * 100)}% · ${state ?? 'steady'}`;
@@ -77,6 +86,9 @@ type PlanStepKind =
   | 'waitDestroyed'
   | 'waitEnemyInArea'
   | 'waitStrength'
+  | 'waitFuel'
+  | 'waitAmmo'
+  | 'resupply'
   | 'setReaction'
   | 'fireMission'
   | 'setCallForFire'
@@ -488,6 +500,7 @@ class App {
       h('h4', { text: 'Models' }),
       box('suppression', 'Suppression', 'Incoming fire makes targets less accurate, slower to fire and spot; infantry get pinned down'),
       box('morale', 'Morale', 'Units become shaken and break under losses and fire, then rally'),
+      box('fuel', 'Fuel', 'Vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down. Supply trucks refuel and rearm.'),
       h('h4', { text: 'Time and weather (at the scenario start)' }),
       h(
         'div',
@@ -1144,6 +1157,7 @@ class App {
         if (hitEntity.force !== selForce && hitEntity.damage !== 'destroyed') add(`Attack ${hitEntity.name}`, () => this.task(sel, { type: 'attack', targetId: hitEntity.id }));
         if (hitEntity.force !== selForce && this.hasIndirect(sel)) add(`Fire mission on ${hitEntity.name}`, () => this.task(sel, { type: 'fireMission', target: { x: Math.round(hitEntity.x), y: Math.round(hitEntity.y) }, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
         add(`Follow ${hitEntity.name}`, () => this.task(sel, { type: 'follow', targetId: hitEntity.id }));
+        if (hitEntity.force === selForce && hitEntity.supplies !== undefined && hitEntity.id !== sel) add(`Resupply from ${hitEntity.name}`, () => this.task(sel, { type: 'resupply', supplierId: hitEntity.id }));
         const carrierId = this.unit(hit) ? hit : hitEntity.id;
         if (hitEntity.force === selForce && this.domainOf(sel) === 'lifeform' && this.isCarrier(carrierId)) {
           const cname = this.unit(hit)?.name ?? hitEntity.name;
@@ -1269,6 +1283,10 @@ class App {
         this.bind('suppression'),
         e.unitId ? null : 'Morale',
         e.unitId ? null : this.bind('morale'),
+        e.fuel === undefined ? null : 'Fuel',
+        e.fuel === undefined ? null : this.bind('fuel'),
+        e.supplies === undefined ? null : 'Supplies',
+        e.supplies === undefined ? null : this.bind('supplies'),
         e.unitId ? 'Unit' : null,
         e.unitId ? h('a', { href: '#', text: this.unit(e.unitId)?.name ?? e.unitId, onclick: (ev: Event) => (ev.preventDefault(), this.select(e.unitId!)) }) : null,
       ),
@@ -1477,6 +1495,10 @@ class App {
             return `Mount ${this.unit(t.carrierId)?.name ?? name(t.carrierId)}`;
           case 'dismount':
             return 'Dismount passengers';
+          case 'breach':
+            return `Breach ${name(t.graphicId)}`;
+          case 'resupply':
+            return t.supplierId ? `Resupply from ${name(t.supplierId)}` : 'Resupply';
           default:
             return t.type;
         }
@@ -1497,6 +1519,8 @@ class App {
         if (c.type === 'underFire') return 'Wait until under fire';
         if (c.type === 'enemyInArea') return `Wait until enemy in ${name(c.areaId)}`;
         if (c.type === 'strengthBelow') return `Wait until strength below ${Math.round(c.fraction * 100)}%`;
+        if (c.type === 'fuelBelow') return `Wait until fuel below ${Math.round(c.fraction * 100)}%`;
+        if (c.type === 'ammoBelow') return `Wait until ammunition below ${Math.round(c.fraction * 100)}%`;
         return `Wait until ${name(c.entityId)} destroyed`;
       }
       case 'setReactions':
@@ -1524,6 +1548,9 @@ class App {
       ['waitDestroyed', 'Wait until destroyed (pick)'],
       ['waitEnemyInArea', 'Wait until enemy in area'],
       ['waitStrength', 'Wait until strength below (%)'],
+      ['waitFuel', 'Wait until fuel below (%)'],
+      ['waitAmmo', 'Wait until ammunition below (%)'],
+      ['resupply', 'Resupply at the nearest supply vehicle'],
       ['setReaction', 'Set reaction on contact'],
       ['setCallForFire', 'Set call for fire'],
       ...(this.domainOf(id) === 'lifeform' ? ([['mount', 'Mount carrier (pick)']] as [PlanStepKind, string][]) : []),
@@ -1562,8 +1589,8 @@ class App {
         const s = h('select', {}, h('option', { value: 'yes', text: 'Call for fire' }), h('option', { value: 'no', text: 'Stop calling for fire' })) as HTMLSelectElement;
         param.append(s);
         getParam = () => s.value;
-      } else if (['wait', 'setSpeed', 'setAltitude', 'waitTime', 'orbit', 'waitStrength', 'fireMission'].includes(k)) {
-        const defaults: Record<string, string> = { wait: '60', setSpeed: '30', setAltitude: '150', waitTime: String(Math.round((this.state?.time ?? 0) + 120)), orbit: '2000', waitStrength: '50', fireMission: '3' };
+      } else if (['wait', 'setSpeed', 'setAltitude', 'waitTime', 'orbit', 'waitStrength', 'waitFuel', 'waitAmmo', 'fireMission'].includes(k)) {
+        const defaults: Record<string, string> = { wait: '60', setSpeed: '30', setAltitude: '150', waitTime: String(Math.round((this.state?.time ?? 0) + 120)), orbit: '2000', waitStrength: '50', waitFuel: '25', waitAmmo: '30', fireMission: '3' };
         const n = h('input', { type: 'number', value: defaults[k], style: 'width:80px', title: k === 'orbit' ? 'radius (m)' : '' }) as HTMLInputElement;
         param.append(n);
         getParam = () => Number(n.value);
@@ -1615,6 +1642,11 @@ class App {
             return push({ kind: 'waitUntil', condition: { type: 'enemyInArea', areaId: String(v) } });
           case 'waitStrength':
             return push({ kind: 'waitUntil', condition: { type: 'strengthBelow', fraction: Math.min(100, Math.max(1, Number(v) || 50)) / 100 } });
+          case 'waitFuel':
+          case 'waitAmmo':
+            return push({ kind: 'waitUntil', condition: { type: k === 'waitFuel' ? 'fuelBelow' : 'ammoBelow', fraction: Math.min(100, Math.max(1, Number(v) || 25)) / 100 } });
+          case 'resupply':
+            return push({ kind: 'task', task: { type: 'resupply' } });
           case 'setReaction':
             return push({ kind: 'setReactions', reactions: { onContact: v === 'halt' ? 'halt' : 'continue' } });
           case 'mount':
@@ -1771,6 +1803,8 @@ class App {
       );
       set('suppression', suppressionBar(e.suppression ?? 0));
       if (!e.unitId) set('morale', moraleText(e.morale, e.moraleState));
+      if (e.fuel !== undefined) set('fuel', levelBar(e.fuel));
+      if (e.supplies !== undefined) set('supplies', `${e.supplies.toFixed(1)} vehicle loads`);
       const cap = this.capacityOf(e.id);
       if (cap) set('passengers', `Passengers ${e.passengers?.length ?? 0}/${cap}`);
       syncReactions(e.reactions);

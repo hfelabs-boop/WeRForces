@@ -90,6 +90,8 @@ export function validateTask(v: unknown): TaskSpec {
     }
     case 'breach':
       return { type: 'breach', graphicId: str(t.graphicId, 'graphicId') };
+    case 'resupply':
+      return t.supplierId === undefined ? { type: 'resupply' } : { type: 'resupply', supplierId: str(t.supplierId, 'supplierId') };
     default:
       throw new ValidationError(`unknown task type ${String(t.type)}`);
   }
@@ -111,10 +113,12 @@ function validateCondition(v: unknown): Condition {
       return { type: 'entityDestroyed', entityId: str(c.entityId, 'entityId') };
     case 'enemyInArea':
       return { type: 'enemyInArea', areaId: str(c.areaId, 'areaId') };
-    case 'strengthBelow': {
+    case 'strengthBelow':
+    case 'fuelBelow':
+    case 'ammoBelow': {
       const fraction = num(c.fraction, 'fraction');
       if (fraction <= 0 || fraction > 1) throw new ValidationError('fraction must be in (0, 1]');
-      return { type: 'strengthBelow', fraction };
+      return { type: c.type, fraction };
     }
     default:
       throw new ValidationError(`unknown condition ${String(c.type)}`);

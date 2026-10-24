@@ -45,13 +45,14 @@ import { Rng } from './rng.js';
 import { SENSOR_INTERVAL, updateSensors } from './sensors.js';
 import { Obstacles } from './obstacles.js';
 import { Smoke } from './smoke.js';
+import { burnFuel, updateResupply } from './supply.js';
 import { SpatialIndex } from './spatial.js';
 import { createTask, MountTask, type Task, type TaskStatus } from './tasks.js';
 import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
 import { formationOffset, perMemberTask, Unit } from './units.js';
 
 export const DEFAULT_DT = 0.1;
-export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true };
+export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true };
 const MAX_EVENTS = 1000;
 
 type Listener<T> = (value: T) => void;
@@ -235,6 +236,7 @@ export class Engine {
     for (const w of type.weapons) e.ammo.set(w, this.catalog.weapon(w).ammo);
     if (type.reactions) e.reactions = { ...type.reactions };
     e.smokeLeft = type.smokeGrenades ?? 0;
+    e.supplies = type.supply?.capacity ?? 0;
     this.spatial.invalidate();
     if (type.domain === 'air') {
       e.altitudeOverride = opts.altitude;
@@ -770,7 +772,7 @@ export class Engine {
     if (target) this.afterDamage(target, det.outcome, shot.shooterId);
   }
 
-  private afterDamage(target: Entity, outcome: string, byId?: string, cause?: string): void {
+  afterDamage(target: Entity, outcome: string, byId?: string, cause?: string): void {
     if ((outcome === 'kill' || outcome === 'mobility') && !target.remote) {
       // Passengers of a knocked-out carrier: some die with it, the rest bail out.
       if (outcome === 'kill') {
@@ -930,6 +932,8 @@ export class Engine {
 
     const ground = groundFactor(this.env);
     let hasObstacles = false;
+    // Out of fuel, vehicles stop where they are.
+    if (this.rules.fuel) for (const e of this.entities.values()) if (e.fuel <= 0 && e.domain !== 'air' && !e.remote) e.steer = null;
     for (const g of this.graphics.values()) if (g.kind === 'minefield' || g.kind === 'obstacle') hasObstacles = true;
     for (const e of this.entities.values()) {
       if (!e.embarkedIn) {
@@ -946,6 +950,7 @@ export class Engine {
       if (c) this.syncPassenger(e, c);
       else e.embarkedIn = undefined;
     }
+    if (this.rules.fuel) for (const e of this.entities.values()) if (e.type.endurance) burnFuel(this, e, dt);
 
     for (const e of this.entities.values()) {
       if (e.remote) continue;
@@ -960,6 +965,7 @@ export class Engine {
       this.smoke.expire(windVector(this.env));
       checkCallsForFire(this);
       updateMorale(this);
+      updateResupply(this);
     }
     for (const e of this.entities.values()) updateCombat(this, e);
     this.processImpacts();
@@ -1122,6 +1128,8 @@ export class Engine {
     if (st.suppression !== undefined) e.suppression = st.suppression;
     if (st.morale !== undefined) e.morale = st.morale;
     if (st.moraleState) e.moraleState = st.moraleState;
+    if (st.fuel !== undefined) e.fuel = st.fuel;
+    if (st.supplies !== undefined) e.supplies = st.supplies;
   }
 
   private authoredState(e: Entity): EntityRecord['state'] {
@@ -1172,6 +1180,8 @@ export class Engine {
         suppression: e.suppression || undefined,
         morale: e.morale < 1 ? e.morale : undefined,
         moraleState: e.moraleState !== 'steady' ? e.moraleState : undefined,
+        fuel: e.fuel < 1 ? e.fuel : undefined,
+        supplies: e.type.supply && e.supplies !== e.type.supply.capacity ? e.supplies : undefined,
       },
     };
   }
@@ -1290,6 +1300,8 @@ export class Engine {
       pinned: e.pinned || undefined,
       morale: e.unit || !this.rules.morale ? undefined : Math.round(e.morale * 100) / 100,
       moraleState: e.unit || !this.rules.morale || e.moraleState === 'steady' ? undefined : e.moraleState,
+      fuel: e.type.endurance && this.rules.fuel ? Math.round(e.fuel * 1000) / 1000 : undefined,
+      supplies: e.type.supply ? Math.round(e.supplies * 100) / 100 : undefined,
     };
   }
 

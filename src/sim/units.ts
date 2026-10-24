@@ -6,6 +6,7 @@ import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import type { PlanExecutor, Taskable } from './plans.js';
 import { createTask, FormationTask, indirectWeaponFor, type Task, type TaskStatus } from './tasks.js';
+import { needsSupply } from './supply.js';
 
 /** Body-frame offset (x = right, y = forward) for follower k (1-based) in a formation. */
 export function formationOffset(formation: Formation, k: number, spacing: number): Vec2 {
@@ -27,7 +28,7 @@ export function formationOffset(formation: Formation, k: number, spacing: number
 
 /** Unit tasks that every member executes itself, rather than the leader with the rest in formation. */
 export function perMemberTask(spec: TaskSpec): boolean {
-  return spec.type === 'attack' || spec.type === 'fireMission' || spec.type === 'mount' || spec.type === 'dismount';
+  return spec.type === 'attack' || spec.type === 'fireMission' || spec.type === 'mount' || spec.type === 'dismount' || spec.type === 'resupply';
 }
 
 export class Unit implements Taskable {
@@ -94,6 +95,11 @@ export class Unit implements Taskable {
       const alive = this.alive();
       const tubes = alive.filter((m) => indirectWeaponFor(engine, m, spec.target, spec.weaponId));
       for (const m of tubes.length ? tubes : alive) engine.setEntityTask(m, createTask(spec));
+      return;
+    }
+    if (spec.type === 'resupply') {
+      // Every member that needs it goes to the supply vehicle; the rest stay put.
+      for (const m of this.alive()) engine.setEntityTask(m, needsSupply(engine, m) ? createTask(spec) : null);
       return;
     }
     if (spec.type === 'mount' || spec.type === 'dismount') {

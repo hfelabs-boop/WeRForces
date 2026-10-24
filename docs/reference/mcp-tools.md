@@ -127,12 +127,12 @@ Delete an entity, a unit (with its members) or a graphic.
 
 ## `assign_task`
 
-Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
+Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `targetId` | string | yes | entity (E..) or unit (U..) id |
-| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` \| `"mount"` \| `"dismount"` \| `"breach"` | yes |  |
+| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` \| `"mount"` \| `"dismount"` \| `"breach"` \| `"resupply"` | yes |  |
 | `to` | {x, y, lat, lon, town} |  | Location as {x,y}, {lat,lon} or {town} |
 | `routeId` | string |  |  |
 | `targetEntityId` | string |  |  |
@@ -145,7 +145,7 @@ Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMiss
 
 ## `assign_plan`
 
-Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: {kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), {kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, {kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, {kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"entityDestroyed",entityId}}.
+Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: {kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), {kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, {kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, {kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"fuelBelow",fraction}|{type:"ammoBelow",fraction}|{type:"entityDestroyed",entityId}}.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -183,12 +183,13 @@ Set rules of engagement for an entity or unit: fireAtWill, returnFire or holdFir
 
 ## `set_simulation_rules` _(idempotent)_
 
-Turn optional parts of the model on or off for this scenario (all are on by default): suppression (fire pins and degrades the target) and morale (units become shaken and break under losses). Useful for comparison runs.
+Turn optional parts of the model on or off for this scenario (all are on by default): suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel). Useful for comparison runs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `suppression` | boolean |  |  |
 | `morale` | boolean |  |  |
+| `fuel` | boolean |  |  |
 
 ## `set_environment` _(idempotent)_
 

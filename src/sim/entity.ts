@@ -67,6 +67,10 @@ export class Entity {
   /** Morale of an entity that is not in a unit (units keep their own). */
   morale = 1;
   moraleState: MoraleState = 'steady';
+  /** 0..1 fuel left. */
+  fuel = 1;
+  /** Supply vehicles: full loads left to hand out. */
+  supplies = 0;
 
   /** Cruise speed override (m/s) set by plans. */
   speedOverride?: number;

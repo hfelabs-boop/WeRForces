@@ -106,6 +106,11 @@ function icon(ctx: CanvasRenderingContext2D, kind: SymbolKind, s: number): void 
       ctx.moveTo(0, -h * 0.3);
       ctx.lineTo(0, h * 0.35);
       break;
+    case 'supply':
+      // Combat service support, supply: a bar across the lower part of the frame.
+      ctx.moveTo(-w * 1.2, h * 0.55);
+      ctx.lineTo(w * 1.2, h * 0.55);
+      break;
     case 'rotary':
       ctx.moveTo(-w, -h * 0.6);
       ctx.lineTo(w, h * 0.6);
