@@ -8,6 +8,8 @@ export class SpatialIndex {
   /** Per force: cell key -> indices into items. */
   private forces = new Map<number, Map<number, number[]>>();
   private builtAt = NaN;
+  /** Scratch for query results (item indices). */
+  private hits = new Int32Array(0);
 
   constructor(readonly cellSize = 1000) {}
 
@@ -51,7 +53,9 @@ export class SpatialIndex {
     const y0 = Math.floor((y - radius) / cs);
     const y1 = Math.floor((y + radius) / cs);
     const span = (x1 - x0 + 1) * (y1 - y0 + 1);
-    const hits: number[] = [];
+    if (this.hits.length < this.items.length) this.hits = new Int32Array(this.items.length);
+    const hits = this.hits;
+    let n = 0;
     for (const [force, cells] of this.forces) {
       if (force === skipForce) continue;
       if (span > cells.size) {
@@ -59,18 +63,21 @@ export class SpatialIndex {
         for (const [k, cell] of cells) {
           const cx = Math.floor(k / 65536) - 32768;
           const cy = (k % 65536) - 32768;
-          if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) for (const i of cell) hits.push(i);
+          if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) for (const i of cell) hits[n++] = i;
         }
       } else {
         for (let cx = x0; cx <= x1; cx++) {
           for (let cy = y0; cy <= y1; cy++) {
             const cell = cells.get(this.key(cx, cy));
-            if (cell) for (const i of cell) hits.push(i);
+            if (cell) for (const i of cell) hits[n++] = i;
           }
         }
       }
     }
-    hits.sort((a, b) => a - b);
-    return hits.map((i) => this.items[i]);
+    // Each item is in one cell, so there are no duplicates; a typed sort is numeric.
+    const sorted = hits.subarray(0, n).sort();
+    const out = new Array<Entity>(n);
+    for (let k = 0; k < n; k++) out[k] = this.items[sorted[k]];
+    return out;
   }
 }

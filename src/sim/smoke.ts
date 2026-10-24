@@ -56,7 +56,13 @@ export class Smoke {
     const dy = b.y - a.y;
     const len = Math.hypot(dx, dy);
     if (len < 1) return false;
+    const xMin = Math.min(a.x, b.x);
+    const xMax = Math.max(a.x, b.x);
+    const yMin = Math.min(a.y, b.y);
+    const yMax = Math.max(a.y, b.y);
     for (const c of this.clouds) {
+      // A cloud wholly outside the sight line's bounding box cannot touch it.
+      if (c.x + c.radius < xMin || c.x - c.radius > xMax || c.y + c.radius < yMin || c.y - c.radius > yMax) continue;
       // Closest approach of the line to the cloud's centre.
       const t = ((c.x - a.x) * dx + (c.y - a.y) * dy) / (len * len);
       const px = a.x + dx * t;

@@ -24,13 +24,23 @@ export interface Threat {
   range: number;
 }
 
+/** Most threat viewsheds kept (each a bit per sample, under 2 kB). */
+const MAX_VIEWSHEDS = 8000;
+
 export class ThreatMap {
   private cache = new Map<string, { key: string; ids: string; at: number; grid: Float32Array | null }>();
+  /**
+   * Which samples each threat position sees, by exact position, eye height and reach:
+   * enemies that hold still are not traced again on the next rebuild.
+   */
+  private viewsheds = new Map<string, Uint8Array>();
+  private viewshedTerrain = -1;
 
   constructor(private readonly engine: Engine) {}
 
   clear(): void {
     this.cache.clear();
+    this.viewsheds.clear();
   }
 
   /** Enemies a force knows about that can shoot at a domain, where it last saw them. */
@@ -82,6 +92,10 @@ export class ThreatMap {
     const cols = t.cols;
     const rows = t.rows;
     const exposure = new Float32Array(cols * rows);
+    if (this.viewshedTerrain !== this.engine.terrainVersion || this.viewsheds.size > MAX_VIEWSHEDS) {
+      this.viewsheds.clear();
+      this.viewshedTerrain = this.engine.terrainVersion;
+    }
     for (const th of threats) {
       const reach = Math.ceil(th.range / cs);
       const stride = Math.max(1, Math.ceil((2 * reach) / SAMPLES_ACROSS));
@@ -89,8 +103,14 @@ export class ThreatMap {
       const c1 = Math.min(cols - 1, Math.ceil(th.x / cs) + reach);
       const r0 = Math.max(0, Math.floor(th.y / cs) - reach);
       const r1 = Math.min(rows - 1, Math.ceil(th.y / cs) + reach);
+      const vkey = `${th.x}:${th.y}:${th.z}:${th.range}`;
+      const known = this.viewsheds.get(vkey);
+      const seen = known ?? new Uint8Array(Math.ceil((Math.ceil((r1 - r0 + 1) / stride) * Math.ceil((c1 - c0 + 1) / stride)) / 8));
+      if (!known) this.viewsheds.set(vkey, seen);
+      let bit = -1;
       for (let r = r0; r <= r1; r += stride) {
         for (let c = c0; c <= c1; c += stride) {
+          bit++;
           // Sample the middle of each stride block.
           const sc = Math.min(c1, c + (stride >> 1));
           const sr = Math.min(r1, r + (stride >> 1));
@@ -98,8 +118,13 @@ export class ThreatMap {
           const y = sr * cs;
           const d = Math.hypot(x - th.x, y - th.y);
           if (d >= th.range) continue;
-          const z = t.surfaceHeight(x, y) + 2;
-          if (!t.lineOfSight({ x: th.x, y: th.y, z: th.z }, { x, y, z })) continue;
+          if (known) {
+            if (!(seen[bit >> 3] & (1 << (bit & 7)))) continue;
+          } else {
+            const z = t.surfaceHeight(x, y) + 2;
+            if (!t.lineOfSight({ x: th.x, y: th.y, z: th.z }, { x, y, z })) continue;
+            seen[bit >> 3] |= 1 << (bit & 7);
+          }
           const w = 1 - d / th.range;
           for (let rr = r; rr < Math.min(r + stride, r1 + 1); rr++) for (let cc = c; cc < Math.min(c + stride, c1 + 1); cc++) exposure[rr * cols + cc] += w;
         }

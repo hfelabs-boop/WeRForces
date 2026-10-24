@@ -67,6 +67,17 @@ const NEIGHBORS: [number, number, number][] = [
   [-1, -1, Math.SQRT2],
 ];
 
+/** Search arrays shared by every gridAStar call on grids of the same size. */
+let buffers: { n: number; g: Float64Array; parent: Int32Array; seen: Uint32Array; stamp: number } | null = null;
+
+function scratch(n: number): { g: Float64Array; parent: Int32Array; seen: Uint32Array; stamp: number } {
+  if (!buffers || buffers.n !== n || buffers.stamp > 0xfffffff0) {
+    buffers = { n, g: new Float64Array(n), parent: new Int32Array(n), seen: new Uint32Array(n), stamp: 0 };
+  }
+  buffers.stamp += 2;
+  return buffers;
+}
+
 export interface GridPathResult {
   /** Node indices (row * cols + col) from start to goal inclusive. */
   nodes: number[];
@@ -86,10 +97,10 @@ export function gridAStar(
   minCost = 1,
   maxExpansions = 400_000,
 ): GridPathResult | null {
-  const n = cols * rows;
-  const g = new Float64Array(n).fill(Infinity);
-  const parent = new Int32Array(n).fill(-1);
-  const closed = new Uint8Array(n);
+  const { g, parent, seen, stamp } = scratch(cols * rows);
+  // A node's g and parent are only valid once `seen` carries this search's stamp; closed
+  // nodes carry stamp + 1. This saves clearing grid-sized arrays for every search.
+  const closedStamp = stamp + 1;
   const gc = goal % cols;
   const gr = Math.floor(goal / cols);
   const h = (i: number) => {
@@ -104,13 +115,15 @@ export function gridAStar(
 
   const open = new MinHeap();
   g[start] = 0;
+  parent[start] = -1;
+  seen[start] = stamp;
   open.push(start, h(start));
   let expansions = 0;
   while (open.size > 0) {
     const cur = open.pop();
-    if (closed[cur]) continue;
+    if (seen[cur] === closedStamp) continue;
     if (cur === goal) break;
-    closed[cur] = 1;
+    seen[cur] = closedStamp;
     if (++expansions > maxExpansions) return null;
     const cc = cur % cols;
     const cr = Math.floor(cur / cols);
@@ -120,7 +133,7 @@ export function gridAStar(
       const nr = cr + dr;
       if (nc < 0 || nr < 0 || nc >= cols || nr >= rows) continue;
       const ni = nr * cols + nc;
-      if (closed[ni]) continue;
+      if (seen[ni] === closedStamp) continue;
       const c = cost(nc, nr);
       if (!Number.isFinite(c)) continue;
       // Prevent diagonal corner cutting through impassable cells.
@@ -128,14 +141,15 @@ export function gridAStar(
         if (!Number.isFinite(cost(cc + dc, cr)) || !Number.isFinite(cost(cc, cr + dr))) continue;
       }
       const ng = g[cur] + len * 0.5 * (curCost + c);
-      if (ng < g[ni]) {
+      if (seen[ni] !== stamp || ng < g[ni]) {
         g[ni] = ng;
         parent[ni] = cur;
+        seen[ni] = stamp;
         open.push(ni, ng + h(ni));
       }
     }
   }
-  if (!Number.isFinite(g[goal])) return null;
+  if (seen[goal] !== stamp && seen[goal] !== closedStamp) return null;
   const nodes: number[] = [];
   for (let i = goal; i !== -1; i = parent[i]) nodes.push(i);
   nodes.reverse();

@@ -963,7 +963,8 @@ export class Engine {
 
   /** Line of sight through terrain, canopy and smoke (radar sees through smoke). */
   lineOfSight(a: Vec3, b: Vec3, radar = false): boolean {
-    return this.terrain.lineOfSight(a, b) && (radar || !this.smoke.blocks(a, b));
+    // Smoke first: it is the cheaper test, and the answer is the same either way.
+    return (radar || !this.smoke.blocks(a, b)) && this.terrain.lineOfSight(a, b);
   }
 
   /** A route for a domain, avoiding obstacles and the minefields `force` knows about. */

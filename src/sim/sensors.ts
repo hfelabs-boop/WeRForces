@@ -5,6 +5,7 @@ import { angleDiff, bearing, clamp } from '../shared/math.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import { LAND_COVER } from '../shared/terrainGrid.js';
+import type { Vec3 } from '../shared/types.js';
 import { sensorRange } from './environment.js';
 import { spotFactor } from './morale.js';
 
@@ -57,6 +58,10 @@ export function updateSensors(engine: Engine, observer: Entity): void {
       if (range2 > reach * reach) continue;
       const range = Math.sqrt(range2);
       const flash = now - target.lastFiredAt < 5;
+      // Line of sight is the same for every sensor of a kind: trace it at most once each.
+      let aim: Vec3 | undefined;
+      let sight: boolean | undefined;
+      let radarSight: boolean | undefined;
       for (const { s, range: dark, flashRange } of sensors) {
         const maxRange = flash ? flashRange : dark;
         if (range > maxRange || !s.detects.includes(target.domain)) continue;
@@ -64,8 +69,10 @@ export function updateSensors(engine: Engine, observer: Entity): void {
           const off = Math.abs(angleDiff(observer.heading, bearing(observer, target)));
           if (off > s.fov / 2) continue;
         }
-        const aim = { x: target.x, y: target.y, z: target.z + Math.min(2, target.type.sensorHeight || 2) };
-        if (!engine.lineOfSight(eye, aim, !!s.radar)) continue;
+        aim ??= { x: target.x, y: target.y, z: target.z + Math.min(2, target.type.sensorHeight || 2) };
+        if (s.radar) radarSight ??= engine.lineOfSight(eye, aim, true);
+        else sight ??= engine.lineOfSight(eye, aim, false);
+        if (!(s.radar ? radarSight : sight)) continue;
         if (!engine.rng.chance(detectionProbability(engine, observer, target, range, maxRange, !!s.radar))) continue;
         recordContact(engine, observer, target, now);
         break;
