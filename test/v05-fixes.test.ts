@@ -102,3 +102,12 @@ describe('driving a unit leader', () => {
     expect(p.memberList[1].y).toBeGreaterThan(before + 100);
   });
 });
+
+describe('vehicles at the edge of water', () => {
+  it('skirt a lake corner their route clips instead of sticking there for good', () => {
+    const eng = new Engine();
+    generateBattle(eng, { mission: 'attack', seed: 13, blue: { composition: 'combined', support: ['recon'] }, red: { composition: 'mech' } });
+    eng.runFor(600);
+    expect(Object.keys(eng.sync.states().find((m) => m.force === 1)!.started)).toContain('P2');
+  }, 120000);
+});
