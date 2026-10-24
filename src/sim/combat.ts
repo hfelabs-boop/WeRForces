@@ -65,11 +65,11 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
   const candidates: Entity[] = [];
   const explicit = shooter.attackTargetId ? engine.entities.get(shooter.attackTargetId) : undefined;
   if (explicit && explicit.alive) candidates.push(explicit);
-  // Nothing within reach of a loaded direct-fire weapon: no shot (a shortcut, same outcome).
-  const reach = directReach(engine, shooter);
-  let inReach = false;
-  const within = (t: Entity) => Math.hypot(t.x - shooter.x, t.y - shooter.y, t.z - shooter.z) <= reach;
-  if (explicit && explicit.alive) inReach = within(explicit);
+  // Nothing within reach of a loaded direct-fire weapon means no shot: a shortcut with the
+  // same outcome (with a metre to spare, so rounding never skips a possible shot).
+  const reach = candidates.length || shooter.contacts.size ? directReach(engine, shooter) : 0;
+  const reach2 = (reach + 1) * (reach + 1);
+  let inReach = candidates.length > 0 && near(shooter, candidates[0], reach2);
   if (shooter.roe !== 'holdFire' && reach > 0) {
     for (const c of shooter.contacts.values()) {
       const t = engine.entities.get(c.id);
@@ -79,7 +79,7 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
         if (last === undefined || now - last > 60) continue;
       }
       candidates.push(t);
-      if (!inReach) inReach = within(t);
+      if (!inReach) inReach = near(shooter, t, reach2);
     }
   }
   if (candidates.length === 0 || !inReach) {
@@ -133,6 +133,10 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
     return;
   }
   shooter.engagingId = undefined;
+}
+
+function near(a: Entity, b: Entity, range2: number): boolean {
+  return (b.x - a.x) ** 2 + (b.y - a.y) ** 2 + (b.z - a.z) ** 2 <= range2;
 }
 
 /** Longest range of the direct-fire weapons a shooter has rounds for (0: none). */

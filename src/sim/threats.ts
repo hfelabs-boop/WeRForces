@@ -16,6 +16,8 @@ const SAMPLES_ACROSS = 120;
  * more coarsely, halving the samples across down to a quarter, to keep rebuilds quick.
  */
 const LOS_BUDGET = 2_000_000;
+/** Threats from which a set counts as large (see mostlySame). */
+const LARGE_SET = 50;
 /** A threat map is rebuilt at most this often, or when the threats change. */
 const REBUILD_EVERY = 10;
 
@@ -33,7 +35,7 @@ export interface Threat {
 const MAX_VIEWSHEDS = 8000;
 
 export class ThreatMap {
-  private cache = new Map<string, { key: string; ids: string; at: number; grid: Float32Array | null }>();
+  private cache = new Map<string, { key: string; ids: string; idSet: Set<string>; at: number; grid: Float32Array | null }>();
   /**
    * Which samples each threat position sees, by exact position, eye height and reach:
    * enemies that hold still are not traced again on the next rebuild.
@@ -85,10 +87,26 @@ export class ThreatMap {
     const hit = this.cache.get(k);
     // The same threats, moved a little since the last build a few seconds ago, keep the old map.
     const age = this.engine.time - (hit?.at ?? -Infinity);
-    if (hit && (hit.key === key || (hit.ids === ids && age >= 0 && age < REBUILD_EVERY))) return hit.grid;
+    if (hit && (hit.key === key || ((hit.ids === ids || this.mostlySame(hit.idSet, threats)) && age >= 0 && age < REBUILD_EVERY))) return hit.grid;
     const grid = threats.length ? this.build(threats) : null;
-    this.cache.set(k, { key, ids, at: this.engine.time, grid });
+    this.cache.set(k, { key, ids, idSet: new Set(threats.map((t) => t.id)), at: this.engine.time, grid });
     return grid;
+  }
+
+  /**
+   * In a big battle the known threats change every second; a map built from a large set
+   * that differs by at most a tenth is still good enough to route by for a few seconds.
+   */
+  private mostlySame(before: Set<string>, now: Threat[]): boolean {
+    if (now.length < LARGE_SET || before.size < LARGE_SET) return false;
+    let changed = 0;
+    let kept = 0;
+    for (const t of now) {
+      if (before.has(t.id)) kept++;
+      else changed++;
+    }
+    changed += before.size - kept;
+    return changed <= Math.max(before.size, now.length) / 10;
   }
 
   private build(threats: Threat[]): Float32Array {

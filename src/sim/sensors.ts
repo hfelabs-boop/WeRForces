@@ -88,17 +88,19 @@ export function updateSensors(engine: Engine, observer: Entity): void {
 function recordContact(engine: Engine, observer: Entity, target: Entity, now: number): void {
   const isNew = !observer.contacts.has(target.id);
   // Contacts go round the unit on the radio, unless it is jammed.
-  const share = observer.unit && !engine.ew.radioJammed(observer) ? observer.unit.alive() : [observer];
+  const share = observer.unit && !engine.ew.radioJammed(observer) ? observer.unit.memberList : [observer];
   for (const m of share) {
+    if (!m.alive) continue;
     const existing = m.contacts.get(target.id);
-    m.contacts.set(target.id, {
-      id: target.id,
-      firstSeen: existing?.firstSeen ?? now,
-      lastSeen: now,
-      x: target.x,
-      y: target.y,
-      z: target.z,
-    });
+    if (existing) {
+      // Updated in place: contacts are re-seen every scan.
+      existing.lastSeen = now;
+      existing.x = target.x;
+      existing.y = target.y;
+      existing.z = target.z;
+    } else {
+      m.contacts.set(target.id, { id: target.id, firstSeen: now, lastSeen: now, x: target.x, y: target.y, z: target.z });
+    }
   }
   if (isNew && engine.isHostile(observer.force, target.force)) {
     engine.log('detected', `${observer.name} detected ${target.name}`, observer.id, target.id);
