@@ -27,7 +27,8 @@
     "docs:gen": "tsx scripts/docs-gen.ts",
     "bench": "tsx scripts/bench.ts",
     "terrain:import": "tsx src/terrain/cli.ts",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "golden:update": "tsx scripts/golden-update.ts"
   },
   "engines": {
     "node": ">=20"

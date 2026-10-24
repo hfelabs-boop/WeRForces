@@ -1083,3 +1083,10 @@ body.player [data-controller-only] {
   pointer-events: none;
   z-index: 5;
 }
+
+.meter.wide {
+  width: 100%;
+}
+.batch .batch-out {
+  margin-top: 10px;
+}

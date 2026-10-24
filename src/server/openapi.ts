@@ -115,6 +115,30 @@ export function buildOpenApi(baseUrl: string): Schema {
           parameters: [{ name: 'time', in: 'query', schema: { type: 'number' }, description: 'simulation time in seconds (default: end of the recording)' }],
         }),
       },
+      '/api/v1/recording/events.csv': { get: op('Recording', 'The recorded event log as CSV (time, kind, text, entity, target)') },
+      '/api/v1/recording/kills.csv': { get: op('Recording', 'Kills as CSV: time, victim, killer, weapon') },
+      '/api/v1/recording/strength.csv': { get: op('Recording', 'Alive entities per force over time, as CSV') },
+      '/api/v1/recording/report.pdf': { get: op('Recording', 'The after-action report as a printable PDF: summary, strength chart, kills, weapons, bookmarks') },
+      '/api/v1/batch': {
+        get: op('Batch', 'Batch (Monte Carlo) jobs: status and progress'),
+        post: op('Batch', 'Start a batch: replicate a scenario with different random seeds (in a worker thread) and summarise the outcomes', {
+          ...body({
+            type: 'object',
+            properties: {
+              scenario: { description: 'a stored scenario name, or a scenario file; default: the current state', oneOf: [{ type: 'string' }, { type: 'object' }] },
+              runs: { type: 'integer', minimum: 1, maximum: 1000, default: 10 },
+              duration: { type: 'number', description: 'simulated seconds per run (default 1800)' },
+              seed: { type: 'integer', description: 'seed of the first run; run i uses seed + i (default 1000)' },
+              stopWhenDestroyed: { type: 'boolean', description: 'end a run early once a force has nothing left alive (default true)' },
+            },
+          }),
+        }),
+      },
+      '/api/v1/batch/{id}': {
+        get: op('Batch', 'A batch job: progress, and when done the summary (losses per force with mean, sd, 95% CI and histogram; exchange ratio; area control; shots). ?outcomes=true adds every run.', { parameters: [idParam()] }),
+        delete: { tags: ['Batch'], summary: 'Cancel a running batch', parameters: [idParam()], responses: { '204': { description: 'Cancelled' }, ...errors } },
+      },
+      '/api/v1/batch/{id}/runs.csv': { get: op('Batch', 'One row per run: seed, end time, losses per force, shots, first kill, area control', { parameters: [idParam()] }) },
       '/api/v1/recording/bookmarks': {
         post: op('Recording', 'Add a bookmark (note) to the recording', {
           ...body({ type: 'object', required: ['text'], properties: { text: { type: 'string' }, time: { type: 'number', description: 'default: now' } } }),

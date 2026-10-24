@@ -53,6 +53,20 @@ export class Api {
   }
 
   /** Call the /api/v1 REST API. */
+  /** Fetch a file from the API (with the key) and hand it to the browser as a download. */
+  async download(path: string, filename: string): Promise<void> {
+    const r = await fetch(`/api/v1${path}`, { headers: this.headers() });
+    if (!r.ok) throw new Error(((await r.json().catch(() => null)) as { error?: { message?: string } } | null)?.error?.message ?? `HTTP ${r.status}`);
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
   async v1<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
     const r = await fetch(`/api/v1${path}`, { method, headers: this.headers(true), body: body === undefined ? (method === 'GET' || method === 'DELETE' ? undefined : '{}') : JSON.stringify(body) });
     if (r.status === 204) return undefined as T;

@@ -12,6 +12,7 @@ import { IntegrationHub, type IntegrationOptions } from '../integrations/hub.js'
 import { createMcpServer, type ApiCaller } from '../mcp/tools.js';
 import type { ClientMessage, CommandResult, ForceId, Role, ServerMessage, SimEvent, SimState } from '../shared/types.js';
 import { ApiV1 } from './apiV1.js';
+import { BatchManager } from './batch.js';
 import { executeCommand } from './commands.js';
 import { DocsSite } from './docs.js';
 import { CONTROLLER, checkCommand, filterEvents, filterState, ForbiddenError } from './fog.js';
@@ -107,7 +108,7 @@ export class SimServer {
   ) {
     this.lastTerrainVersion = runner.engine.terrainVersion;
     this.integrations = new IntegrationHub(runner, opts.integrations);
-    this.api = new ApiV1({ runner, integrations: this.integrations, scenarioDir: opts.scenarioDir, recordingDir: opts.recordingDir, terrainDir: opts.terrainDir });
+    this.api = new ApiV1({ runner, integrations: this.integrations, scenarioDir: opts.scenarioDir, recordingDir: opts.recordingDir, terrainDir: opts.terrainDir, batch: new BatchManager() });
     this.docs = opts.docsDir ? new DocsSite(opts.docsDir, opts.repoBlobUrl) : null;
     this.http = http.createServer((req, res) => {
       this.handle(req, res).catch((err) => {
@@ -227,6 +228,11 @@ export class SimServer {
     if (r.text !== undefined) {
       res.writeHead(r.status, { 'Content-Type': r.contentType ?? 'text/plain; charset=utf-8', ...headers });
       res.end(r.text);
+      return;
+    }
+    if (r.bytes !== undefined) {
+      res.writeHead(r.status, { 'Content-Type': r.contentType ?? 'application/octet-stream', 'Content-Length': String(r.bytes.byteLength), ...headers });
+      res.end(r.bytes);
       return;
     }
     res.writeHead(r.status, { 'Content-Type': r.contentType ?? 'application/json', ...headers });

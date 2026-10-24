@@ -229,6 +229,19 @@ Automatic behaviours that run alongside tasks: onContact "halt" makes the entity
 | `withdrawTo` | {x, y, lat, lon, town} |  | Location as {x,y}, {lat,lon} or {town} |
 | `callForFire` | boolean |  |  |
 
+## `run_batch`
+
+Monte Carlo analysis: replicate a scenario (a stored one by name, or the current state) with different random seeds and summarise the outcomes: losses per force (mean, standard deviation, 95% confidence interval, histogram), loss exchange ratio, which force holds each area at the end, rounds fired. Runs in the background on the server; waits up to `waitSeconds` for the result, else returns the job id to check with jobId.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `scenario` | string |  | stored scenario name (default: the current state) |
+| `runs` | integer (1–1000) |  | replications (default 10) |
+| `durationMinutes` | number |  | simulated minutes per run (default 30) |
+| `seed` | integer (-9007199254740991–9007199254740991) |  |  |
+| `waitSeconds` | number (0–600) |  | how long to wait for the result (default 120) |
+| `jobId` | string |  | check on a batch started earlier instead of starting one |
+
 ## `after_action_report` _(read-only)_
 
 After-action review of the run so far (or of a loaded recording): strength and losses per force, every kill with killer, weapon and time, rounds fired per weapon, bookmarks.

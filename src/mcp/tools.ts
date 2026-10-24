@@ -462,6 +462,39 @@ export function createMcpServer(call: ApiCaller): McpServer {
   // ---------------------------------------------------------------- after-action review
 
   tool(
+    'run_batch',
+    'Monte Carlo analysis: replicate a scenario (a stored one by name, or the current state) with different random seeds and summarise the outcomes: losses per force (mean, standard deviation, 95% confidence interval, histogram), loss exchange ratio, which force holds each area at the end, rounds fired. Runs in the background on the server; waits up to `waitSeconds` for the result, else returns the job id to check with jobId.',
+    {
+      scenario: z.string().optional().describe('stored scenario name (default: the current state)'),
+      runs: z.number().int().min(1).max(1000).optional().describe('replications (default 10)'),
+      durationMinutes: z.number().positive().optional().describe('simulated minutes per run (default 30)'),
+      seed: z.number().int().optional(),
+      waitSeconds: z.number().min(0).max(600).optional().describe('how long to wait for the result (default 120)'),
+      jobId: z.string().optional().describe('check on a batch started earlier instead of starting one'),
+    },
+    async (a) => {
+      type Job = { id: string; status: string; done: number; runs: number; error?: string; summary?: { scenario: string; runs: number; duration: number; losses: { force: number; total: number; stats: { mean: number; sd: number; ci95: [number, number]; min: number; max: number } }[]; exchangeRatio?: number; areas: { name: string; held: Record<string, number> }[]; shots: { mean: number }; wallSeconds: number } };
+      let job = a.jobId
+        ? await api<Job>('GET', `/api/v1/batch/${encodeURIComponent(a.jobId)}`)
+        : await api<Job>('POST', '/api/v1/batch', { scenario: a.scenario, runs: a.runs, duration: a.durationMinutes === undefined ? undefined : a.durationMinutes * 60, seed: a.seed });
+      const until = Date.now() + (a.waitSeconds ?? 120) * 1000;
+      while (job.status === 'running' && Date.now() < until) {
+        await new Promise((r) => setTimeout(r, 1000));
+        job = await api<Job>('GET', `/api/v1/batch/${encodeURIComponent(job.id)}`);
+      }
+      if (job.status !== 'done' || !job.summary) return `Batch ${job.id}: ${job.status}, ${job.done}/${job.runs} runs${job.error ? ` (${job.error})` : ''}. Call run_batch with jobId "${job.id}" to check again.`;
+      const s = job.summary;
+      const name = (f: number) => ['Other', 'Blue', 'Red', 'Neutral'][f] ?? String(f);
+      const lines = [`Batch ${job.id}: ${s.scenario}, ${s.runs} runs of ${Math.round(s.duration / 60)} min (${s.wallSeconds} s)`];
+      for (const l of s.losses) lines.push(`${name(l.force)} losses: ${l.stats.mean} ± ${l.stats.sd} of ${l.total} (95% CI ${l.stats.ci95[0]}-${l.stats.ci95[1]}, range ${l.stats.min}-${l.stats.max})`);
+      if (s.exchangeRatio !== undefined) lines.push(`Loss exchange ratio (red/blue): ${s.exchangeRatio}`);
+      for (const ar of s.areas) lines.push(`${ar.name} held at the end: ${Object.entries(ar.held).map(([f, p]) => `${name(Number(f))} ${Math.round(p * 100)}%`).join(', ') || 'by nobody'}`);
+      lines.push(`Rounds fired per run: ${s.shots.mean}`);
+      return lines.join('\n');
+    },
+  );
+
+  tool(
     'after_action_report',
     'After-action review of the run so far (or of a loaded recording): strength and losses per force, every kill with killer, weapon and time, rounds fired per weapon, bookmarks.',
     {},

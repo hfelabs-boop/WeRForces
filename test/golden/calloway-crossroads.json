@@ -1,0 +1,19 @@
+{
+  "scenario": "calloway-crossroads",
+  "seconds": 1200,
+  "alive": {
+    "1": "14/14",
+    "2": "13/19",
+    "3": "3/3"
+  },
+  "kills": [
+    "136.7 Tank Plt 1 Lead destroyed by Gunslinger Lead",
+    "139.7 Tank Plt 1 3 destroyed by Gunslinger 2",
+    "166.8 Convoy 7 Lead destroyed by Gunslinger 2",
+    "184.2 Convoy 7 2 destroyed by Gunslinger 2",
+    "201.0 Convoy 7 3 destroyed by Gunslinger 2",
+    "216.2 Convoy 7 4 destroyed by Gunslinger Lead"
+  ],
+  "events": 62,
+  "digest": "e8029531cc9baa319d693d791be0d1703db63891fc110b42078aa2cde64f52c1"
+}

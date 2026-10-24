@@ -5,7 +5,10 @@ import path from 'node:path';
 import { entitiesGeoJSON, frameFor, graphicsGeoJSON, liveKML, sceneKML } from '../integrations/gis.js';
 import type { IntegrationHub } from '../integrations/hub.js';
 import { dist2d } from '../shared/math.js';
-import type { Command, CommandResult, EntitySnapshot, ForceId, Role, SimEventKind, SimState, TerrainDataset, UnitSnapshot, Vec2 } from '../shared/types.js';
+import type { Command, CommandResult, EntitySnapshot, ForceId, Role, ScenarioFile, SimEventKind, SimState, TerrainData, TerrainDataset, UnitSnapshot, Vec2 } from '../shared/types.js';
+import { outcomesCsv } from '../sim/batch.js';
+import type { BatchManager } from './batch.js';
+import { attachment, eventsCsv, killsCsv, reportPdf, strengthCsv } from './reports.js';
 import { DATASET_NAME, listDatasets } from '../terrain/store.js';
 import { Terrain } from '../sim/terrain.js';
 import { CONTROLLER, canSee, checkCommand, filterEvents, filterState, ForbiddenError } from './fog.js';
@@ -23,6 +26,8 @@ export interface ApiContext {
   recordingDir?: string;
   /** Imported terrain datasets (default: a "terrains" folder next to scenarioDir). */
   terrainDir?: string;
+  /** Batch (Monte Carlo) jobs. */
+  batch?: BatchManager;
 }
 
 const SCENARIO_NAME = /^[A-Za-z0-9_-]{1,64}$/;
@@ -143,6 +148,10 @@ export class ApiV1 {
     return u;
   }
 
+  private weaponName(id: string): string {
+    return this.engine.catalog.weapons.get(id)?.name ?? id;
+  }
+
   private history() {
     return { undo: this.ctx.runner.undoStack.length, redo: this.ctx.runner.redoStack.length, time: this.engine.time };
   }
@@ -225,6 +234,47 @@ export class ApiV1 {
     r.post(`${P}/scenario/undo`, () => (this.run({ cmd: 'undo' }), { json: this.history() }));
     r.post(`${P}/scenario/redo`, () => (this.run({ cmd: 'redo' }), { json: this.history() }));
     r.get(`${P}/scenarios`, () => ({ json: this.listScenarios() }));
+
+    // ---------------------------------------------------------------- batch runs
+    const batch = () => {
+      if (!this.ctx.batch) throw new HttpError(409, 'batch runs are not available here');
+      return this.ctx.batch;
+    };
+    const job = (id: string) => {
+      const j = batch().get(id);
+      if (!j) throw new HttpError(404, `unknown batch job ${id}`);
+      return j;
+    };
+    r.get(`${P}/batch`, () => ({ json: batch().list() }));
+    r.post(`${P}/batch`, (req) => {
+      const b = obj(req.body);
+      const runs = b.runs === undefined ? 10 : Math.floor(num(b.runs, 'runs'));
+      const duration = b.duration === undefined ? 1800 : num(b.duration, 'duration');
+      if (runs < 1 || runs > 1000) throw new HttpError(400, 'runs must be between 1 and 1000');
+      if (duration <= 0 || duration > 86400) throw new HttpError(400, 'duration must be in (0, 86400] seconds');
+      const scenario = (typeof b.scenario === 'string' ? this.readScenario(b.scenario) : b.scenario && typeof b.scenario === 'object' ? b.scenario : this.engine.toScenario()) as ScenarioFile;
+      if (scenario.format !== 'werforces-scenario') throw new HttpError(400, 'not a WeRForces scenario');
+      const terrains: Record<string, TerrainData> = {};
+      const ds = scenario.terrain?.dataset;
+      if (ds) terrains[ds] = this.engine.terrain.spec.dataset === ds ? this.engine.terrain.toData() : this.engine.terrainLoader!(ds);
+      const j = batch().start({
+        scenario,
+        options: { runs, duration, seed: b.seed === undefined ? 1000 : Math.floor(num(b.seed, 'seed')), stopWhenDestroyed: b.stopWhenDestroyed !== false },
+        catalog: this.engine.catalog.catalog,
+        terrains,
+      });
+      return { status: 202, json: { ...j, outcomes: undefined } };
+    });
+    r.get(`${P}/batch/{id}`, (req) => {
+      const j = job(req.params.id);
+      return { json: { ...j, outcomes: req.query.get('outcomes') === 'true' ? j.outcomes : undefined } };
+    });
+    r.get(`${P}/batch/{id}/runs.csv`, (req) => ({ text: outcomesCsv(job(req.params.id).outcomes), contentType: 'text/csv; charset=utf-8', headers: attachment(`batch-${req.params.id}.csv`) }));
+    r.delete(`${P}/batch/{id}`, (req) => {
+      job(req.params.id);
+      batch().cancel(req.params.id);
+      return { status: 204 };
+    });
     r.get(`${P}/scenarios/{name}`, (req) => ({ json: this.readScenario(req.params.name) }));
     r.post(`${P}/scenarios/{name}/load`, (req) => {
       this.run({ cmd: 'loadScenario', scenario: this.readScenario(req.params.name) as never });
@@ -265,6 +315,10 @@ export class ApiV1 {
     r.get(`${P}/recording`, () => ({ json: rec().summary() }));
     r.get(`${P}/recording/data`, () => ({ json: rec().toJSON() }));
     r.get(`${P}/recording/report`, () => ({ json: rec().report() }));
+    r.get(`${P}/recording/events.csv`, () => ({ text: eventsCsv(rec().report(), rec().toJSON().events), contentType: 'text/csv; charset=utf-8', headers: attachment('events.csv') }));
+    r.get(`${P}/recording/kills.csv`, () => ({ text: killsCsv(rec().report(), (w) => this.weaponName(w)), contentType: 'text/csv; charset=utf-8', headers: attachment('kills.csv') }));
+    r.get(`${P}/recording/strength.csv`, () => ({ text: strengthCsv(rec().report()), contentType: 'text/csv; charset=utf-8', headers: attachment('strength.csv') }));
+    r.get(`${P}/recording/report.pdf`, () => ({ bytes: reportPdf(rec().report(), (w) => this.weaponName(w)), contentType: 'application/pdf', headers: attachment('aar-report.pdf') }));
     r.get(`${P}/recording/state`, (req) => {
       const s = rec().summary();
       const t = req.query.get('time') === null ? s.end : num(req.query.get('time'), 'time');

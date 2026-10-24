@@ -196,6 +196,10 @@ export class AarPlayer {
     }
   }
 
+  private downloadFile(path: string, name: string): void {
+    this.host.api.download(path, name).catch((err) => this.host.toast(String((err as Error).message)));
+  }
+
   private async report(): Promise<void> {
     let r: AarReport;
     try {
@@ -236,7 +240,15 @@ export class AarPlayer {
         ),
         r.bookmarks.length ? h('h4', { text: 'Bookmarks' }) : null,
         r.bookmarks.length ? table(['Time', 'Note'], r.bookmarks.map((b) => [fmt(b.time), b.text])) : null,
-        h('div', { class: 'row' }, h('button', { text: 'Close', onclick: () => close() })),
+        h(
+          'div',
+          { class: 'row' },
+          h('button', { text: 'Download PDF', onclick: () => this.downloadFile('/recording/report.pdf', 'aar-report.pdf') }),
+          h('button', { text: 'Kills CSV', onclick: () => this.downloadFile('/recording/kills.csv', 'kills.csv') }),
+          h('button', { text: 'Events CSV', onclick: () => this.downloadFile('/recording/events.csv', 'events.csv') }),
+          h('button', { text: 'Strength CSV', onclick: () => this.downloadFile('/recording/strength.csv', 'strength.csv') }),
+          h('button', { text: 'Close', onclick: () => close() }),
+        ),
       ),
     );
     widenModal();

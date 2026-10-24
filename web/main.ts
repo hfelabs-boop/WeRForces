@@ -413,6 +413,7 @@ class App {
       if (action === 'review-recording') void this.reviewRecordingDialog();
       if (action === 'settings') void this.settingsDialog();
       if (action === 'undo' || action === 'redo') void this.undoRedo(action);
+      if (action === 'batch') void this.batchDialog();
     });
     ($('#file-input') as HTMLInputElement).addEventListener('change', async (e) => {
       const input = e.target as HTMLInputElement;
@@ -1485,6 +1486,81 @@ class App {
     );
   }
 
+  /** Monte Carlo runs of a scenario in the background, with the outcome statistics. */
+  private async batchDialog(): Promise<void> {
+    const stored = await this.api.v1<{ name: string; title?: string }[]>('GET', '/scenarios').catch(() => []);
+    const scenario = h('select', {}, h('option', { value: '', text: 'The current state' }), stored.map((s) => h('option', { value: s.name, text: s.title ?? s.name }))) as HTMLSelectElement;
+    const runs = h('input', { type: 'number', min: '1', max: '1000', value: '20' }) as HTMLInputElement;
+    const minutes = h('input', { type: 'number', min: '1', max: '1440', value: '30' }) as HTMLInputElement;
+    const seed = h('input', { type: 'number', value: '1000' }) as HTMLInputElement;
+    const early = h('input', { type: 'checkbox', checked: true }) as HTMLInputElement;
+    const out = h('div', { class: 'batch-out' });
+    const startBtn = h('button', { class: 'primary', text: 'Run' }) as HTMLButtonElement;
+    let jobId: string | null = null;
+    let timer = 0;
+    let close = () => {};
+    const stop = () => window.clearInterval(timer);
+    const cancelBtn = h('button', {
+      text: 'Close',
+      onclick: () => {
+        stop();
+        if (jobId && cancelBtn.textContent === 'Cancel run') void this.api.v1('DELETE', `/batch/${jobId}`).catch(() => undefined);
+        close();
+      },
+    }) as HTMLButtonElement;
+    type Job = { id: string; status: string; done: number; runs: number; error?: string; thread: string; summary?: BatchView };
+    const poll = async () => {
+      if (!jobId) return;
+      const j = await this.api.v1<Job>('GET', `/batch/${jobId}`).catch(() => null);
+      if (!j) return;
+      clear(out);
+      if (j.status === 'running') {
+        out.append(h('p', { text: `Running ${j.done}/${j.runs}…` }), h('span', { class: 'meter wide' }, h('span', { style: `width:${Math.round((j.done / j.runs) * 100)}%;background:var(--accent)` })));
+        return;
+      }
+      stop();
+      cancelBtn.textContent = 'Close';
+      startBtn.disabled = false;
+      if (j.status !== 'done' || !j.summary) {
+        out.append(h('p', { class: 'hint', text: `Batch ${j.status}${j.error ? `: ${j.error}` : ''}` }));
+        return;
+      }
+      out.append(batchResults(j.summary), h('div', { class: 'row' }, h('button', { text: 'Download runs (CSV)', onclick: () => this.api.download(`/batch/${j.id}/runs.csv`, `batch-${j.id}.csv`).catch((e) => this.toast(String(e.message))) })));
+    };
+    startBtn.addEventListener('click', async () => {
+      try {
+        const j = await this.api.v1<Job>('POST', '/batch', {
+          scenario: scenario.value || undefined,
+          runs: Number(runs.value),
+          duration: Number(minutes.value) * 60,
+          seed: Number(seed.value),
+          stopWhenDestroyed: early.checked,
+        });
+        jobId = j.id;
+        startBtn.disabled = true;
+        cancelBtn.textContent = 'Cancel run';
+        stop();
+        timer = window.setInterval(() => void poll(), 1000);
+        void poll();
+      } catch (err) {
+        this.toast(String((err as Error).message));
+      }
+    });
+    const field = (label: string, input: HTMLElement) => [h('label', { text: label }), input];
+    close = this.modal(
+      h(
+        'div',
+        { class: 'settings batch' },
+        h('h3', { text: 'Batch analysis' }),
+        h('p', { class: 'hint', text: 'Run the scenario many times with different random seeds, on the server in the background, and compare the outcomes.' }),
+        h('div', { class: 'env-grid' }, ...field('Scenario', scenario), ...field('Runs', runs), ...field('Minutes per run', minutes), ...field('First seed', seed), ...field('Stop when a side is wiped out', early)),
+        h('div', { class: 'row' }, startBtn, cancelBtn),
+        out,
+      ),
+    );
+    document.getElementById('modal-body')?.classList.add('wide');
+  }
+
   private async undoRedo(which: 'undo' | 'redo'): Promise<void> {
     if (this.aar.active) return this.toast('Replaying: exit the AAR to edit', true);
     const r = await this.cmd({ cmd: which });
@@ -2212,3 +2288,71 @@ const GRAPHIC_HINTS: Record<GraphicKind, string> = {
 };
 
 const PRECIPITATION_LABELS: Record<Precipitation, string> = { none: '', rain: 'rain', heavyRain: 'heavy rain', snow: 'snow' };
+
+interface BatchView {
+  scenario: string;
+  runs: number;
+  duration: number;
+  losses: { force: ForceId; total: number; stats: { mean: number; sd: number; min: number; max: number; ci95: [number, number] }; histogram: number[] }[];
+  exchangeRatio?: number;
+  areas: { id: string; name: string; held: Partial<Record<ForceId, number>> }[];
+  shots: { mean: number };
+  endTime: { mean: number };
+  wallSeconds: number;
+}
+
+/** Batch outcome tables and a loss histogram per force. */
+function batchResults(s: BatchView): HTMLElement {
+  const colors: Record<number, string> = { 0: '#e0d060', 1: '#4fa3ff', 2: '#ff5a5a', 3: '#5ad06a' };
+  const hist = (hgram: number[], color: string) => {
+    const max = Math.max(1, ...hgram);
+    const w = 220;
+    const bw = w / hgram.length;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', String(w));
+    svg.setAttribute('height', '40');
+    hgram.forEach((n, i) => {
+      const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      const hh = (n / max) * 34;
+      r.setAttribute('x', String(i * bw + 0.5));
+      r.setAttribute('y', String(36 - hh));
+      r.setAttribute('width', String(Math.max(1, bw - 1)));
+      r.setAttribute('height', String(hh));
+      r.setAttribute('fill', color);
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      t.textContent = `${n} run${n === 1 ? '' : 's'} lost ${i}`;
+      r.append(t);
+      svg.append(r);
+    });
+    return svg;
+  };
+  return h(
+    'div',
+    {},
+    h('p', { class: 'hint', text: `${s.scenario}: ${s.runs} runs of ${Math.round(s.duration / 60)} min in ${s.wallSeconds} s · runs ended at ${Math.round(s.endTime.mean / 60)} min on average · ${s.shots.mean} rounds fired per run` }),
+    h(
+      'table',
+      { class: 'aar-table' },
+      h('thead', {}, h('tr', {}, ['Force', 'Losses (mean ± sd)', '95% CI', 'Range', 'Distribution of losses'].map((c) => h('th', { text: c })))),
+      h(
+        'tbody',
+        {},
+        s.losses.map((l) =>
+          h(
+            'tr',
+            {},
+            h('td', { text: FORCE_NAMES[l.force] }),
+            h('td', { text: `${l.stats.mean} ± ${l.stats.sd} of ${l.total}` }),
+            h('td', { text: `${l.stats.ci95[0]} – ${l.stats.ci95[1]}` }),
+            h('td', { text: `${l.stats.min} – ${l.stats.max}` }),
+            h('td', {}, hist(l.histogram, colors[l.force] ?? '#aaa')),
+          ),
+        ),
+      ),
+    ),
+    s.exchangeRatio !== undefined ? h('p', { text: `Loss exchange ratio (Red lost per Blue lost): ${s.exchangeRatio}` }) : null,
+    ...s.areas.map((a) =>
+      h('p', { text: `${a.name} held at the end: ${Object.entries(a.held).map(([f, p]) => `${FORCE_NAMES[Number(f) as ForceId]} ${Math.round((p ?? 0) * 100)}%`).join(', ') || 'by nobody'}` }),
+    ),
+  );
+}
