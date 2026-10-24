@@ -59,6 +59,8 @@ describe('quick battle', () => {
     eng.runFor(1500);
     const blue = eng.sync.states().find((m) => m.force === 1)!;
     expect(Object.keys(blue.started)).toContain('P2');
+    // The support-by-fire platoon's overwatch ends, so the attack goes on to consolidate.
+    expect(Object.keys(blue.started)).toContain('P3');
     const losses = (f: number) => [...eng.entities.values()].filter((e) => e.force === f && !e.ambient && e.destroyed).length;
     expect(losses(1) + losses(2)).toBeGreaterThan(0);
   }, 60000);

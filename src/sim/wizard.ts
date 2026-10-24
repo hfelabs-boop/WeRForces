@@ -282,8 +282,10 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
     const subs = engine.subordinatesOf(att);
     const assault: PhaseOrder[] = [];
     if (subs.length >= 3) {
-      // Support by fire with one platoon; the others assault.
-      assault.push(order(subs[0], { type: 'overwatch', position: attackPos, facing: deg(toward) }));
+      // Support by fire with one platoon while the others assault: for about as long as the
+      // assault takes to cross to the objective (at ~5 m/s), so the next phase can start.
+      const cross = Math.hypot(objective.x - attackPos.x, objective.y - attackPos.y);
+      assault.push(order(subs[0], { type: 'overwatch', position: attackPos, facing: deg(toward), duration: Math.round(cross / 5 + 120) }));
       for (const s of subs.slice(1)) assault.push(order(s, { type: 'moveTo', target: objective }));
     } else {
       assault.push(order(att, { type: 'moveTo', target: objective }));
