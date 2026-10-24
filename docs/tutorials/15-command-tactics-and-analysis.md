@@ -82,13 +82,12 @@ choose **Defend here**.
 
 Then give the Red platoons one order together:
 
-1. Click **RU Tank Platoon** in the **Objects** tab. Then, with the whole map
-   in view, **Shift+click** the RU Mech Platoon's symbol on the map, just east
-   of the tank platoon's. Zoomed out this far, the map draws each platoon as one
+1. With the whole map in view, click the RU Tank Platoon and **Shift+click** the
+   RU Mech Platoon. Zoomed out this far, the map draws each platoon as one
    symbol, so a click picks the platoon. (Zoomed in, it picks a single
-   vehicle.) The quick-task bar at the bottom of the map can cover the tank
-   platoon's symbol, which is why you pick that one from the tree; if it covers
-   both, drag the map up a little.
+   vehicle.) With the company still selected, the quick-task bar at the bottom
+   of the map may cover the Red platoons: press **⇅** on the bar to move it to
+   the top of the map.
 2. Zoom in on **12.45E 7.4N** until the scale bar reads 200 m, and right-click
    there, on open ground. Zoomed out, that point is under the company's symbol
    and the menu offers to attack it instead.
@@ -250,15 +249,14 @@ curl -X POST localhost:8080/api/v1/scenario/undo -H 'Content-Type: application/j
 ```
 
 ```json
-{"undo":10,"redo":1,"time":0}
+{"undo":8,"redo":1,"time":0}
 ```
 
 That response came from a fresh server just after the setup above. The undo
 took back the last edit, the group order to the two Red platoons: a group order
-is a single edit, so one undo takes back the orders to every unit in it. 10
-earlier edits remain, starting with **File → New scenario** (applying the
-simulation settings counts as three). MCP's `manage_scenario` has `undo` and
-`redo` actions.
+is a single edit, so one undo takes back the orders to every unit in it. 8
+earlier edits remain, starting with **File → New scenario**. MCP's
+`manage_scenario` has `undo` and `redo` actions.
 
 ## 7. Measure
 
