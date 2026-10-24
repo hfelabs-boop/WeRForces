@@ -74,7 +74,7 @@ The convoy follows the route in **column**. Note the lead vehicle's name
    For each step, pick the type, set the value, and press **Add**.
    ![The Ambush plan in the plan editor](../images/tutorial-02-plan.png)
 
-3. Press **Assign plan**. *Current activity* shows *Plan 1/4: Set ROE Hold fire*,
+3. Press **Assign plan**. *Current activity* shows *Ambush 1/4: Set ROE holdFire*,
    and the plan advances when the clock runs.
 
 Why wait 20 s? Holding fire lets the convoy close into the kill zone. Hit
@@ -107,10 +107,10 @@ What happens (times are simulation time):
 
 | Time | What you see |
 | --- | --- |
-| ~2:20 | The convoy comes round the bend. *US Mech Platoon … detected RU Supply Convoy Lead*. The plan moves to step 3 |
-| ~2:40 | The 20 s are up: *plan Ambush complete*, ROE is now fire at will, and the Bradleys open up. The BRDM returns fire |
-| ~2:45 | *RU Supply Convoy Lead destroyed*. The reserve's condition is met, so the tank platoon forms a wedge and moves north |
-| 3:00–9:00 | The trucks are destroyed one by one. In our run the last truck slipped through, drove on towards Calloway, and was caught by the arriving tanks |
+| ~2:21 | The convoy comes round the bend. *US Mech Platoon 2 detected RU Supply Convoy Lead* (and the BRDM spots the Bradleys at the same moment, but holds its fire). The plan moves to step 3 |
+| ~2:41 | The 20 s are up: *US Mech Platoon: plan Ambush complete*, ROE is now fire at will, and the Bradleys fire TOWs at about 1.2 km. Being fired at, the BRDM answers with its heavy machine gun |
+| ~2:45 | *RU Supply Convoy Lead destroyed*. The reserve's condition is met, so the tank platoon forms a wedge and moves north. The BRDM has just destroyed *US Mech Platoon 2*, and that Bradley's TOW *lost guidance and missed* |
+| 3:00–3:50 | The trucks drive on west towards Calloway and are destroyed one by one; each time, the next vehicle takes command and carries on along the route. In our run a TOW immobilised the last truck at 3:44, and the arriving tanks finished it at 3:47 from about 1.3 km |
 
 In our run the convoy was destroyed for the loss of one Bradley, hit by the
 BRDM's heavy machine gun. Your results will vary with exact positions.
@@ -120,8 +120,9 @@ BRDM's heavy machine gun. Your results will vary with exact positions.
 Rewind (⏮) between experiments.
 
 - **No patience.** Remove the 20 s wait. The Bradleys open fire at the first
-  sighting, while the trucks are still out of view, and the rest of the convoy
-  may get through to the reserve.
+  sighting and destroy the BRDM at 2:26, while the trucks are still out of view.
+  The trucks then drive into the kill zone one at a time; in our run the
+  Bradleys destroyed two of them and the reserve's tanks caught the last at 3:23.
 - **Make the convoy fight.** Set its ROE to **Fire at will**.
 - **Loop a patrol.** Give the convoy **Patrol** instead of Follow. An open route
   is driven back and forth; a closed one (last point on the first) loops.
@@ -134,11 +135,14 @@ Rewind (⏮) between experiments.
   task finishes. *Wait until …* steps wait for their condition.
 - **Assigning a task directly replaces the plan.** To change a plan, edit it and
   press **Assign plan** again. The draft stays in the editor.
-- A plan cannot react while a task is running. Use **ROE** for reactions while
-  moving, or split a route into legs separated by *wait until* steps.
+- A plan runs one step at a time, so it cannot react while a task is running.
+  To react while moving, use **ROE** (units fire on the move), **Reactions** in
+  the inspector (for example *On contact: Halt and fight*), or split a route into
+  legs separated by *wait until* steps.
 
 Conditions: time, in area (the entity, or its unit's leader, is inside an area),
-enemy detected, under fire (shot at in the last 15 s), and entity destroyed. See
+enemy detected, under fire (shot at in the last 15 s), entity destroyed, enemy in
+area (a hostile is inside an area) and strength below a percentage. See
 [Concepts → Plans](../concepts.md#plans).
 
 **Next:** [Tutorial 3: Building and sharing a scenario](03-building-a-scenario.md).

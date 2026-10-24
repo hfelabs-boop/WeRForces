@@ -30,15 +30,21 @@ The response describes the scenario:
 ```json
 {
   "scenario": "Untitled",
+  "description": "",
   "time": 0,
   "running": false,
   "timeScale": 1,
   "strength": [],
+  "entities": 0,
+  "units": 0,
+  "graphics": 0,
   "terrain": {
     "size": 16000,
     "origin": { "lat": 50.75, "lon": 9.9 },
+    "note": "Local coordinates are metres: x east, y north, from the south-west corner (0,0) to (size,size).",
     "towns": [ { "name": "Alderford", "x": 1849, "y": 14485 }, { "name": "Brenham", "x": 13791, "y": 6777 }, "…" ]
   },
+  "dis": { "enabled": false },
   "lastEventSeq": 1
 }
 ```
@@ -126,9 +132,8 @@ Created Blue Armor (U1, 4 tanks) and Red Mech (U2, 3 BMPs)
   00:07:01  Blue Armor Lead destroyed by Red Mech Lead
   00:07:03  Red Mech 2 destroyed by Blue Armor 3
   00:07:37  Red Mech Lead destroyed by Blue Armor 2
-  00:07:39  Blue Armor 2 destroyed by Red Mech Lead
 
-After 00:08:00: Blue 2/4, Red 0/3
+After 00:08:00: Blue 3/4, Red 0/3
 ```
 
 Its `api()` helper is all you need to start your own client:

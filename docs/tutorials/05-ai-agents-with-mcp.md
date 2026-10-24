@@ -79,8 +79,9 @@ connect. You can list the tools and call them by hand.
 | --- | --- |
 | Awareness | `get_situation`, `list_entities`, `get_entity`, `get_unit`, `list_catalog`, `get_events`, `query_terrain`, `check_line_of_sight` |
 | Creation | `create_entity`, `create_unit`, `create_graphic`, `delete_object` |
-| Tasking | `assign_task`, `assign_plan`, `stop`, `set_roe` |
+| Tasking | `assign_task`, `assign_plan`, `embark`, `stop`, `set_roe`, `set_reactions` |
 | Time | `control_simulation` (run/pause/rewind/speed), `advance_time` (simulate *N* seconds now and summarise) |
+| Review | `after_action_report`, `replay_state`, `add_bookmark` |
 | Scenarios | `manage_scenario` (list/load/save/new) |
 
 Parameters are documented in the [MCP tools reference](../reference/mcp-tools.md).
@@ -107,7 +108,8 @@ returns the terrain and towns:
 
 ```json
 { "id": "U1", "name": "Blue Armor", "members": [
-  { "id": "E1", "name": "Blue Armor Lead", "type": "us-m1a2", "x": 10866, "y": 3389, "lat": 50.7804647, "lon": 10.0539655, "damage": "none" },
+  { "id": "E1", "name": "Blue Armor Lead", "type": "us-m1a2", "force": 1, "unit": "U1", "x": 10866, "y": 3389,
+    "lat": 50.7804647, "lon": 10.0539655, "heading": 0, "kmh": 0, "damage": "none" },
   { "id": "E2", "name": "Blue Armor 2", …, "task": "In formation on Blue Armor Lead" }, … ] }
 ```
 
@@ -117,7 +119,7 @@ returns U2 with three BMP-2s.
 **`check_line_of_sight {"from": {"town": "Eastwick"}, "to": {"town": "Brenham"}}`**: an agent can reason about terrain before acting.
 
 ```json
-{ "visible": false, "distance": 4477 }
+{ "visible": false, "distance": 4477, "from": { "x": 10866, "y": 3389, "z": 66.7… }, "to": { "x": 13791, "y": 6777, "z": 160.3… } }
 ```
 
 **`assign_task {"targetId": "U1", "type": "moveTo", "to": {"town": "Brenham"}}`**
@@ -131,29 +133,36 @@ Blue Armor: Move to (13791, 6777)
 ```json
 {
   "time": "00:15:00",
-  "strength": [ { "name": "Blue", "total": 4, "alive": 0 }, { "name": "Red", "total": 3, "alive": 0 } ],
+  "strength": [ { "force": 1, "name": "Blue", "total": 4, "alive": 1 }, { "force": 2, "name": "Red", "total": 3, "alive": 0 } ],
   "shotsFired": 11,
   "events": [
     "00:06:20 [damaged] Red Mech 3 suffered a mobility kill",
     "00:06:22 [destroyed] Blue Armor Lead destroyed by Red Mech 3",
     "00:06:22 [info] Blue Armor: Blue Armor Lead lost, Blue Armor 2 takes command",
     "00:06:55 [destroyed] Red Mech 3 destroyed by Blue Armor 2",
-    "00:06:56 [damaged] Blue Armor 2 suffered a mobility kill",
-    "00:06:57 [info] Blue Armor: Blue Armor 2 immobilised, Blue Armor 3 takes command",
+    "00:06:59 [destroyed] Blue Armor 2 destroyed by Red Mech Lead",
+    "00:06:59 [info] Blue Armor: Blue Armor 2 lost, Blue Armor 3 takes command",
     "…",
-    "00:07:51 [destroyed] Red Mech 2 destroyed by Blue Armor 4",
-    "00:07:53 [destroyed] Blue Armor 4 destroyed by Red Mech 2"
+    "00:07:31 [destroyed] Blue Armor 3 destroyed by Red Mech 2",
+    "00:07:31 [info] Blue Armor: Blue Armor 3 lost, Blue Armor 4 takes command",
+    "00:07:55 [destroyed] Red Mech 2 destroyed by Blue Armor 4"
   ]
 }
 ```
 
-From this the agent can write a report like: *"Both platoons were destroyed.
-The BMPs opened first with ATGMs at about 6:20 while the tanks were still
-closing in column. Command passed down the platoon three times. The last BMP's
-missile was already in flight when it was killed, and it destroyed the last
-tank."* It can then offer to replay with a different approach, e.g. deploying
-into a wedge and stopping in overwatch before the town
-(`control_simulation {"action":"rewind"}`, then `assign_plan`).
+From this the agent can write a report like: *"Blue took Brenham with one tank
+left; all three BMPs were destroyed. Contact came at about 6:20, under 500 m
+from the town, as the tanks drove in. The lead tank hit first, but a BMP's ATGM
+destroyed it. After that the two sides traded one for one, and command passed
+down the platoon three times. The last BMP was killed while its missile was in
+flight, so the missile lost guidance and the last tank survived."* It can
+then offer to replay with a different approach, e.g. stopping in overwatch
+before the town instead of driving into it. Rewind returns to the state last
+loaded or saved, which here is the empty scenario from `manage_scenario new`,
+so the agent should save once the forces are placed
+(`manage_scenario {"action":"save","name":"mcp-demo"}`) before `advance_time`.
+Then it can replay with `control_simulation {"action":"rewind"}` and
+`assign_plan`.
 
 ## 5. Prompts to try
 

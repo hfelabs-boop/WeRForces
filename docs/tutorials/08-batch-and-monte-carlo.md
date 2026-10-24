@@ -71,7 +71,7 @@ Calloway Crossroads: 20 runs of 3000 s (27.8 s wall time)
   Objective "OBJ CALLOWAY" taken in 0/20 runs
 ```
 
-Each replication of this 36-entity, 50-minute battle takes about 1.4 s.
+Each replication of this 36-entity, 50-minute battle takes about 1.5 s.
 
 ## 3. Comparing courses of action
 
@@ -93,21 +93,22 @@ npx tsx examples/monte-carlo.ts no-apaches.json 20 3000
 ```
 
 ```
-Calloway Crossroads (no Apaches): 20 runs of 3000 s (22.1 s wall time)
-  Blue losses 2.0 ± 1.2 of 12
-  Red losses  14.8 ± 1.1 of 19
-  Loss exchange ratio (red/blue) 7.20
+Calloway Crossroads (no Apaches): 20 runs of 3000 s (26.8 s wall time)
+  Blue losses 2.5 ± 1.5 of 12
+  Red losses  14.6 ± 1.1 of 19
+  Loss exchange ratio (red/blue) 5.94
+  Objective "OBJ CALLOWAY" taken in 0/20 runs
 ```
 
 | Measure (20 runs each) | With Apaches | Without |
 | --- | --- | --- |
-| Blue losses | 1.4 ± 0.7 | 2.0 ± 1.2 |
-| Red losses | 14.8 ± 0.8 | 14.8 ± 1.1 |
-| Loss exchange ratio | 10.2 | 7.2 |
+| Blue losses | 1.4 ± 0.7 | 2.5 ± 1.5 |
+| Red losses | 14.8 ± 0.8 | 14.6 ± 1.1 |
+| Loss exchange ratio | 10.2 | 5.9 |
 
-In this scenario the Apaches don't change how many Red vehicles die. They kill
-the supply convoy early, which the ground forces would have caught anyway.
-What they do is **reduce Blue losses and their spread**. With 20 runs per side
+In this scenario the Apaches hardly change how many Red vehicles die. They kill
+Tank Plt 1 and most of the supply convoy early, targets the ground forces would
+have destroyed anyway. What they do is **reduce Blue losses and their spread**. With 20 runs per side
 the difference is suggestive, not conclusive. Run 100+ before drawing
 conclusions, and look at the whole distribution, not only the mean.
 
@@ -125,10 +126,13 @@ const left = [...engine.entities.values()]
 
 Across seeds 1000–1005:
 
-- every run leaves **Osa 1**, the SA-8 parked behind the crest north of town;
-- one run also leaves three riflemen of *Squad 1* in the woods. Infantry in
-  forest is hard to detect (× 0.35 × 0.6), and canopy blocks sight lines beyond
-  150 m of forest.
+- every run leaves **Osa 1**, the SA-8 parked in the woods north-east of town.
+  Vehicles in forest are hard to detect (× 0.35), and canopy blocks sight lines
+  that pass through more than 150 m of forest. From the tanks' final positions,
+  about 850 m away, the line of sight runs through some 450 m of trees;
+- one run (seed 1000) also leaves three riflemen of *Squad 1* just south-west
+  of the town centre, about 200 m from the nearest tank but hidden by the lie of
+  the ground. People are hard to detect anyway (× 0.6).
 
 Blue's plan ends with the tanks parked in the middle of town, out of sight of
 the SA-8, so nobody goes looking for it. That is the point of the analysis: the
@@ -156,10 +160,14 @@ Calloway Crossroads (clear the SA-8): 20 runs of 3000 s (27.9 s wall time)
   Objective "OBJ CALLOWAY" taken in 5/20 runs
 ```
 
-The objective is now taken in a quarter of the runs, from none before. The
-failures are mostly the infantry in the woods. Clearing woods is infantry work,
-so try adding a US Rifle Squad with *Wait until time 1800 → Move to* the wood
-line west of Calloway.
+The objective is now taken in a quarter of the runs, from none before. In 13
+of the 15 failures Osa 1 is still there. Each time, Team ARMOR's lead tank is
+knocked out by Squad 1's RPGs just as the attack begins (about 29.5 minutes
+in). When the next tank takes command the unit drops the attack, and the plan
+reports *plan Seize OBJ CALLOWAY complete* with the SA-8 untouched. The other two
+failures leave *Squad 1* riflemen in town. Clearing woods and towns is infantry
+work, so try adding a US Rifle Squad with *Wait until time 1800 → Move to* the
+wood line north-east of Calloway.
 
 ## 4. Making it your own
 

@@ -55,8 +55,9 @@ Open the **Objects** tab. It lists both units and their members. Click
 ![Both platoons placed, the Blue platoon selected](../images/tutorial-01-placed.png)
 
 Click one of the tanks (in the tree or on the map) to see its **Weapons**
-(120 mm gun, 40 rounds, 4.0 km; 7.62 mm machine gun) and **Sensors** (thermal
-sight 4.5 km, 120° forward).
+(*120mm M256 smoothbore (APFSDS) — 40/40 · 4.0 km* and a 7.62 mm machine gun)
+and **Sensors** (*Vehicle thermal sight, Unaided eye*; the thermal sight sees
+4.5 km in a 120° arc ahead).
 
 ## 5. Save, so you can rewind to this point
 
@@ -69,11 +70,16 @@ things:
 ## 6. Give a move order
 
 1. Select **US Tank Platoon** (click its symbol).
-2. **Right-click empty ground just south-west of Brenham**, at about **13.4E 6.4N**,
-   and choose **Move here**.
+2. **Right-click the ground just south-west of Brenham**, at about **13.6E 6.4N**,
+   and choose **Move here**. *Current activity* shows *Move to (13600, 6400)*.
+
+   Don't stop much further back: around 13.4E 6.4N the tanks end up deep in the
+   woods, where the canopy blocks the view of Brenham and there is usually no
+   fight at all.
 
    The menu depends on what is under the cursor. Right-clicking the Red platoon's
-   symbol offers **Attack** and **Follow** instead (Attack is covered in step 9).
+   symbol offers **Attack RU Mech Platoon Lead** and **Follow RU Mech Platoon
+   Lead** instead (Attack is covered in step 9).
 3. Open **Layers ▾** and make sure **Planned paths** is ticked. A dashed white
    line shows the route the platoon leader will drive. It follows roads where
    that is faster and avoids water and steep slopes.
@@ -89,20 +95,25 @@ What to look for:
   on it. Zoom in with the wheel to see the individual tanks.
 - **Contacts.** With a tank selected, yellow lines run to everything it
   detects. A red line marks its current target. Contacts appear when there is
-  line of sight, inside the sensor's range and field of view.
+  line of sight, inside the sensor's range and field of view. Forest blocks
+  sight lines that pass through more than 150 m of it.
 - **Fire.** Shots appear as yellow tracers; hits as orange flashes, misses as
   grey puffs.
 - **Event log.** *X detected Y*, then detonations, damage (*mobility kill*,
-  *firepower kill*) and kills. Tick **fire** in the log header to see every shot.
+  *firepower kill*) and kills. A Konkurs is wire guided: if its BMP is destroyed
+  before the missile lands, the log shows *9M113 Konkurs ATGM lost guidance and
+  missed*. Tick **fire** in the log header to see every shot.
   The counts on the right (*Blue 4/4 · Red 3/3*) update as vehicles are lost.
 
 ![The engagement at Brenham: tracers, a destroyed BMP and the event log](../images/tutorial-01-fight.png)
 
-The meeting engagement usually starts six to eight simulated minutes in, when
-the platoons come over the ridge in sight of each other. **Your result will
+The meeting engagement usually starts five to six simulated minutes in, when
+the tanks get within about 500 m of the BMPs and in sight of them. **Your result will
 differ** from anyone else's, because exact positions matter. In one run of this
-setup Red's ATGMs destroyed two tanks before the Abrams got into gun range, and
-the last two tanks finished the BMPs.
+setup (Blue at 10.9E 4.0N, Red at 13.8E 6.8N) the lead tank destroyed a BMP at
+5:27 and was killed by a Konkurs four seconds later. *US Tank Platoon 2* took
+command and destroyed the other two BMPs by 6:11, and their last missiles lost
+guidance. Final count: *Blue 3/4 · Red 0/3*.
 
 > Tip: click **3D** (or **Split**) during the fight, select a tank and tick
 > **Follow selected**.

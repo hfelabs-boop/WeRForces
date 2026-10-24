@@ -15,6 +15,7 @@
 | Field | Value | Effect |
 | --- | --- | --- |
 | Name | `River Line` | |
+| Terrain | *Generated (settings below)* | the default. The other entries are imported real-world terrains |
 | Keep terrain | *untick* | generate new terrain from the fields below |
 | Terrain seed | `4242` | any number. The same seed always gives the same map |
 | Extent | `12 km` | map size |
@@ -80,14 +81,15 @@ keep them.
 The file holds the **terrain recipe** (seed and parameters), not the terrain
 itself, so it is small (a few KB) and recreates the identical map anywhere.
 
-> Saving mid-run captures the **current** state:
+> Saving mid-run writes a full **checkpoint** of the current state:
 >
-> - the positions of surviving entities (destroyed ones are left out);
-> - the assigned tasks and plans;
+> - positions, damage, ammunition and contacts (destroyed entities are kept as
+>   wrecks);
+> - the assigned tasks and plans, and how far each has got;
+> - munitions in flight and the random number state;
 > - the current time, as `startTime`.
 >
-> Damage and ammunition use are not saved. Plans restart from their first step
-> when the file is loaded.
+> Loading the file continues the run exactly as it would have gone on.
 
 ## 6. Edit the file by hand
 
@@ -116,7 +118,7 @@ by DIS, TAK and GIS exports, but not the terrain:
 **Change an entity's starting altitude** (aircraft, metres above ground):
 
 ```json
-{ "id": "E14", "typeId": "ru-mi24", "altitude": 40, ... }
+{ "id": "E20", "typeId": "ru-mi24", "altitude": 40, ... }
 ```
 
 Reload with **File → Open scenario…**. If the file has a mistake, for example an
