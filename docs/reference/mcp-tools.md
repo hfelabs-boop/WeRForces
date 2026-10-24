@@ -144,6 +144,7 @@ Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMiss
 | `facing` | number (0–360) |  | overwatch/defend/screen/ambush: direction to face, degrees from north |
 | `width` | number |  | defend/screen/ambush: frontage in m for a unit |
 | `speedKmh` | number |  |  |
+| `covered` | boolean |  | moveTo: take a covered route, out of sight of known enemies' direct fire where possible |
 
 ## `assign_plan`
 

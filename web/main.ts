@@ -1188,6 +1188,7 @@ class App {
         }
         add('Move here', () => this.task(sel, { type: 'moveTo', target: world }));
         if (this.domainOf(sel) !== 'air') {
+          add('Move here by a covered route', () => this.task(sel, { type: 'moveTo', target: world, covered: true }));
           add('Overwatch here', () => this.task(sel, { type: 'overwatch', position: world }));
           add('Defend here', () => this.task(sel, { type: 'defend', position: world }));
           add('Screen here', () => this.task(sel, { type: 'screen', position: world }));

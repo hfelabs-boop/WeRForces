@@ -143,13 +143,13 @@ function breakUnit(engine: Engine, u: Unit): void {
   const alive = u.alive();
   u.plan = null;
   for (const m of u.memberList) m.roe = 'returnFire';
-  u.startTask(engine, { type: 'moveTo', target: fallBackPoint(engine, alive) });
+  u.startTask(engine, { type: 'moveTo', target: fallBackPoint(engine, alive), covered: true });
 }
 
 function breakEntity(engine: Engine, e: Entity): void {
   e.plan = null;
   e.roe = 'returnFire';
-  engine.assignTaskInternal(e, { type: 'moveTo', target: fallBackPoint(engine, [e]) });
+  engine.assignTaskInternal(e, { type: 'moveTo', target: fallBackPoint(engine, [e]), covered: true });
 }
 
 /** Run once per simulated second. */

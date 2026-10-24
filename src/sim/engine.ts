@@ -46,6 +46,7 @@ import { Rng } from './rng.js';
 import { SENSOR_INTERVAL, updateSensors } from './sensors.js';
 import { Obstacles } from './obstacles.js';
 import { Smoke } from './smoke.js';
+import { ThreatMap } from './threats.js';
 import { burnFuel, updateResupply } from './supply.js';
 import { SpatialIndex } from './spatial.js';
 import { createTask, MountTask, type Task, type TaskStatus } from './tasks.js';
@@ -136,6 +137,7 @@ export class Engine {
   readonly obstacles = new Obstacles(this);
   /** Smoke clouds. */
   readonly smoke = new Smoke(this);
+  readonly threats = new ThreatMap(this);
   readonly graphics = new Map<string, Graphic>();
   readonly listeners: EngineListeners = { event: [], fire: [], detonation: [], removed: [], reset: [], step: [] };
 
@@ -711,7 +713,7 @@ export class Engine {
       u.withdrawn = true;
       u.plan = null;
       for (const m of u.memberList) m.roe = 'returnFire';
-      u.startTask(this, { type: 'moveTo', target: r.withdrawTo });
+      u.startTask(this, { type: 'moveTo', target: r.withdrawTo, covered: true });
       this.log('task', `${u.name}: strength ${alive}/${u.memberList.length}, withdrawing`, u.id);
     }
     for (const e of this.entities.values()) {
@@ -720,7 +722,7 @@ export class Engine {
       e.withdrawn = true;
       e.plan = null;
       e.roe = 'returnFire';
-      this.setEntityTask(e, createTask({ type: 'moveTo', target: r.withdrawTo }));
+      this.setEntityTask(e, createTask({ type: 'moveTo', target: r.withdrawTo, covered: true }));
       this.log('task', `${e.name}: weapons out of action, withdrawing`, e.id);
     }
   }
@@ -837,8 +839,14 @@ export class Engine {
   }
 
   /** A route for a domain, avoiding obstacles and the minefields `force` knows about. */
-  planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number, force?: ForceId): Vec2[] | null {
-    const overlay = this.obstacles.overlay(force, domain);
+  /**
+   * Plan a route for a force: round obstacles and known minefields, and with `avoidThreats`
+   * away from ground known enemies can see and cover with direct fire.
+   */
+  planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number, force?: ForceId, avoidThreats = false): Vec2[] | null {
+    let overlay = this.obstacles.overlay(force, domain);
+    const threat = avoidThreats && force !== undefined ? this.threats.overlay(force, domain) : null;
+    if (threat) overlay = overlay ? overlay.map((v, i) => v * threat[i]) : threat;
     const route = this.terrain.planRoute(from, to, domain, offroadFactor, overlay);
     return route && overlay && domain !== 'lifeform' ? this.obstacles.threadLanes(route, from) : route;
   }
@@ -1142,6 +1150,7 @@ export class Engine {
     this.sensorDue.clear();
     this.losMemo.clear();
     this.smoke.clear();
+    this.threats.clear();
     this.obstacles.changed();
     this.counters = { E: 0, U: 0, G: 0 };
     this.disCounter = 0;

@@ -221,7 +221,17 @@ export function buildOpenApi(baseUrl: string): Schema {
         post: op(
           'Terrain',
           'Plan a route without moving anything',
-          body({ type: 'object', required: ['from', 'to'], properties: { from: ref('Position'), to: ref('Position'), domain: { enum: ['ground', 'lifeform', 'surface', 'air'] } } }),
+          body({
+            type: 'object',
+            required: ['from', 'to'],
+            properties: {
+              from: ref('Position'),
+              to: ref('Position'),
+              domain: { enum: ['ground', 'lifeform', 'surface', 'air'] },
+              force: { type: 'integer', description: "plan for this force: round obstacles and the minefields it knows" },
+              covered: { type: 'boolean', description: "with force: keep out of sight of the enemies it knows about" },
+            },
+          }),
         ),
       },
       '/api/v1/integrations': { get: op('Integrations', 'Status of CoT/TAK and webhooks') },
@@ -262,7 +272,7 @@ export function buildOpenApi(baseUrl: string): Schema {
         Formation: { enum: ['column', 'line', 'wedge', 'vee', 'echelonRight'] },
         Task: {
           oneOf: [
-            { type: 'object', required: ['type', 'target'], properties: { type: { const: 'moveTo' }, target: ref('Position'), speed: { type: 'number', description: 'm/s' } } },
+            { type: 'object', required: ['type', 'target'], properties: { type: { const: 'moveTo' }, target: ref('Position'), speed: { type: 'number', description: 'm/s' }, covered: { type: 'boolean', description: "route out of sight of known enemies' direct fire where possible" } } },
             { type: 'object', required: ['type', 'routeId'], properties: { type: { const: 'followRoute' }, routeId: { type: 'string' }, speed: { type: 'number' }, reverse: { type: 'boolean' }, startIndex: { type: 'integer' } } },
             { type: 'object', required: ['type', 'routeId'], properties: { type: { const: 'patrol' }, routeId: { type: 'string' }, speed: { type: 'number' } } },
             { type: 'object', required: ['type', 'duration'], properties: { type: { const: 'wait' }, duration: { type: 'number' } } },

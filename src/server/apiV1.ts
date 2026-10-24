@@ -527,7 +527,11 @@ export class ApiV1 {
       const to = this.point(b.to, 'to');
       const domain = (b.domain as string) ?? 'ground';
       if (!['ground', 'lifeform', 'surface', 'air'].includes(domain)) throw new HttpError(400, 'invalid domain');
-      const route = this.engine.terrain.planRoute(from, to, domain as never, typeof b.offroadFactor === 'number' ? b.offroadFactor : 0.6);
+      const offroad = typeof b.offroadFactor === 'number' ? b.offroadFactor : 0.6;
+      let force = typeof b.force === 'number' ? (b.force as ForceId) : undefined;
+      // Players plan as their own force.
+      if (this.role.kind === 'player') force = this.role.force;
+      const route = force === undefined ? this.engine.terrain.planRoute(from, to, domain as never, offroad) : this.engine.planRoute(from, to, domain as never, offroad, force, b.covered === true);
       if (!route) throw new HttpError(422, 'no route found');
       const pts = [from, ...route];
       let length = 0;

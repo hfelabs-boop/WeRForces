@@ -310,6 +310,7 @@ export function createMcpServer(call: ApiCaller): McpServer {
       facing: z.number().min(0).max(360).optional().describe('overwatch/defend/screen/ambush: direction to face, degrees from north'),
       width: z.number().optional().describe('defend/screen/ambush: frontage in m for a unit'),
       speedKmh: z.number().optional(),
+      covered: z.boolean().optional().describe("moveTo: take a covered route, out of sight of known enemies' direct fire where possible"),
     },
     async (a) => {
       const speed = a.speedKmh === undefined ? undefined : a.speedKmh / 3.6;
@@ -319,7 +320,7 @@ export function createMcpServer(call: ApiCaller): McpServer {
       };
       const task =
         a.type === 'moveTo'
-          ? { type: 'moveTo', target: need(a.to, 'to'), speed }
+          ? { type: 'moveTo', target: need(a.to, 'to'), speed, covered: a.covered }
           : a.type === 'mount'
             ? { type: 'mount', carrierId: need(a.targetEntityId, 'targetEntityId') }
             : a.type === 'dismount'

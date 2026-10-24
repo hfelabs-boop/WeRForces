@@ -61,6 +61,9 @@ export abstract class Task {
   }
 }
 
+/** Seconds between replans of a covered route. */
+const COVERED_REPLAN = 15;
+
 function arriveRadius(e: Entity): number {
   if (e.domain === 'air') return (e.type.minSpeed ?? 0) > 0 ? Math.max(300, e.speed * 3) : 40;
   if (e.domain === 'surface') return 40;
@@ -74,9 +77,12 @@ class PathFollower {
   private blockedTime = 0;
   goal: Vec2 | null = null;
 
+  /** `covered`: route away from known enemies' fields of fire. */
+  constructor(readonly covered = false) {}
+
   plan(e: Entity, engine: Engine, goal: Vec2): boolean {
     this.goal = { ...goal };
-    const route = engine.planRoute(e, goal, e.domain, e.type.offroadFactor, e.force);
+    const route = engine.planRoute(e, goal, e.domain, e.type.offroadFactor, e.force, this.covered);
     if (!route) return false;
     this.waypoints = route;
     this.index = 0;
@@ -115,10 +121,12 @@ class PathFollower {
 }
 
 export class MoveToTask extends Task {
-  private path = new PathFollower();
+  private path: PathFollower;
+  private replanIn = COVERED_REPLAN;
 
-  constructor(readonly target: Vec2, readonly speed?: number) {
-    super({ type: 'moveTo', target, speed });
+  constructor(readonly target: Vec2, readonly speed?: number, readonly covered = false) {
+    super({ type: 'moveTo', target, speed, covered: covered || undefined });
+    this.path = new PathFollower(covered);
   }
 
   protected override start({ engine, entity }: TaskContext): void {
@@ -126,11 +134,19 @@ export class MoveToTask extends Task {
   }
 
   protected tick({ engine, entity, dt }: TaskContext): TaskStatus {
+    if (this.covered && entity.domain !== 'air') {
+      // New contacts change where it is safe to go.
+      this.replanIn -= dt;
+      if (this.replanIn <= 0) {
+        this.replanIn = COVERED_REPLAN;
+        this.path.plan(entity, engine, this.target);
+      }
+    }
     return this.path.step(entity, engine, dt, this.speed ?? entity.cruiseSpeed) ? 'done' : 'running';
   }
 
   describe(): string {
-    return `Move to (${Math.round(this.target.x)}, ${Math.round(this.target.y)})`;
+    return `Move to (${Math.round(this.target.x)}, ${Math.round(this.target.y)})${this.covered ? ' by a covered route' : ''}`;
   }
 
   override get remainingPath(): Vec2[] {
@@ -673,7 +689,7 @@ export class ResupplyTask extends Task {
 export function createTask(spec: TaskSpec): Task {
   switch (spec.type) {
     case 'moveTo':
-      return new MoveToTask(spec.target, spec.speed);
+      return new MoveToTask(spec.target, spec.speed, spec.covered);
     case 'followRoute':
       return new FollowRouteTask(spec.routeId, spec.speed, spec.reverse ?? false, false, spec.startIndex);
     case 'patrol':
@@ -880,6 +896,7 @@ export class AmbushTask extends HoldPositionTask {
  */
 export class ScreenTask extends HoldPositionTask {
   private falling = false;
+  private retreat = new PathFollower(true);
 
   constructor(readonly s: Extract<TaskSpec, { type: 'screen' }>) {
     super(s, s.position, s.facing);
@@ -898,7 +915,7 @@ export class ScreenTask extends HoldPositionTask {
 
   protected tick(ctx: TaskContext): TaskStatus {
     const { engine, entity, dt } = ctx;
-    if (this.falling) return this.path.step(entity, engine, dt, entity.type.maxSpeed * 0.8) ? 'done' : 'running';
+    if (this.falling) return this.retreat.step(entity, engine, dt, entity.type.maxSpeed * 0.8) ? 'done' : 'running';
     this.hold(ctx);
     const breakAt = this.s.breakContact ?? 1500;
     for (const id of entity.contacts.keys()) {
@@ -909,7 +926,7 @@ export class ScreenTask extends HoldPositionTask {
       const to = { x: Math.max(50, Math.min(edge, fb.x)), y: Math.max(50, Math.min(edge, fb.y)) };
       this.falling = true;
       entity.prepared = undefined;
-      if (!this.path.plan(entity, engine, to)) return this.fail('no route to fall back');
+      if (!this.retreat.plan(entity, engine, to)) return this.fail('no route to fall back');
       engine.log('task', `${entity.name}: enemy within ${Math.round(dist2d(entity, t))} m, screen falling back`, entity.id, t.id);
       return 'running';
     }
@@ -921,7 +938,7 @@ export class ScreenTask extends HoldPositionTask {
   }
 
   override get remainingPath(): Vec2[] {
-    return this.falling || !this.arrived ? this.path.remaining : [];
+    return this.falling ? this.retreat.remaining : this.arrived ? [] : this.path.remaining;
   }
 }
 

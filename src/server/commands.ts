@@ -46,7 +46,7 @@ export function validateTask(v: unknown): TaskSpec {
   const speed = t.speed === undefined ? undefined : num(t.speed, 'speed');
   switch (t.type) {
     case 'moveTo':
-      return { type: 'moveTo', target: vec(t.target, 'target'), speed };
+      return { type: 'moveTo', target: vec(t.target, 'target'), speed, covered: t.covered === true || undefined };
     case 'followRoute':
       return {
         type: 'followRoute',

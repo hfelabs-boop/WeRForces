@@ -180,7 +180,8 @@ export interface Catalog {
 // ---------------------------------------------------------------- tasks & plans
 
 export type TaskSpec =
-  | { type: 'moveTo'; target: Vec2; speed?: number }
+  /** `covered`: keep out of sight of known enemies' direct fire where possible (slower, safer route). */
+  | { type: 'moveTo'; target: Vec2; speed?: number; covered?: boolean }
   | { type: 'followRoute'; routeId: string; speed?: number; reverse?: boolean; startIndex?: number }
   | { type: 'patrol'; routeId: string; speed?: number }
   | { type: 'wait'; duration: number }
