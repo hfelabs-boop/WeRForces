@@ -229,6 +229,35 @@ task is turned into one when the matrix is stored, and a 400 names the unit and
 phase it could not understand. Up to 20 phases of 100 orders. See
 [Concepts](../concepts.md#synchronization-matrix).
 
+### Commanders
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/commanders` | Forces run by a commander (players: their own), with status and latest decisions |
+| GET | `/forces/{force}/commander` | One force's commander (`kind: "none"` when it has none), and `llm: {available, reason?}`: whether a language model is configured |
+| PUT | `/forces/{force}/commander` | `{"kind": "rules", "options": {"aggressiveness": 0.7}}` sets it; `{"kind": "none"}` takes the force back. Players: their own force, not `llm`. Returns the commander |
+| POST | `/forces/{force}/commander/decide` | 202: a decision at the next simulated second |
+
+```json
+{"force":2,"name":"Red","kind":"rules","options":{"aggressiveness":0.7},"state":"ready","next":946,
+ "decisions":[{"time":901,"trigger":"contact","summary":"Attack (2 contacts, enemy power 2.4 against our 6.1); concentrating on BMP-2 (E10).",
+   "orders":["RU Mech Platoon: attack BMP-2 (E10)","RU Mortar Battery: fire 4 rounds on 2 contacts at (6667, 6640)"]}],
+ "llm":{"available":false,"reason":"no language model is configured on this server (set WERFORCES_AI_API_KEY and WERFORCES_AI_MODEL)"}}
+```
+
+`kind`: `none`, `rules` or `llm`. `options`: `interval` (10–600 s, default 45),
+`aggressiveness` (0–1, default 0.5), `holdOff` (0–3600 s, default 300),
+`seed`, and for an LLM `intent` (up to 500 characters), `maxCallsPerMinute`
+(default 4), `maxTokens` (per call, default 2048), `maxToolCalls` (per
+decision, default 12) and `tokenBudget` (default 500000). `state` is `ready`,
+`thinking` (a model call under way), `error` (with `error`) or `unavailable`.
+A decision's `trigger` is `start`, `scheduled`, `contact`, `losses`, `phase`,
+`idle` or `asked`; `rejected` lists refused orders with the reason. LLM
+commanders add `usage: {calls, inputTokens, outputTokens}`. The same command
+over `/api/command` or a `batch`: `{"cmd": "setCommander", "force": 2, "kind":
+"rules", "options": {}}`. Scenario files keep commanders in `commanders`. See
+[Concepts](../concepts.md#commanders).
+
 ### Alerts
 
 | Method | Path | Notes |
@@ -273,7 +302,7 @@ side knows.
  "blue": {"nation": "us", "composition": "combined", "size": "platoon", "support": ["artillery"]},
  "red": {"nation": "ru", "composition": "mech", "size": "platoon", "support": ["engineers"]},
  "time": 10, "weather": "clear", "distance": 3000, "civilians": false,
- "terrain": {"seed": 7, "size": 16000}, "name": "Attack at dawn"}
+ "terrain": {"seed": 7, "size": 16000}, "name": "Attack at dawn", "commander": {"red": "rules"}}
 ```
 
 `mission`: `meeting`, `attack` (default), `defend`, `delay` or `recon`, from
@@ -282,8 +311,9 @@ Blue's side. `composition`: `armor`, `mech` (default), `infantry` or `combined`.
 `recon`, `engineers`, `supply`, `air`, `airDefense`. `weather`: `clear`,
 `haze`, `fog` or `rain`. `distance` 1000–20000 m (default 3000, or 5000 with a
 company). `terrain` as for `/scenario/new` (default: the current terrain).
-Without `seed` a random one is used and returned. A 400 says why a battle could
-not be placed.
+`commander`: `{"blue"?: "none" | "rules", "red"?: ...}`, a side run by the
+rule-based commander instead of a phase plan. Without `seed` a random one is
+used and returned. A 400 says why a battle could not be placed.
 
 ### Recording and after-action review
 
@@ -396,7 +426,7 @@ The browser app uses a few unversioned endpoints, which you can also use:
   civilians) answers **403**. The routes a player may use are the object,
   task, plan, drive, explain, graphics, events, terrain (with viewshed) and
   catalog reading routes, plus orders, alerts, codewords and their own force's
-  synchronization matrix.
+  synchronization matrix and (rule-based) commander.
 - **OpenID Connect.** With `--oidc-issuer`, browsers sign in with your identity
   provider and get an HttpOnly, SameSite=Lax session cookie, accepted on `/api`,
   `/ws` and `/mcp` with the role their claims map to (see

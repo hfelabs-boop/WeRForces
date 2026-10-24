@@ -64,6 +64,10 @@ const PLAYER_ROUTES: [string, RegExp][] = [
   ['PUT', /^\/api\/v1\/sync-matrix\/[^/]+\/?$/],
   ['POST', /^\/api\/v1\/sync-matrix\/[^/]+\/phases\/[^/]+\/start\/?$/],
   ['POST', /^\/api\/v1\/codewords\/?$/],
+  ['GET', /^\/api\/v1\/commanders\/?$/],
+  ['GET', /^\/api\/v1\/forces\/[^/]+\/commander\/?$/],
+  ['PUT', /^\/api\/v1\/forces\/[^/]+\/commander\/?$/],
+  ['POST', /^\/api\/v1\/forces\/[^/]+\/commander\/decide\/?$/],
   ['POST', /^\/api\/v1\/alerts\/([^/]+\/)?acknowledge\/?$/],
   ['POST', /^\/api\/v1\/(entities|units)\/[^/]+\/(task|plan|stop|embark|disembark)\/?$/],
   ['POST', /^\/api\/v1\/units\/[^/]+\/(aggregate|disaggregate)\/?$/],
@@ -695,6 +699,36 @@ export class ApiV1 {
       const force = this.role.kind === 'player' ? this.role.force : ((b.force ?? 1) as ForceId);
       this.run({ cmd: 'sendCodeword', force, codeword: String(b.codeword ?? '') });
       return { status: 201, json: { force, codeword: String(b.codeword).trim().toUpperCase(), time: this.engine.time } };
+    });
+    // ---------------------------------------------------------------- commanders
+    const commanderForce = (v: string) => {
+      const force = this.forceParam(v);
+      if (this.role.kind === 'player' && force !== this.role.force) throw new HttpError(403, 'players see and set their own force\'s commander only');
+      return force;
+    };
+    const commanderView = (force: ForceId) => {
+      const llm = this.engine.commanders.llm;
+      return { force, name: FORCE_NAMES[force], kind: 'none', ...this.engine.commanders.get(force), llm: { available: !!llm?.transport, ...(llm?.transport ? {} : { reason: llm?.unavailable ?? 'no language model is configured on this server' }) } };
+    };
+    r.get(`${P}/commanders`, () => {
+      const list = this.engine.commanders.status() ?? [];
+      return { json: this.role.kind === 'player' ? list.filter((c) => c.force === (this.role as { force: ForceId }).force) : list };
+    });
+    r.get(`${P}/forces/{force}/commander`, (req) => ({ json: commanderView(commanderForce(req.params.force)) }));
+    r.put(`${P}/forces/{force}/commander`, (req) => {
+      const force = commanderForce(req.params.force);
+      const b = obj(req.body);
+      this.run({ cmd: 'setCommander', force, kind: b.kind as never, options: b.options as never });
+      return { json: commanderView(force) };
+    });
+    r.post(`${P}/forces/{force}/commander/decide`, (req) => {
+      const force = commanderForce(req.params.force);
+      try {
+        this.engine.commanders.requestDecision(force);
+      } catch (err) {
+        throw new HttpError(404, (err as Error).message);
+      }
+      return { status: 202, json: commanderView(force) };
     });
     r.post(`${P}/orders`, (req) => {
       const b = obj(req.body);

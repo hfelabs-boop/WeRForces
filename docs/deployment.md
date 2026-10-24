@@ -93,6 +93,46 @@ players see their own force in every session. DIS, Cursor-on-Target and
 webhooks are connected to the main session only. Sessions other than `main`
 are not kept across a restart: save their scenarios first.
 
+## LLM commanders
+
+A force can be run by a large language model ([Concepts →
+Commanders](concepts.md#commanders)). The server talks to it over HTTPS with
+the Messages API, and is configured only from the environment and the command
+line. There is no default model: nothing is called until both a key and a model
+id are set.
+
+| Variable | Flag | Meaning |
+| --- | --- | --- |
+| `WERFORCES_AI_API_KEY` | — | The API key (environment only, so it does not show in process lists). Required |
+| `WERFORCES_AI_MODEL` | `--ai-model <id>` | The model id to use. Required |
+| `WERFORCES_AI_BASE_URL` | `--ai-base-url <url>` | Messages API base URL (default `https://api.anthropic.com`); `/v1/messages` is added |
+| `WERFORCES_AI_API_VERSION` | — | The `anthropic-version` header (default `2026-10-21`) |
+| `WERFORCES_AI_TIMEOUT` | — | Seconds before a call is given up (default 90) |
+
+```bash
+export WERFORCES_AI_API_KEY=…            # from your secret store
+export WERFORCES_AI_MODEL='<model id>'
+npm start -- --api-key "$CONTROL_KEY"
+# then, as exercise control:
+curl -X PUT -H "Authorization: Bearer $CONTROL_KEY" -H 'Content-Type: application/json' \
+  -d '{"kind": "llm", "options": {"intent": "Hold OBJ IRON", "maxCallsPerMinute": 2}}' \
+  http://127.0.0.1:8080/api/v1/forces/red/commander
+```
+
+With Docker, pass them with `-e` (or an `env_file` in Compose). The server
+prints *LLM commanders: available* when both are set;
+`GET /api/v1/forces/{force}/commander` says why not (`llm.reason`) when they
+are not. The key is never logged, saved in scenarios or sent to clients; only
+exercise control can start an LLM commander, and other `ANTHROPIC_*`
+variables are not read. Each commander keeps to its own limits: model calls per
+simulated minute (`maxCallsPerMinute`, default 4: at a high time multiplier
+that is many per real minute), output tokens per call (`maxTokens`), tool calls
+per decision (`maxToolCalls`) and a total `tokenBudget` (default 500000), after
+which it stops with an error. Batch runs and headless `--duration` runs do not
+call models. With both variables set, `npx vitest run test/commander.test.ts`
+also plays a short battle against the live API (otherwise that test is
+skipped).
+
 ## Docker
 
 The image runs the server as an unprivileged user on port 8080, listening on

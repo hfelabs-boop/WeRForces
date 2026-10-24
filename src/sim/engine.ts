@@ -61,6 +61,7 @@ import { SyncPlans } from './sync.js';
 import { Life } from './life.js';
 import { Ew, JAMMED_ORDER_DELAY } from './ew.js';
 import { Aggregation } from './aggregate.js';
+import { Commanders } from './commander/manager.js';
 
 export const DEFAULT_DT = 0.1;
 export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
@@ -170,6 +171,8 @@ export class Engine {
   models: Models = { ...DEFAULT_MODELS };
   /** Aggregate-level units: units simulated as one object, and the policy for splitting them up. */
   readonly aggregates = new Aggregation(this);
+  /** Forces run by a commander (rule-based or LLM). */
+  readonly commanders = new Commanders(this);
 
   private hostilities = new Set<string>(['1-2']);
   private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
@@ -1299,6 +1302,7 @@ export class Engine {
       this.life.update();
       this.alerts.update();
       this.sync.update();
+      this.commanders.update();
     }
     for (const e of this.entities.values()) updateCombat(this, e);
     this.processImpacts();
@@ -1322,6 +1326,7 @@ export class Engine {
     this.pendingOrders = [];
     this.codewords.clear();
     this.sync.clear();
+    this.commanders.clear();
     this.life.clear();
     this.ew.clear();
     this.aggregates.clear();
@@ -1423,6 +1428,7 @@ export class Engine {
     for (const c of s.codewords ?? []) this.codewords.set(`${c.force}|${c.codeword.toUpperCase()}`, c.time);
     for (const m of s.syncMatrices ?? []) this.sync.set({ force: m.force, phases: m.phases }, m.started);
     this.life.set(s.patternOfLife ?? {});
+    this.commanders.load(s.commanders);
     // Tasks and plans last, since they can reference any object. Checkpoints resume them part-way.
     for (const r of s.entities ?? []) {
       const e = this.entities.get(r.id);
@@ -1653,6 +1659,7 @@ export class Engine {
       environment: JSON.stringify(this.environment) === JSON.stringify(DEFAULT_ENVIRONMENT) ? undefined : { ...this.environment },
       smoke: this.smoke.clouds.length ? this.smoke.clouds.map((c) => ({ ...c })) : undefined,
       aggregation: this.aggregates.policyRecord(),
+      commanders: this.commanders.save(this.time > 0),
     };
   }
 
@@ -1760,6 +1767,7 @@ export class Engine {
       schedule: this.schedule(),
       alerts: this.alerts.open().slice(0, 50),
       sync: this.sync.all().length ? this.sync.states() : undefined,
+      commanders: this.commanders.status(),
       catalogVersion: this.catalogVersion,
     };
   }

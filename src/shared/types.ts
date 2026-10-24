@@ -1,5 +1,7 @@
 // Shared, serializable types used by the simulation engine, the server API
 // and the browser front-end. Everything in here must be plain JSON data.
+
+import type { CommanderKind, CommanderOptions, CommanderSettings, CommanderStatus } from './commander.js';
 //
 // Coordinate conventions (local tangent plane around the terrain origin):
 //   x = metres east, y = metres north, z = metres above mean sea level.
@@ -603,6 +605,8 @@ export interface ScenarioFile {
   syncMatrices?: (SyncMatrix & { started?: Record<string, number> })[];
   /** When aggregated units disaggregate and re-aggregate (defaults when missing). */
   aggregation?: AggregationPolicy;
+  /** Forces run by a commander (rule-based or LLM): settings only, never keys. */
+  commanders?: CommanderSettings[];
 }
 
 /** Background civilians: cars on the roads and people in the towns (neutral, force 3). */
@@ -925,6 +929,8 @@ export interface SimState {
   alerts?: Alert[];
   /** Synchronization matrices (global plans), per force. */
   sync?: SyncMatrixState[];
+  /** Forces run by a commander, with its latest decisions. */
+  commanders?: CommanderStatus[];
   /** Changes when the catalog does (clients fetch it again). */
   catalogVersion?: number;
   /** Plan steps waiting for a set time, soonest first (for the timeline). */
@@ -1005,6 +1011,8 @@ export type Command =
   | { cmd: 'startPhase'; force: ForceId; phaseId: string }
   /** Send a codeword to a force (players: their own). Plans waiting for it go on. */
   | { cmd: 'sendCodeword'; force: ForceId; codeword: string }
+  /** Put a force under a commander ('rules' or 'llm'), or take it back ('none'). */
+  | { cmd: 'setCommander'; force: ForceId; kind: CommanderKind; options?: CommanderOptions }
   | { cmd: 'setReactions'; targetId: string; reactions: Reactions }
   /** Put infantry (entity or unit) into a carrier (entity or unit) instantly, e.g. when setting up a scenario. */
   | { cmd: 'embark'; passengerId: string; carrierId: string }

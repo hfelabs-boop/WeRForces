@@ -83,6 +83,11 @@ export function buildOpenApi(baseUrl: string): Schema {
               time: { type: 'number', minimum: 0, maximum: 24, description: 'local time at the start, hours (default 10)' },
               weather: { type: 'string', enum: ['clear', 'haze', 'fog', 'rain'] },
               civilians: { type: 'boolean', description: 'civilian traffic and pedestrians' },
+              commander: {
+                type: 'object',
+                description: 'sides run by the rule-based commander instead of a phase plan, e.g. {"red": "rules"}',
+                properties: { blue: { type: 'string', enum: ['none', 'rules'] }, red: { type: 'string', enum: ['none', 'rules'] } },
+              },
             },
           }),
         }),
@@ -226,6 +231,15 @@ export function buildOpenApi(baseUrl: string): Schema {
         put: op('Catalog', 'Add or change a catalog entry (section: entity-types, weapons, sensors or unit-templates; the body as in GET /catalog). Every field is checked; references to weapons, sensors and types must exist. Entities already on the map keep their old definition', { parameters: [idParam('section'), idParam()], ...body({ type: 'object' }) }),
         delete: op('Catalog', 'Remove a custom entry (the built-in one it replaced comes back). Refused while entities use it', { parameters: [idParam('section'), idParam()] }),
       },
+      '/api/v1/commanders': { get: op('Simulation', 'Forces run by a commander, with their settings, state and latest decisions (players: their own)', {}, ok({ type: 'array', items: ref('Commander') })) },
+      '/api/v1/forces/{force}/commander': {
+        get: op('Simulation', 'A force\'s commander (kind "none" when it has none), its latest decisions and rationale, and whether an LLM is configured on this server', { parameters: [idParam('force')] }, ok(ref('Commander'))),
+        put: op('Simulation', 'Put a force under a commander or take it back. Body: {kind: "none" | "rules" | "llm", options}. The commander gets the force\'s fog-of-war view at its interval (and sooner on contact, losses, a new phase or a unit left idle) and gives orders through the same commands as a player of that force; orders it did not give are left alone for `holdOff` seconds. Players: their own force, not "llm"', {
+          parameters: [idParam('force')],
+          ...body({ type: 'object', required: ['kind'], properties: { kind: { type: 'string', enum: ['none', 'rules', 'llm'] }, options: ref('CommanderOptions') } }),
+        }, ok(ref('Commander'))),
+      },
+      '/api/v1/forces/{force}/commander/decide': { post: op('Simulation', 'Ask the force\'s commander for a decision at the next simulated second', { parameters: [idParam('force')] }, { description: 'Accepted', ...json(ref('Commander')) }) },
       '/api/v1/codewords': {
         get: op('Simulation', 'Codewords sent so far, per force (players: their own)'),
         post: op('Simulation', 'Send a codeword to a force: plans waiting for it go on. Body: {codeword, force} (players: their own force)', {
@@ -368,6 +382,34 @@ export function buildOpenApi(baseUrl: string): Schema {
             composition: { type: 'string', enum: ['armor', 'mech', 'infantry', 'combined'], description: 'default mech; combined is tanks with mechanised infantry' },
             size: { type: 'string', enum: ['platoon', 'company'], description: 'a company is three platoons and an HQ (default platoon)' },
             support: { type: 'array', items: { type: 'string', enum: ['artillery', 'recon', 'engineers', 'supply', 'air', 'airDefense'] }, description: 'artillery: mortars with a platoon, howitzers with a company; engineers: a minefield in front of a defence, or sappers with an attack' },
+          },
+        },
+        CommanderOptions: {
+          type: 'object',
+          properties: {
+            interval: { type: 'number', minimum: 10, maximum: 600, description: 'simulated seconds between decisions (default 45)' },
+            aggressiveness: { type: 'number', minimum: 0, maximum: 1, description: 'rules: 0 cautious .. 1 bold (default 0.5)' },
+            holdOff: { type: 'number', minimum: 0, maximum: 3600, description: 'seconds an order it did not give is left alone (default 300)' },
+            seed: { type: 'integer', description: 'seed for its own random choices' },
+            intent: { type: 'string', maxLength: 500, description: 'LLM: the commander\'s intent, added to the prompt' },
+            maxCallsPerMinute: { type: 'number', minimum: 1, maximum: 60, description: 'LLM: model calls per simulated minute (default 4)' },
+            maxTokens: { type: 'number', minimum: 256, maximum: 32000, description: 'LLM: output tokens per call (default 2048)' },
+            maxToolCalls: { type: 'number', minimum: 1, maximum: 50, description: 'LLM: tool calls per decision (default 12)' },
+            tokenBudget: { type: 'number', minimum: 1000, description: 'LLM: tokens in all, after which it stops (default 500000)' },
+          },
+        },
+        Commander: {
+          type: 'object',
+          properties: {
+            force: { type: 'integer' },
+            kind: { type: 'string', enum: ['none', 'rules', 'llm'] },
+            options: ref('CommanderOptions'),
+            state: { type: 'string', enum: ['ready', 'thinking', 'error', 'unavailable'] },
+            next: { type: 'number', description: 'simulation time of the next scheduled decision' },
+            error: { type: 'string' },
+            decisions: { type: 'array', description: 'newest first', items: { type: 'object', properties: { time: { type: 'number' }, trigger: { type: 'string' }, summary: { type: 'string' }, orders: { type: 'array', items: { type: 'string' } }, rejected: { type: 'array', items: { type: 'string' } } } } },
+            usage: { type: 'object', properties: { calls: { type: 'integer' }, inputTokens: { type: 'integer' }, outputTokens: { type: 'integer' } } },
+            llm: { type: 'object', properties: { available: { type: 'boolean' }, reason: { type: 'string' } } },
           },
         },
         Error: { type: 'object', properties: { error: { type: 'object', properties: { status: { type: 'integer' }, message: { type: 'string' } } } } },

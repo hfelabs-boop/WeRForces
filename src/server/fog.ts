@@ -110,6 +110,7 @@ export function filterState(engine: Engine, s: SimState, force: ForceId): SimSta
     orders: s.orders?.filter((o) => forceOf(engine, o.targetId) === force),
     schedule: s.schedule?.filter((o) => forceOf(engine, o.targetId) === force),
     alerts: s.alerts?.filter((a) => a.force === force),
+    commanders: s.commanders?.filter((c) => c.force === force),
     dis: undefined,
   };
 }
@@ -181,6 +182,7 @@ const PLAYER_COMMANDS = new Set<Command['cmd']>([
   'sendCodeword',
   'setSyncMatrix',
   'startPhase',
+  'setCommander',
   'setJamming',
   'drive',
   'batch',
@@ -298,6 +300,11 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
           condition(p?.trigger?.condition);
         }
       }
+      return;
+    case 'setCommander':
+      if (Number(c.force) !== force) throw new ForbiddenError('players hand their own force to a commander only');
+      // Model calls cost money: only exercise control starts an LLM commander.
+      if (c.kind === 'llm') throw new ForbiddenError('an LLM commander is set by exercise control');
       return;
     case 'ackAlert':
       // Players acknowledge their own force's alerts only.

@@ -257,6 +257,28 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'set_commander',
+    'Hand a force to a commander, or take it back. "rules": the offline doctrinal commander (attacks when strong enough, defends or delays when weak, calls fire on groups of contacts, resupplies, pulls back broken units, sends scouts first). "llm": a language model configured on the server. Either sees only what the force sees and orders through the same commands as a player; orders it did not give are left alone for holdOff seconds. Its decisions and reasons go to the event log and get_commander. "none" stands it down.',
+    {
+      force: z.enum(['blue', 'red', 'neutral']),
+      kind: z.enum(['none', 'rules', 'llm']),
+      aggressiveness: z.number().min(0).max(1).optional().describe('0 cautious .. 1 bold (default 0.5)'),
+      interval: z.number().min(10).max(600).optional().describe('simulated seconds between decisions (default 45)'),
+      holdOff: z.number().min(0).max(3600).optional().describe('seconds an order it did not give is left alone (default 300)'),
+      intent: z.string().max(500).optional().describe("LLM: the commander's intent"),
+    },
+    async ({ force, kind, ...options }) => api('PUT', `/api/v1/forces/${force}/commander`, { kind, options }),
+  );
+
+  tool(
+    'get_commander',
+    "A force's commander: its kind, settings, state and latest decisions with their rationale and orders.",
+    { force: z.enum(['blue', 'red', 'neutral']) },
+    async ({ force }) => api('GET', `/api/v1/forces/${force}/commander`),
+    { readOnlyHint: true },
+  );
+
+  tool(
     'get_alerts',
     'The attention queue: what needs looking at now (units idle after finishing their orders, broken, out of fuel or ammunition, leader lost, losses, failed tasks, under fire, first contact), newest first. Pass acknowledge: true to clear them once handled.',
     { acknowledge: z.boolean().optional().describe('Acknowledge all open alerts after reading them') },
@@ -578,6 +600,7 @@ export function createMcpServer(call: ApiCaller): McpServer {
       weather: z.enum(['clear', 'haze', 'fog', 'rain']).optional(),
       distance: z.number().min(1000).max(20000).optional().describe('metres between the sides at the start'),
       civilians: z.boolean().optional(),
+      commander: z.object({ blue: z.enum(['none', 'rules']).optional(), red: z.enum(['none', 'rules']).optional() }).optional().describe('sides run by the rule-based commander instead of a phase plan, e.g. {red: "rules"}'),
       seed: z.number().int().optional().describe('same seed and options, same battle'),
       name: z.string().max(80).optional(),
     },

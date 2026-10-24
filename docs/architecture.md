@@ -43,6 +43,9 @@ src/sim           The simulation engine; no I/O, usable as a library
   viewshed.ts       viewshed grids for the map overlay
   catalogEdit.ts    validation of catalog entries made in the editor
   wizard.ts         quick battle generator
+  commander/        commanders that run a force: manager.ts (when to decide, carrying orders out as
+                    the force's player), situation.ts (the force's view), rules.ts (rule-based),
+                    llm.ts (the LLM tool loop; the transport is passed in), options.ts, types.ts
   spatial.ts        per-force uniform grid for neighbourhood queries (sensors, blasts)
   recorder.ts       continuous recording for playback and AAR
   rng.ts            seeded PRNG
@@ -51,7 +54,8 @@ src/server        CLI, real-time runner (time-sliced, undo checkpoints), command
                   REST v1 router, OpenAPI, HTTP/WS server with sessions (server.ts),
                   fog.ts (roles, per-force views, command permissions), oidc.ts (sign-in),
                   batch.ts + batchWorker.ts (batch jobs in worker threads),
-                  reports.ts + pdf.ts (AAR as CSV and PDF)
+                  reports.ts + pdf.ts (AAR as CSV and PDF), llm.ts (Messages API transport for
+                  LLM commanders, configured from the environment)
 src/terrain       real terrain import (GeoTIFF + GeoJSON/OSM → dataset), landcover.ts (WorldCover),
                   osm.ts (OSM XML, Overpass) and the dataset store
 hla               HLA bridge federate (Java, IEEE 1516e, RPR FOM subset) and its scripts
@@ -99,8 +103,9 @@ docs              this documentation (served at /docs)
 8. **Once per second:** the light and weather are updated, smoke drifts and
    expires, observers request fire missions, unit morale is updated, supply
    vehicles resupply, jamming is worked out, the pattern of life tops up and
-   moves its civilians, alerts are checked, and synchronization-matrix
-   triggers are checked (starting phases).
+   moves its civilians, alerts are checked, synchronization-matrix
+   triggers are checked (starting phases), and commanders decide or carry out
+   orders that have arrived from a model.
 9. **Combat:** pick a target and weapon, fire, and put the shot in flight.
 10. **Impacts:** shots that arrive this tick are resolved into damage (area
    damage for indirect fire, smoke clouds for smoke rounds) and suppression.
@@ -258,6 +263,8 @@ npm run docs:gen      # regenerate docs/reference/catalog.md and mcp-tools.md
 | `drive.test.ts` | direct control |
 | `catalog-edit.test.ts` | catalog editor validation and per-scenario entries |
 | `wizard.test.ts` | quick battles |
+| `commander.test.ts` | commanders: settings and checkpoints, hold-off, determinism, the LLM tool loop with a scripted transport (permissions, failures, limits), REST and MCP |
+| `commander-battles.test.ts` | the rule-based commander against idle and attacking forces in quick battles, over 10 seeds |
 | `docs.test.ts` | the generated references are current; internal doc links resolve |
 
 **Golden runs** pin the model's behaviour: Calloway Crossroads and Lakeside
