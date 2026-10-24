@@ -918,7 +918,13 @@ export class Aggregation {
       b.unit.leader = next;
       if (next) engine.log('info', `${b.unit.name}: ${victim.name} lost, ${next.name} takes command`, b.id);
     }
-    if (!b.alive().length) engine.log('info', `${b.unit.name} destroyed as an aggregate`, b.id);
+    if (!b.alive().length) {
+      // Nothing left to aggregate: an ordinary unit of wrecks from now on.
+      this.list.delete(b.id);
+      b.unit.aggregate = null;
+      b.unit.taskSpec = null;
+      engine.log('info', `${b.unit.name} destroyed`, b.id);
+    }
   }
 
   // ------------------------------------------------------------ views and records

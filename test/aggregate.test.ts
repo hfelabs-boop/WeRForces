@@ -3,6 +3,12 @@ import { EXPOSURE, killRate } from '../src/sim/aggregate.js';
 import { Engine } from '../src/sim/engine.js';
 import { explainUnit } from '../src/sim/explain.js';
 import { Recorder } from '../src/sim/recorder.js';
+import { ApiV1 } from '../src/server/apiV1.js';
+import { executeCommand } from '../src/server/commands.js';
+import { SimRunner } from '../src/server/runner.js';
+import { createMcpServer } from '../src/mcp/tools.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Terrain } from '../src/sim/terrain.js';
 import { filterEvents, filterState } from '../src/server/fog.js';
 import type { AggregateSnapshot, ForceId, SimEvent } from '../src/shared/types.js';
@@ -316,5 +322,50 @@ describe('aggregate-level units', () => {
     eng.runFor(2);
     expect(rec.stateAt(eng.time).entities.length).toBe(4);
     rec.detach();
+  });
+
+  it('is driven by commands, REST and MCP, and undone like any edit', async () => {
+    const eng = engine();
+    const runner = new SimRunner(eng, 0.1, 20, 0);
+    const api = new ApiV1({ runner, integrations: {} as never, scenarioDir: '/tmp' });
+    const call = async (method: string, path: string, body?: unknown) => {
+      const [p, q] = path.split('?');
+      const r = await api.dispatch({ method, path: p, query: new URLSearchParams(q ?? ''), body, baseUrl: '' });
+      return { status: r.status ?? 200, json: r.json };
+    };
+    const hq = eng.createUnitFromTemplate('us-tank-company', 1, 4000, 4000);
+    const subs = eng.subordinatesOf(hq);
+    expect(subs.length).toBe(3);
+    // A company aggregates with its platoons, each its own aggregate.
+    let r = await call('POST', `/api/v1/units/${hq.id}/aggregate`);
+    expect(r.status).toBe(200);
+    expect((r.json as { aggregate?: unknown }).aggregate).toBeDefined();
+    expect(subs.every((u) => u.aggregate)).toBe(true);
+    expect(eng.entities.size).toBe(0);
+    r = await call('POST', `/api/v1/units/${hq.id}/aggregate`);
+    expect(r.status).toBe(400);
+    // Orders pass down to aggregated subordinates.
+    await call('POST', `/api/v1/units/${hq.id}/task`, { type: 'moveTo', target: { x: 6000, y: 4000 } });
+    expect(subs.every((u) => u.aggregate!.activeTask()?.spec.type === 'moveTo')).toBe(true);
+    r = await call('PUT', '/api/v1/simulation/aggregation', { disaggregateRange: 2000, reaggregateRange: 1000 });
+    expect(r.json).toMatchObject({ disaggregateRange: 2000, reaggregateRange: 2000 });
+    expect((await call('PUT', '/api/v1/simulation/aggregation', { bogus: 1 })).status).toBe(400);
+    // Undo puts the entities back.
+    expect(executeCommand(runner, { cmd: 'disaggregate', unitId: subs[0].id }).ok).toBe(true);
+    expect(subs[0].aggregate).toBeNull();
+    expect(executeCommand(runner, { cmd: 'undo' }).ok).toBe(true);
+    expect(eng.units.get(subs[0].id)!.aggregate).not.toBeNull();
+    // MCP.
+    const server = createMcpServer(async (method, path, body) => call(method, path, body));
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(a);
+    const client = new Client({ name: 'test', version: '1' });
+    await client.connect(b);
+    const res = (await client.callTool({ name: 'aggregate_unit', arguments: { unitId: hq.id, aggregate: false } })) as { content: { text: string }[]; isError?: boolean };
+    expect(res.isError).toBeFalsy();
+    expect([...eng.units.values()].every((u) => !u.aggregate)).toBe(true);
+    const pol = (await client.callTool({ name: 'set_aggregation_policy', arguments: { autoReaggregate: false } })) as { content: { text: string }[] };
+    expect(JSON.parse(pol.content[0].text).autoReaggregate).toBe(false);
+    await client.close();
   });
 });
