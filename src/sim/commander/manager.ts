@@ -87,6 +87,7 @@ export class Commanders {
 
   /** Put a force under a commander, or take it back ('none'). Throws Error on bad options. */
   set(force: ForceId, kind: CommanderKind, options: unknown = {}, quiet = false): void {
+    if (kind !== 'none' && kind !== 'rules' && kind !== 'llm') throw new Error("kind must be 'none', 'rules' or 'llm'");
     const opts = checkOptions(options);
     const old = this.slots.get(force);
     if (old) this.stopSlot(old);
@@ -95,7 +96,6 @@ export class Commanders {
       if (old && !quiet) this.say(force, `${FORCE_NAMES[force]} commander stood down`);
       return;
     }
-    if (kind !== 'rules' && kind !== 'llm') throw new Error("kind must be 'none', 'rules' or 'llm'");
     const slot = this.makeSlot(force, kind, opts);
     this.slots.set(force, slot);
     if (!quiet) this.say(force, `${FORCE_NAMES[force]} is now run by the ${kind === 'rules' ? 'rule-based' : 'LLM'} commander`);
@@ -176,7 +176,11 @@ export class Commanders {
       const trigger = this.trigger(slot);
       if (!trigger) continue;
       if (slot.kind === 'llm') {
-        if (slot.state === 'thinking') continue;
+        if (slot.state === 'thinking') {
+          // Asked again while thinking: ask once it is done.
+          if (trigger === 'asked') slot.asked = true;
+          continue;
+        }
         if (!this.llm?.transport) {
           slot.state = 'unavailable';
           slot.error = this.llm?.unavailable ?? 'no language model is configured on this server';
