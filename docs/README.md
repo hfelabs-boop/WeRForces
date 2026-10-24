@@ -27,6 +27,9 @@ These pages are also served by a running server at **`/docs`** (toolbar → **He
 | 7 | [TAK, webhooks and GIS](tutorials/07-tak-webhooks-and-gis.md) | Feeding ATAK/TAK Server, Slack/Discord and QGIS/Google Earth |
 | 8 | [Batch runs and Monte Carlo analysis](tutorials/08-batch-and-monte-carlo.md) | Headless runs, using the engine as a library, comparing courses of action |
 | 9 | [Extending the catalog](tutorials/09-extending-the-catalog.md) | Adding entity types, weapons, sensors and unit templates |
+| 10 | [Fire support and mechanized infantry](tutorials/10-fire-support-and-mech-infantry.md) | Observers and call for fire, fire missions, carrying and dismounting infantry, halt on contact |
+| 11 | [Exercise control, players and the AAR](tutorials/11-exercise-control-and-aar.md) | Fog of war with player keys, replaying a run, bookmarks, the after-action report |
+| 12 | [Real terrain](tutorials/12-real-terrain.md) | Importing a real DEM and map features, terrain queries on real ground |
 
 ## Guides
 
@@ -34,6 +37,9 @@ These pages are also served by a running server at **`/docs`** (toolbar → **He
   menus, keyboard).
 - [Concepts](concepts.md): coordinates, forces, entities and units, tasks and
   plans, sensors, combat and damage, and time.
+- [Terrain import](terrain-import.md): real elevation data and map features.
+- [Deployment](deployment.md): Docker, HTTPS, exercise-control and player keys,
+  sizing.
 - [Architecture](architecture.md): how the code is organised, the simulation
   loop, and how to add features.
 - [FAQ and troubleshooting](faq.md)
@@ -61,3 +67,5 @@ Runnable scripts in [`examples/`](../examples):
 | `custom-catalog.ts` | Adding a new tank, gun and unit template without editing the source |
 | `webhook-receiver.mjs` | Receiving webhooks and verifying their signature |
 | `cot-listener.mjs` | Printing Cursor-on-Target traffic without an ATAK device |
+| `combined-arms.mjs` | Artillery with a forward observer, a mechanized platoon carrying a rifle squad, and the AAR report ([Tutorial 10](tutorials/10-fire-support-and-mech-infantry.md)) |
+| `fulda-overlay.geojson` | A hand-drawn map feature overlay for terrain import ([Tutorial 12](tutorials/12-real-terrain.md)) |

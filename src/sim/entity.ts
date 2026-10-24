@@ -1,4 +1,4 @@
-import type { DamageState, EntityTypeDef, ForceId, Plan, Roe, TaskSpec, Vec2, Vec3 } from '../shared/types.js';
+import type { DamageState, EntityTypeDef, ForceId, Plan, Reactions, Roe, TaskSpec, Vec2, Vec3 } from '../shared/types.js';
 import type { PlanExecutor } from './plans.js';
 import type { Task } from './tasks.js';
 import type { Unit } from './units.js';
@@ -48,6 +48,16 @@ export class Entity {
   steer: SteerCommand | null = null;
   /** Set by the mover when terrain stopped movement this tick. */
   blocked = false;
+
+  reactions: Reactions = {};
+  /** True while the on-contact reaction holds the entity in place. */
+  halted = false;
+  /** Set once the withdraw reaction has fired. */
+  withdrawn = false;
+  /** Carrier id while riding in another entity (mounted infantry). */
+  embarkedIn?: string;
+  /** Simulation time this observer may call for fire again. */
+  callForFireAt = -Infinity;
 
   /** Cruise speed override (m/s) set by plans. */
   speedOverride?: number;

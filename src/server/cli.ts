@@ -11,6 +11,8 @@ import { DEFAULT_CATALOG, mergeCatalog } from '../sim/catalog.js';
 import { Engine } from '../sim/engine.js';
 import type { ScenarioFile } from '../shared/types.js';
 import { IntegrationHub, type IntegrationOptions } from '../integrations/hub.js';
+import { parsePlayer } from './fog.js';
+import { datasetLoader } from '../terrain/store.js';
 import { SimRunner } from './runner.js';
 import { SimServer } from './server.js';
 
@@ -32,10 +34,14 @@ Options:
       --site <n>              DIS site id (default 1)
       --application <n>       DIS application id (default 3001)
       --api-key <key>         Require this key on /api, /ws and /mcp (or env WERFORCES_API_KEY)
+      --player <force:key>    Player key for a force (blue, red, neutral): fog of war, own force only; repeatable.
+                              Requires --api-key, which stays the exercise-control (full view) key
       --cors <origin>         Allow cross-origin browser access from an origin ('*' for any); repeatable
       --cot <url>             Stream Cursor-on-Target to TAK: udp://239.2.3.1:6969 or tcp://host:8087
       --cot-interval <s>      Seconds between CoT position reports (default 2)
       --webhook <url>         POST simulation events to a URL (Slack/Discord URLs get chat formatting); repeatable
+      --terrains <dir>        Folder of imported terrain datasets (default ./terrains; see werforces-terrain)
+      --record-interval <s>   Seconds of simulated time between recorded frames for playback/AAR (default 1, 0 = off)
       --headless              No web server; run the scenario and print events
       --duration <s>          Headless only: simulated seconds to run as fast as possible
   -h, --help                  Show this help
@@ -98,6 +104,9 @@ async function main(): Promise<void> {
       cors: { type: 'string', multiple: true },
       cot: { type: 'string' },
       'cot-interval': { type: 'string', default: '2' },
+      'record-interval': { type: 'string', default: '1' },
+      terrains: { type: 'string' },
+      player: { type: 'string', multiple: true },
       webhook: { type: 'string', multiple: true },
       headless: { type: 'boolean', default: false },
       duration: { type: 'string' },
@@ -115,7 +124,8 @@ async function main(): Promise<void> {
     catalog = mergeCatalog(DEFAULT_CATALOG, JSON.parse(readFileSync(values.catalog, 'utf8')));
     console.log(`Catalog extension: ${values.catalog}`);
   }
-  const engine = new Engine({ catalog });
+  const terrainDir = path.resolve(values.terrains ?? path.join(root, 'terrains'));
+  const engine = new Engine({ catalog, terrainLoader: datasetLoader(terrainDir) });
   if (values.scenario) engine.loadScenario(loadScenarioArg(values.scenario, scenarioDir));
   else engine.newScenario('Untitled');
 
@@ -137,7 +147,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  const runner = new SimRunner(engine);
+  const recordInterval = Number(values['record-interval']);
+  if (!Number.isFinite(recordInterval) || recordInterval < 0) throw new Error('--record-interval must be a number of seconds (0 = off)');
+  const runner = new SimRunner(engine, undefined, undefined, recordInterval);
   runner.setTimeScale(Number(values['time-scale']));
   if (values.dis) {
     const port = Number(values['dis-port']);
@@ -172,11 +184,17 @@ async function main(): Promise<void> {
     });
     console.log('Running headless. Ctrl+C to stop.');
   } else {
+    const players = (values.player ?? []).map(parsePlayer);
+    if (players.length && !values['api-key']) throw new Error('--player needs --api-key (the exercise-control key)');
+    if (new Set(players.map((p) => p.key)).size !== players.length || players.some((p) => p.key === values['api-key'])) throw new Error('player keys must be unique and differ from --api-key');
+    for (const p of players) console.log(`Player key for ${['Other', 'Blue', 'Red', 'Neutral'][p.force]}: fog of war on`);
     const server = new SimServer(runner, {
+      players,
       port: Number(values.port),
       host: values.host!,
       webRoot: path.join(root, 'dist', 'web'),
       scenarioDir,
+      terrainDir,
       apiKey: values['api-key'] || undefined,
       docsDir: path.join(root, 'docs'),
       repoBlobUrl: repoBlobUrl(root),

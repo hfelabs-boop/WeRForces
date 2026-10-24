@@ -82,3 +82,13 @@ npm start -- --host 0.0.0.0 --api-key "$(openssl rand -hex 16)"   # reachable fr
 The server only listens on 127.0.0.1 unless you pass `--host`. If you expose it,
 always set an API key. See [Command line](reference/cli.md) and
 [REST API → Security](reference/rest-api.md#security).
+
+## Docker
+
+```bash
+docker build -t werforces .
+docker run -p 8080:8080 -e WERFORCES_API_KEY=change-me werforces
+```
+
+For HTTPS, `docker compose up -d` puts Caddy in front with automatic
+certificates. See [Deployment](deployment.md).

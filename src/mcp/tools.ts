@@ -4,6 +4,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import type { AarReport } from '../shared/recording.js';
 
 export interface ApiResult {
   status: number;
@@ -294,15 +295,16 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'assign_task',
-    'Give an entity or unit a task (replaces its current plan). moveTo/orbit need `to`; followRoute/patrol need `routeId`; attack/follow need `targetId`; wait needs `duration`.',
+    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
     {
       targetId: z.string().describe('entity (E..) or unit (U..) id'),
-      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait']),
+      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission', 'mount', 'dismount']),
       to: position.optional(),
       routeId: z.string().optional(),
       targetEntityId: z.string().optional(),
       duration: z.number().optional().describe('seconds'),
-      radius: z.number().optional().describe('orbit radius in m (default 2000)'),
+      radius: z.number().optional().describe('orbit radius in m (default 2000), or fire mission sheaf radius (default 0)'),
+      rounds: z.number().int().min(1).max(100).optional().describe('fire mission rounds per tube (default 3)'),
       speedKmh: z.number().optional(),
     },
     async (a) => {
@@ -314,7 +316,13 @@ export function createMcpServer(call: ApiCaller): McpServer {
       const task =
         a.type === 'moveTo'
           ? { type: 'moveTo', target: need(a.to, 'to'), speed }
-          : a.type === 'orbit'
+          : a.type === 'mount'
+            ? { type: 'mount', carrierId: need(a.targetEntityId, 'targetEntityId') }
+            : a.type === 'dismount'
+            ? { type: 'dismount' }
+            : a.type === 'fireMission'
+            ? { type: 'fireMission', target: need(a.to, 'to'), rounds: a.rounds, radius: a.radius }
+            : a.type === 'orbit'
             ? { type: 'orbit', center: need(a.to, 'to'), radius: a.radius ?? 2000, duration: a.duration }
             : a.type === 'followRoute' || a.type === 'patrol'
               ? { type: a.type, routeId: need(a.routeId, 'routeId'), speed }
@@ -332,7 +340,8 @@ export function createMcpServer(call: ApiCaller): McpServer {
     'Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: ' +
       '{kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), ' +
       '{kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, ' +
-      '{kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"entityDestroyed",entityId}}.',
+      '{kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, ' +
+      '{kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"entityDestroyed",entityId}}.',
     {
       targetId: z.string(),
       name: z.string().optional(),
@@ -343,6 +352,23 @@ export function createMcpServer(call: ApiCaller): McpServer {
       const kind = a.targetId.startsWith('U') ? 'units' : 'entities';
       const r = await api<{ name: string; plan?: string }>('POST', `/api/v1/${kind}/${encodeURIComponent(a.targetId)}/plan`, { name: a.name, loop: a.loop, statements: a.statements });
       return `${r.name}: ${r.plan ?? 'plan assigned'}`;
+    },
+  );
+
+  tool(
+    'embark',
+    'Instantly put infantry (an entity or a whole unit) inside a carrier (an entity or a unit, whose seats are shared out), e.g. to set up a mechanized platoon with its squad mounted. Use assign_task type "mount" to make them walk to the carrier instead. With `dismount: true`, lets the passengers of the carrier(s) given in carrierId out now.',
+    { passengerId: z.string().optional().describe('infantry entity or unit id'), carrierId: z.string().describe('carrier entity or unit id'), dismount: z.boolean().optional() },
+    async ({ passengerId, carrierId, dismount }) => {
+      if (dismount) {
+        const kind = carrierId.startsWith('U') ? 'units' : 'entities';
+        await api('POST', `/api/v1/${kind}/${encodeURIComponent(carrierId)}/disembark`);
+        return `passengers of ${carrierId} dismounted`;
+      }
+      if (!passengerId) throw new Error('passengerId is required');
+      const kind = passengerId.startsWith('U') ? 'units' : 'entities';
+      await api('POST', `/api/v1/${kind}/${encodeURIComponent(passengerId)}/embark`, { carrierId });
+      return `${passengerId} mounted in ${carrierId}`;
     },
   );
 
@@ -367,6 +393,68 @@ export function createMcpServer(call: ApiCaller): McpServer {
       return `${targetId} ROE = ${value}`;
     },
     { idempotentHint: true },
+  );
+
+  tool(
+    'set_reactions',
+    'Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out; callForFire makes it request fire missions from idle friendly artillery in range on hostiles it sees (not within 150 m of friendly troops).',
+    {
+      targetId: z.string(),
+      onContact: z.enum(['continue', 'halt']).optional(),
+      withdrawBelow: z.number().min(0).max(1).optional(),
+      withdrawTo: position.optional(),
+      callForFire: z.boolean().optional(),
+    },
+    async ({ targetId, ...reactions }) => {
+      const kind = targetId.startsWith('U') ? 'units' : 'entities';
+      const r = await api<{ name: string; reactions?: unknown }>('PATCH', `/api/v1/${kind}/${encodeURIComponent(targetId)}`, { reactions });
+      return { name: r.name, reactions: r.reactions ?? {} };
+    },
+    { idempotentHint: true },
+  );
+
+  // ---------------------------------------------------------------- after-action review
+
+  tool(
+    'after_action_report',
+    'After-action review of the run so far (or of a loaded recording): strength and losses per force, every kill with killer, weapon and time, rounds fired per weapon, bookmarks.',
+    {},
+    async () => {
+      const r = await api<AarReport>('GET', '/api/v1/recording/report');
+      const name = (f: number) => ['Other', 'Blue', 'Red', 'Neutral'][f] ?? String(f);
+      const lines = [`AAR: ${r.scenarioName}, ${fmtTime(r.start)} to ${fmtTime(r.end)}`];
+      for (const f of r.forces) lines.push(`${name(f.force)}: ${f.end}/${f.start} remaining, ${f.losses} lost, ${f.kills} kills, ${f.shots} rounds fired`);
+      if (r.kills.length) lines.push('Kills:', ...r.kills.map((k) => `  ${fmtTime(k.time)} ${k.victim} (${name(k.victimForce)}) by ${k.killer ?? 'unknown'}${k.weaponId ? ` with ${k.weaponId}` : ''}`));
+      if (r.bookmarks.length) lines.push('Bookmarks:', ...r.bookmarks.map((b) => `  ${fmtTime(b.time)} ${b.text}`));
+      return lines.join('\n');
+    },
+    { readOnlyHint: true },
+  );
+
+  tool(
+    'replay_state',
+    'Where everything was at a past simulation time, from the recording: entity positions (grid, lat/lon), damage and units.',
+    { time: z.number().describe('simulation time in seconds'), force: z.number().int().min(0).max(3).optional() },
+    async ({ time, force }) => {
+      const s = await api<{ time: number; entities: { id: string; name: string; force: number; damage: string; lat: number; lon: number; embarkedIn?: string }[] }>('GET', `/api/v1/recording/state?time=${time}`);
+      return {
+        time: s.time,
+        entities: s.entities
+          .filter((e) => force === undefined || e.force === force)
+          .map((e) => ({ id: e.id, name: e.name, force: e.force, damage: e.damage, lat: e.lat, lon: e.lon, mounted: e.embarkedIn })),
+      };
+    },
+    { readOnlyHint: true },
+  );
+
+  tool(
+    'add_bookmark',
+    'Add a note to the recording at the current (or a given) simulation time, for the after-action review.',
+    { text: z.string().min(1).max(200), time: z.number().optional() },
+    async ({ text, time }) => {
+      const b = await api<{ id: string; time: number }>('POST', '/api/v1/recording/bookmarks', { text, time });
+      return `bookmark ${b.id} at ${fmtTime(b.time)}`;
+    },
   );
 
   // ---------------------------------------------------------------- time & scenarios

@@ -1,0 +1,10 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    { "type": "Feature", "properties": { "kind": "town", "name": "OBJ DOM" }, "geometry": { "type": "Point", "coordinates": [9.6721, 50.5546] } },
+    { "type": "Feature", "properties": { "kind": "town", "name": "LD WEST" }, "geometry": { "type": "Point", "coordinates": [9.6300, 50.5300] } },
+    { "type": "Feature", "properties": { "highway": "track", "name": "Exercise track" }, "geometry": { "type": "LineString", "coordinates": [[9.6000, 50.5250], [9.6300, 50.5300], [9.6550, 50.5420], [9.6721, 50.5546]] } },
+    { "type": "Feature", "properties": { "landuse": "forest", "name": "Wood A" }, "geometry": { "type": "Polygon", "coordinates": [[[9.6350, 50.5420], [9.6500, 50.5420], [9.6500, 50.5520], [9.6350, 50.5520], [9.6350, 50.5420]]] } },
+    { "type": "Feature", "properties": { "natural": "wood", "name": "Wood B" }, "geometry": { "type": "Polygon", "coordinates": [[[9.6900, 50.5300], [9.7100, 50.5300], [9.7100, 50.5400], [9.6900, 50.5400], [9.6900, 50.5300]]] } }
+  ]
+}

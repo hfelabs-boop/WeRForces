@@ -259,6 +259,11 @@ export class DisGateway {
     this.timeScale = timeScale;
     for (const e of this.engine.entities.values()) {
       if (e.remote) continue;
+      // Passengers are not separate entities on the network while mounted.
+      if (e.embarkedIn) {
+        if (this.published.has(e.id)) this.sendRemoval(e);
+        continue;
+      }
       const v = e.velocity;
       const scale = running ? timeScale : 0;
       const apparent = { x: v.x * scale, y: v.y * scale, z: v.z * scale };
@@ -349,12 +354,14 @@ export class DisGateway {
   private sendDetonation(det: Detonation): void {
     const shot = det.shot;
     const target = shot.targetId ? this.engine.entities.get(shot.targetId) : undefined;
-    const result = det.hit ? DETONATION_ENTITY_IMPACT : target?.domain === 'air' ? DETONATION_DETONATION : DETONATION_GROUND_IMPACT;
+    // Area-effect rounds burst on the ground; receivers work out their own blast damage.
+    const area = !!det.effects;
+    const result = det.hit && !area ? DETONATION_ENTITY_IMPACT : target?.domain === 'air' ? DETONATION_DETONATION : DETONATION_GROUND_IMPACT;
     this.send(
       encodeDetonation({
         header: this.header(),
         firingEntityId: this.entityIdFor(shot.shooterId),
-        targetEntityId: det.hit ? this.entityIdFor(shot.targetId) : NO_ENTITY,
+        targetEntityId: det.hit && !area ? this.entityIdFor(shot.targetId) : NO_ENTITY,
         munitionId: NO_ENTITY,
         eventId: { site: this.config.site, application: this.config.application, entity: shot.eventNumber },
         velocity: ZERO3,
@@ -459,6 +466,7 @@ export class DisGateway {
       this.engine.applyExternalDetonation(targetId, pdu.burst.munition, location, shooterId);
       return;
     }
+    if (!targetId && this.engine.applyExternalAreaDetonation(pdu.burst.munition, location, shooterId)) return;
     this.engine.log('detonation', 'remote detonation (DIS)', shooterId, targetId, { to: location, hit: pdu.result === DETONATION_ENTITY_IMPACT });
   }
 }

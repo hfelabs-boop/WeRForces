@@ -849,3 +849,160 @@ pre.snippet {
   color: var(--muted);
   font-size: 12px;
 }
+
+/* ------------------------------------------------ after-action review */
+
+.aar-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.aar-bar strong {
+  color: var(--warn);
+}
+
+.aar-track {
+  position: relative;
+  flex: 1;
+  min-width: 160px;
+  display: flex;
+  align-items: center;
+}
+
+.aar-slider {
+  width: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+.aar-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.aar-mark {
+  position: absolute;
+  top: -2px;
+  width: 3px;
+  height: 8px;
+  margin-left: -1px;
+  border-radius: 1px;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.aar-mark.kill {
+  background: var(--bad);
+}
+
+.aar-mark.bookmark {
+  background: var(--warn);
+  height: 12px;
+  top: -4px;
+}
+
+.aar-note {
+  width: 180px;
+}
+
+body.aar .sim-controls,
+body.aar #draw-tools {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+body.aar #btn-aar {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.aar-report h4 {
+  margin: 14px 0 6px;
+}
+
+.aar-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+.aar-table th,
+.aar-table td {
+  text-align: left;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.aar-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.aar-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.aar-chart .grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.aar-chart .axis {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.aar-chart .label {
+  fill: var(--text);
+  font-size: 11px;
+}
+
+.aar-chart .cross {
+  stroke: var(--muted);
+  stroke-dasharray: 3 3;
+}
+
+.aar-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.aar-legend i {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+/* ------------------------------------------------ roles */
+
+body.player [data-controller-only] {
+  display: none !important;
+}
+
+.pill.force-1 {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
+.pill.force-2 {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.pill.force-3 {
+  color: var(--neutral);
+  border-color: var(--neutral);
+}

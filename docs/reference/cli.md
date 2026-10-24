@@ -20,11 +20,14 @@ node dist/server/cli.js [options] # equivalent
 | `--dis-address <addr>` | `255.255.255.255` | Where PDUs are sent: broadcast, a multicast group (224–239.x.x.x, joined automatically) or a unicast host |
 | `--exercise <n>` | `1` | DIS exercise id. Only PDUs with this id are accepted |
 | `--site <n>`, `--application <n>` | `1`, `3001` | This simulation's DIS address. Each federate needs its own pair |
-| `--api-key <key>` | `$WERFORCES_API_KEY` | Require a key on `/api/*`, `/ws` and `/mcp` |
+| `--api-key <key>` | `$WERFORCES_API_KEY` | Require a key on `/api/*`, `/ws` and `/mcp`. Its holder is exercise control: sees and controls everything |
+| `--player <force:key>` | none | A player key for a force (`blue`, `red`, `neutral`): fog of war and orders for that force only ([Concepts](../concepts.md#fog-of-war-and-roles)). Needs `--api-key`; keys must differ. Repeatable |
 | `--cors <origin>` | none | Allow browser access from another origin (`*` for any). Repeatable |
 | `--cot <url>` | off | Stream Cursor-on-Target to `udp://host:port` or `tcp://host:port` |
 | `--cot-interval <s>` | `2` | Seconds between CoT reports |
 | `--webhook <url>` | none | POST events to a URL. `hooks.slack.com` and `discord.com/api/webhooks` URLs are formatted for chat. Repeatable |
+| `--record-interval <s>` | `1` | Simulated seconds between recorded frames for the after-action review. `0` turns recording off |
+| `--terrains <dir>` | `./terrains` | Folder of imported terrain datasets ([Terrain import](../terrain-import.md)) |
 | `--headless` | off | No web server. Runs in real time and prints events to the terminal |
 | `--duration <s>` | – | With `--headless`: simulate this many seconds as fast as possible, print a summary and exit |
 | `-h, --help` | | Show help |
@@ -51,9 +54,33 @@ npm start -- -s calloway-crossroads --cot udp://239.2.3.1:6969 --webhook https:/
 # Serve to the network with a key
 npm start -- --host 0.0.0.0 --api-key "$(openssl rand -hex 16)"
 
+# A two-sided exercise: control plus one key per side
+npm start -- -s calloway-crossroads --host 0.0.0.0 --api-key CONTROL --player blue:BLUEKEY --player red:REDKEY
+
 # Batch: simulate 50 minutes and print the result
 npm start -- -s calloway-crossroads --headless --duration 3000
 ```
+
+## Terrain import
+
+```bash
+npm run terrain:import -- --dem area.tif [--features area.geojson] --name myarea [options]
+node dist/terrain/cli.js ...   # the same, after npm run build (bin: werforces-terrain)
+```
+
+| Option | Description |
+| --- | --- |
+| `--dem <file>` | GeoTIFF elevation model: EPSG:4326 (or NAD83/ETRS89), UTM WGS-84 (EPSG:326xx/327xx) or Web Mercator |
+| `--features <file>` | GeoJSON in WGS-84: roads, water, rivers, forest, towns (OpenStreetMap tags or a `kind` property) |
+| `--name <name>` | Dataset name; scenarios use `"terrain": {"dataset": "<name>"}` |
+| `--title <text>` | Display title |
+| `--center <lat,lon>` | Centre of the extent (default: the DEM's centre) |
+| `--size <m>` | Extent (default: largest square in the DEM, at most 40 km) |
+| `--cell <m>` | Grid spacing (default: about the DEM's resolution, at least 20 m; at most 1201 posts a side) |
+| `--attribution <text>` | Data credit stored in the dataset |
+| `--out <dir>` | Output folder (default `./terrains`) |
+
+See [Terrain import](../terrain-import.md).
 
 ## MCP stdio bridge
 
@@ -76,3 +103,6 @@ See [Tutorial 5](../tutorials/05-ai-agents-with-mcp.md).
 | `npm run scenarios` | Regenerate the sample scenarios |
 | `npm run docs:gen` | Regenerate the generated reference pages |
 | `npm run mcp` | Run the MCP stdio bridge |
+| `npm run e2e` | Browser end-to-end tests (Playwright; build first) |
+| `npm run bench -- [n…]` | Wall-clock cost per simulated second for *n* entities (default 100 500 1000) |
+| `npm run terrain:import` | Import a real terrain (see above) |

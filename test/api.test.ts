@@ -1,4 +1,7 @@
+import { mkdtempSync } from 'node:fs';
 import http from 'node:http';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -32,7 +35,7 @@ beforeAll(async () => {
   engine.newScenario('api-v1', terrain.spec);
   const runner = new SimRunner(engine, 0.1, 20);
   runner.start();
-  server = new SimServer(runner, { port: 0, host: '127.0.0.1', webRoot: 'dist/web', scenarioDir: 'scenarios', apiKey: KEY });
+  server = new SimServer(runner, { port: 0, host: '127.0.0.1', webRoot: 'dist/web', scenarioDir: 'scenarios', recordingDir: mkdtempSync(path.join(tmpdir(), 'wf-rec-')), apiKey: KEY });
   await server.listen();
   base = server.address;
 });
@@ -162,6 +165,37 @@ describe('REST API v1', () => {
     expect(hook.status).toBe(201);
     expect((await api('GET', '/api/v1/integrations')).json.webhooks).toHaveLength(1);
     expect((await api('DELETE', `/api/v1/webhooks/${hook.json.id}`)).status).toBe(204);
+  });
+});
+
+describe('recording and AAR', () => {
+  it('records, reports, bookmarks, saves and reviews', async () => {
+    const tank = await api('POST', '/api/v1/entities', { typeId: 'us-m1a2', force: 1, position: { x: 2000, y: 2000 } });
+    await api('POST', '/api/v1/simulation/step', { seconds: 5 });
+    const sum = await api('GET', '/api/v1/recording');
+    expect(sum.status).toBe(200);
+    expect(sum.json.live).toBe(true);
+    expect(sum.json.end).toBeGreaterThanOrEqual(5);
+    const st = await api('GET', `/api/v1/recording/state?time=${sum.json.end - 1}`);
+    expect(st.json.entities.find((e: { id: string }) => e.id === tank.json.id)).toHaveProperty('lat');
+    const b = await api('POST', '/api/v1/recording/bookmarks', { text: 'tank placed' });
+    expect(b.status).toBe(201);
+    expect((await api('POST', '/api/v1/recording/bookmarks', {})).status).toBe(400);
+    const rep = await api('GET', '/api/v1/recording/report');
+    expect(rep.json.bookmarks.map((x: { text: string }) => x.text)).toContain('tank placed');
+    expect(rep.json.forces.find((f: { force: number }) => f.force === 1).end).toBeGreaterThan(0);
+    expect((await api('PUT', '/api/v1/recordings/run1')).json).toEqual({ saved: 'run1' });
+    expect((await api('GET', '/api/v1/recordings')).json.map((r: { name: string }) => r.name)).toContain('run1');
+    const end = sum.json.end;
+    await api('POST', '/api/v1/simulation/step', { seconds: 5 });
+    const loaded = await api('POST', '/api/v1/recordings/run1/load');
+    expect(loaded.json.live).toBe(false);
+    expect(loaded.json.end).toBeGreaterThanOrEqual(end);
+    expect(loaded.json.end).toBeLessThan(end + 5);
+    expect((await api('DELETE', `/api/v1/recording/bookmarks/${b.json.id}`)).status).toBe(204);
+    expect((await api('POST', '/api/v1/recordings/nope/load')).status).toBe(404);
+    expect((await api('POST', '/api/v1/recording/load', { format: 'x' })).status).toBe(400);
+    expect((await api('POST', '/api/v1/recording/clear')).json.live).toBe(true);
   });
 });
 

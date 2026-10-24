@@ -31,6 +31,8 @@ export interface MapLayers {
 
 interface Effect {
   kind: 'fire' | 'detonation';
+  /** Blast radius in metres (area-effect rounds). */
+  radius?: number;
   from?: Vec2;
   to: Vec2;
   hit?: boolean;
@@ -105,10 +107,13 @@ export class MapView {
   addEvents(events: SimEvent[]): void {
     const now = performance.now();
     for (const ev of events) {
-      if (ev.kind === 'fire' && ev.from && ev.to) {
+      if (ev.kind === 'fire' && ev.from && ev.indirect) {
+        // Indirect fire: muzzle flash only; the round lands later as a detonation.
+        this.effects.push({ kind: 'detonation', to: ev.from, hit: false, start: now, duration: 600 });
+      } else if (ev.kind === 'fire' && ev.from && ev.to) {
         this.effects.push({ kind: 'fire', from: ev.from, to: ev.to, start: now, duration: 900 });
       } else if (ev.kind === 'detonation' && ev.to) {
-        this.effects.push({ kind: 'detonation', to: ev.to, hit: ev.hit, start: now, duration: 1100 });
+        this.effects.push({ kind: 'detonation', to: ev.to, hit: ev.hit, radius: ev.radius, start: now, duration: ev.radius ? 1600 : 1100 });
       }
     }
     if (this.effects.length > 400) this.effects.splice(0, this.effects.length - 400);
@@ -182,12 +187,15 @@ export class MapView {
     const out: { id: string; pos: Vec2; entity?: EntitySnapshot; unit?: UnitSnapshot }[] = [];
     const agg = this.aggregated();
     for (const e of st.entities) {
-      if (agg && e.unitId && this.unitById.has(e.unitId)) continue;
+      if (e.embarkedIn) continue;
+      // Units are drawn as one symbol, except a mounted unit whose leftovers show individually.
+      if (agg && e.unitId && this.unitById.has(e.unitId) && !this.entityById.get(this.unitById.get(e.unitId)!.leaderId ?? '')?.embarkedIn) continue;
       out.push({ id: e.id, pos: e, entity: e });
     }
     if (agg) {
       for (const u of st.units) {
         const leader = u.leaderId ? this.entityById.get(u.leaderId) : undefined;
+        if (leader?.embarkedIn) continue;
         out.push({ id: u.id, pos: leader ?? u, unit: u });
       }
     }
@@ -585,7 +593,8 @@ export class MapView {
           destroyed: e.damage === 'destroyed',
           damaged: e.damage === 'mobility' || e.damage === 'firepower',
           remote: e.remote,
-          alpha: inSelUnit || !selUnit ? 1 : 0.9,
+          // Fog of war: contacts fade as they go stale.
+          alpha: e.contactAge !== undefined ? (e.contactAge > 5 ? 0.45 : 0.8) : inSelUnit || !selUnit ? 1 : 0.9,
         });
         if (inSelUnit) {
           ctx.beginPath();
@@ -595,7 +604,7 @@ export class MapView {
           ctx.stroke();
         }
         if (this.layers.labels && (!agg || e.id === this.selectedId || this.metresPerPixel < 6)) {
-          label(ctx, e.name, p.x + symSize * 1.5, p.y + 4, FORCE_COLORS[e.force].text, '11px system-ui');
+          label(ctx, e.passengers ? `${e.name} +${e.passengers.length}` : e.name, p.x + symSize * 1.5, p.y + 4, FORCE_COLORS[e.force].text, '11px system-ui');
           if (e.domain === 'air') label(ctx, `${Math.round(e.agl)}m`, p.x + symSize * 1.5, p.y + 16, '#ddd', '10px system-ui');
         }
       } else if (sym.unit) {
@@ -640,6 +649,16 @@ export class MapView {
         ctx.arc(from.x, from.y, 4 + t * 6, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(255,240,150,${(1 - t) * 0.9})`;
         ctx.fill();
+      } else if (f.radius) {
+        // Area burst drawn to scale (at least a few pixels).
+        const r = Math.max(6, (f.radius * this.scale) * (0.4 + 0.6 * t));
+        ctx.beginPath();
+        ctx.arc(to.x, to.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,${f.hit ? 90 : 170},20,${(1 - t) * 0.55})`;
+        ctx.fill();
+        ctx.strokeStyle = `rgba(60,40,20,${(1 - t) * 0.8})`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
       } else {
         ctx.beginPath();
         ctx.arc(to.x, to.y, 4 + t * (f.hit ? 22 : 12), 0, Math.PI * 2);

@@ -14,7 +14,7 @@ The WeRForces window has five areas:
 
 | Control | What it does |
 | --- | --- |
-| **File ▾** | **New scenario** (optionally on new terrain), **Open scenario…** (from the server's `scenarios/` folder), **Import from file…**, **Export to file** (downloads the current state as JSON), **Save on server…** |
+| **File ▾** | **New scenario** (on generated terrain, or an imported real terrain), **Open scenario…** (from the server's `scenarios/` folder), **Import from file…**, **Export to file** (downloads the current state as JSON), **Save on server…**, **Review saved recording…** |
 | Scenario name | The loaded scenario |
 | ⏮ | **Rewind**: reload the scenario as it was when last loaded. Anything since is discarded |
 | ▶ Run / ⏸ Pause | Start or stop the clock (**Space**) |
@@ -24,7 +24,10 @@ The WeRForces window has five areas:
 | **Route / Area / Phase line / Point** | Drawing tools for tactical graphics (see below) |
 | **Layers ▾** | Labels, grid, sensor contacts, weapon/sensor range rings, planned paths, and unit display (auto / aggregate / entities) |
 | **2D / 3D / Split** | Which map views are shown |
+| **AAR** | After-action review: replay the recording (see [below](#after-action-review)) |
 | **Integrations** | API and MCP connection details, TAK output, webhooks, GIS feeds |
+| **?** | This documentation |
+| Role pill | *Blue player · fog of war* when you joined with a player key (see [below](#playing-one-force-fog-of-war)) |
 | DIS pill | DIS status when started with `--dis`: exercise, site:application, PDUs sent and received, remote entities |
 | connected | WebSocket connection to the simulation server |
 
@@ -94,8 +97,9 @@ What appears depends on what is selected and what you right-click:
 
 | Selection | Right-click on | Menu items |
 | --- | --- | --- |
-| Entity or unit | Empty map | **Move here**, **Orbit here (2 km)** (aircraft), **Add "move here" to plan**, **Stop** |
-| Entity or unit | A hostile entity or unit | **Attack *name***, **Follow *name***, **Stop** |
+| Entity or unit | Empty map | **Move here**, **Orbit here (2 km)** (aircraft), **Fire mission here (3 rounds)** (artillery and mortars), **Move here and dismount** (carriers with passengers), **Add "move here" to plan**, **Stop** |
+| Entity or unit | A hostile entity or unit | **Attack *name***, **Fire mission on *name*** (artillery and mortars), **Follow *name***, **Stop** |
+| Infantry | A friendly carrier (or carrier unit) | **Mount *name*** (walk over and board), **Put inside *name* now** (scenario set-up), **Follow *name***, **Stop** |
 | Entity or unit | A route or phase line | **Follow route *name***, **Patrol route *name***, **Stop** |
 | Anything | Any object | **Select**, **Center map**, **Delete** |
 | Anything | Anywhere | **Center map here**, **Place point here**, **Place armed item here** (when a palette item is armed) |
@@ -108,6 +112,7 @@ Click **3D** (or **Split** for 2D and 3D side by side). The 3D view shows:
 
 - shaded terrain with roads and towns;
 - vehicle, aircraft and ship models in force colours (dark when destroyed);
+  passengers are not drawn while they ride;
 - routes and phase lines draped over the ground;
 - objective areas drawn as translucent curtains;
 - tracers and detonations.
@@ -139,12 +144,21 @@ scale up close. The 3D code is downloaded the first time you open the view.
   Follow route IRON — Follow route IRON (wp 3/28)*.
 - **Rules of engagement**: Fire at will, Return fire or Hold fire (see
   [Concepts](concepts.md#rules-of-engagement)).
+- **Reactions** (see [Concepts](concepts.md#reactions)):
+  - **On contact**: *Continue the task* or *Halt and fight*;
+  - **Withdraw**: *Never*, or *When weapons are knocked out* (entities) /
+    *Below 75 %, 50 % or 25 % strength* (units), back to where it is now;
+  - **Call for fire**: request fire missions on hostiles it sees.
 - **Tasks:**
   - **Move to…**, **Attack…**, **Follow…** and **Orbit…** (aircraft) ask you to
     click a point or target;
   - **Stop**;
   - a route picker with **Follow** and **Patrol**;
-  - **Wait** *n* seconds.
+  - **Wait** *n* seconds;
+  - **Fire** *n* **rounds** → **Fire mission…** (artillery and mortars; click the
+    target location);
+  - **Mount…** (infantry; click the carrier), or **Passengers n/seats** with
+    **Dismount** (carriers).
 
   A task replaces whatever the entity was doing, including its plan.
 - **Plan editor**: see below.
@@ -153,6 +167,8 @@ scale up close. The 3D code is downloaded the first time you open the view.
 - **Contacts**: what it currently detects, with distance. ◎ marks its current
   target.
 
+A passenger's activity reads *MOUNTED in …*.
+
 ### Unit
 
 The same as an entity, plus **Strength** (alive/total), **Leader**, a
@@ -160,7 +176,9 @@ The same as an entity, plus **Strength** (alive/total), **Leader**, a
 list (★ = leader).
 
 Tasks given to a unit are carried out by the leader; the other members keep
-formation on it. *Attack* is the exception: every member attacks.
+formation on it. *Attack*, *Fire mission*, *Mount* and *Dismount* are the
+exceptions: every member does them. A mounted unit's activity starts with
+*MOUNTED n/m*.
 
 ### Graphic
 
@@ -183,9 +201,9 @@ Step types:
 
 | Kind | Steps |
 | --- | --- |
-| Tasks | Move to (pick), Follow route, Patrol route, Wait (seconds), Attack (pick), Orbit (pick) |
-| Settings | Set ROE, Set speed (km/h), Set altitude (m above ground), Set formation (units) |
-| Conditions | Wait until time (s), Wait until in area, Wait until enemy detected, Wait until under fire, Wait until destroyed (pick) |
+| Tasks | Move to (pick), Follow route, Patrol route, Wait (seconds), Attack (pick), Orbit (pick), Fire mission (pick; rounds), Mount carrier (pick), Dismount passengers |
+| Settings | Set ROE, Set speed (km/h), Set altitude (m above ground; 0 lands a helicopter), Set formation (units), Set reaction on contact, Set call for fire |
+| Conditions | Wait until time (s), Wait until in area, Wait until enemy detected, Wait until under fire, Wait until destroyed (pick), Wait until enemy in area, Wait until strength below (%) |
 
 The draft stays in the editor after you assign it, so you can change it and
 assign it again. Right-clicking the map also offers **Add "move here" to plan**.
@@ -222,6 +240,39 @@ Shows simulation events with their simulation time. Checkboxes filter by kind:
 Double-click a line to select and centre the entity. The strength of each force
 is shown on the right, e.g. *Blue 11/14 · Red 6/19*.
 
+## After-action review
+
+Press **AAR** in the toolbar. The simulation pauses and the map switches to the
+**recording**: everything the server recorded since the scenario was loaded.
+A bar above the event log controls the replay:
+
+| Control | What it does |
+| --- | --- |
+| ⏮ | Back to the start |
+| ▶ / ⏸ and 1×–64× | Play the recording at that speed |
+| Timeline | Drag to any time. Red ticks are kills, yellow ticks bookmarks; click one to jump there |
+| *Bookmark note…* + **Bookmark** | Add a note at the current replay time |
+| **Report** | Strength and losses per force, a strength-over-time chart, every kill (time, victim, killer, weapon), rounds fired per weapon, bookmarks |
+| **Save…** | Save the recording on the server (File → **Review saved recording…** opens it later) |
+| **Exit** | Back to the live scenario, where you left it |
+
+While replaying, the map, 3D view, object tree and event log show the recorded
+situation, the inspector is read-only, and editing and orders are disabled.
+
+## Playing one force (fog of war)
+
+When the server has player keys (`--player blue:KEY`), opening
+`http://host:8080/?api_key=KEY` joins as that force:
+
+- the role pill shows *Blue player · fog of war*;
+- your own force is shown in full; enemies appear only while your force has them
+  as contacts, at the position last seen, named by type (*T-72B3 (E15)*), and
+  fade as the contact goes stale. Selecting one shows when it was last seen;
+- the event log only shows events involving your force;
+- you can give orders and draw graphics for your force. The clock, the File
+  menu, the Create palette, AAR and Integrations belong to exercise control
+  (the `--api-key` holder) and are hidden.
+
 ## Keyboard
 
 | Key | Action |
@@ -239,4 +290,4 @@ is shown on the right, e.g. *Blue 11/14 · Red 6/19*.
 
 If the server was started with `--api-key`, the browser asks for the key once
 and remembers it. Open the app as `http://host:8080/?api_key=…` to supply it in
-the URL instead.
+the URL instead. Entering a player key joins as that force.

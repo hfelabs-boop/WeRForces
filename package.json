@@ -1,6 +1,6 @@
 {
   "name": "werforces",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "WeRForces - an open computer-generated forces (CGF) simulator inspired by VR-Forces: scenario editor, tasking, sensors, combat and DIS interoperability.",
   "private": true,
   "repository": {
@@ -10,7 +10,8 @@
   "type": "module",
   "bin": {
     "werforces": "dist/server/cli.js",
-    "werforces-mcp": "dist/mcp/stdio.js"
+    "werforces-mcp": "dist/mcp/stdio.js",
+    "werforces-terrain": "dist/terrain/cli.js"
   },
   "scripts": {
     "build": "npm run build:server && npm run build:web",
@@ -23,19 +24,25 @@
     "scenarios": "tsx scripts/make-scenarios.ts",
     "check": "npm run typecheck && npm test && npm run build",
     "mcp": "node dist/mcp/stdio.js",
-    "docs:gen": "tsx scripts/docs-gen.ts"
+    "docs:gen": "tsx scripts/docs-gen.ts",
+    "bench": "tsx scripts/bench.ts",
+    "terrain:import": "tsx src/terrain/cli.ts",
+    "e2e": "playwright test"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "geotiff": "^3.0.5",
     "marked": "^18.1.1",
+    "proj4": "^2.22.0",
     "three": "^0.186.1",
     "ws": "^8.22.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/node": "^22.20.5",
     "@types/three": "^0.186.0",
     "@types/ws": "^8.18.2",

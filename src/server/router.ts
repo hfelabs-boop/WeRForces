@@ -1,6 +1,8 @@
 // Minimal transport-independent router. Handlers receive parsed input and return a
 // response object, so the same routes serve HTTP and in-process callers (the MCP server).
 
+import type { Role } from '../shared/types.js';
+
 export class HttpError extends Error {
   constructor(
     readonly status: number,
@@ -18,6 +20,8 @@ export interface RouteRequest {
   body: unknown;
   /** Absolute base URL of the server, e.g. http://127.0.0.1:8080 (for links). */
   baseUrl: string;
+  /** Who is calling (default: the controller). */
+  role?: Role;
 }
 
 export interface RouteResponse {

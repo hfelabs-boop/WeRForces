@@ -1,11 +1,14 @@
 // Versioned, resource-oriented REST API (/api/v1). The same routes back the MCP server.
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { entitiesGeoJSON, frameFor, graphicsGeoJSON, liveKML, sceneKML } from '../integrations/gis.js';
 import type { IntegrationHub } from '../integrations/hub.js';
 import { dist2d } from '../shared/math.js';
-import type { Command, CommandResult, EntitySnapshot, ForceId, SimEventKind, SimState, UnitSnapshot, Vec2 } from '../shared/types.js';
+import type { Command, CommandResult, EntitySnapshot, ForceId, Role, SimEventKind, SimState, TerrainDataset, UnitSnapshot, Vec2 } from '../shared/types.js';
+import { DATASET_NAME, listDatasets } from '../terrain/store.js';
+import { Terrain } from '../sim/terrain.js';
+import { CONTROLLER, canSee, checkCommand, filterEvents, filterState, ForbiddenError } from './fog.js';
 import { FORCE_NAMES } from '../shared/types.js';
 import { executeCommand } from './commands.js';
 import { buildOpenApi } from './openapi.js';
@@ -16,6 +19,10 @@ export interface ApiContext {
   runner: SimRunner;
   integrations: IntegrationHub;
   scenarioDir: string;
+  /** Where saved recordings go (default: a "recordings" folder next to scenarioDir). */
+  recordingDir?: string;
+  /** Imported terrain datasets (default: a "terrains" folder next to scenarioDir). */
+  terrainDir?: string;
 }
 
 const SCENARIO_NAME = /^[A-Za-z0-9_-]{1,64}$/;
@@ -32,8 +39,22 @@ function num(v: unknown, what: string): number {
   return n;
 }
 
+/** Routes a player may use (everything else is exercise control only). */
+const PLAYER_ROUTES: [string, RegExp][] = [
+  ['GET', /^\/api\/v1\/?$/],
+  ['GET', /^\/api\/v1\/(openapi\.json|simulation|catalog(\/[\w-]+)?|entities|units|graphics|events|terrain(\/point)?)\/?$/],
+  ['GET', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
+  ['GET', /^\/api\/v1\/entities\/[^/]+\/path\/?$/],
+  ['POST', /^\/api\/v1\/(entities|units)\/[^/]+\/(task|plan|stop|embark|disembark)\/?$/],
+  ['POST', /^\/api\/v1\/(graphics|terrain\/line-of-sight|terrain\/route)\/?$/],
+  ['PATCH', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
+  ['DELETE', /^\/api\/v1\/graphics\/[^/]+\/?$/],
+];
+
 export class ApiV1 {
   readonly router = new Router();
+  /** Role of the request being handled (handlers run synchronously, one at a time). */
+  private role: Role = CONTROLLER;
 
   constructor(readonly ctx: ApiContext) {
     this.routes();
@@ -43,7 +64,24 @@ export class ApiV1 {
     return this.ctx.runner.engine;
   }
 
+  /** Handle a request as a role: players get their force's view and orders only. */
+  dispatch(input: Omit<RouteRequest, 'params'>) {
+    const role = input.role ?? CONTROLLER;
+    if (role.kind === 'player' && !PLAYER_ROUTES.some(([m, re]) => m === input.method && re.test(input.path))) {
+      const status = this.router.matches(input.path) ? 403 : 404;
+      return Promise.resolve({ status, json: { error: { status, message: status === 403 ? 'exercise control only' : 'unknown endpoint' } } });
+    }
+    this.role = role;
+    return this.router.dispatch(input);
+  }
+
   private run(c: Command): CommandResult {
+    try {
+      checkCommand(this.engine, this.role, c);
+    } catch (err) {
+      if (err instanceof ForbiddenError) throw new HttpError(403, err.message);
+      throw err;
+    }
     const r = executeCommand(this.ctx.runner, c);
     if (!r.ok) throw new HttpError(/^unknown (entity|unit|object|local entity|graphic)/.test(r.error ?? '') ? 404 : 400, r.error ?? 'command failed');
     return r;
@@ -81,13 +119,22 @@ export class ApiV1 {
   }
 
   private state(): SimState {
-    return this.ctx.runner.state();
+    const s = this.ctx.runner.state();
+    return this.role.kind === 'player' ? filterState(this.engine, s, this.role.force) : s;
   }
 
   private entity(id: string): EntitySnapshot {
     const e = this.engine.entities.get(id);
-    if (!e) throw new HttpError(404, `unknown entity ${id}`);
+    if (!e || !canSee(this.engine, this.role, id)) throw new HttpError(404, `unknown entity ${id}`);
+    if (this.role.kind === 'player' && e.force !== this.role.force) return this.state().entities.find((x) => x.id === id)!;
     return this.engine.snapshotEntity(e);
+  }
+
+  /** Entities a player may ask detailed questions about (own force only). */
+  private ownEntity(id: string): EntitySnapshot {
+    const e = this.entity(id);
+    if (this.role.kind === 'player' && e.force !== this.role.force) throw new HttpError(404, `unknown entity ${id}`);
+    return e;
   }
 
   private unit(id: string): UnitSnapshot {
@@ -175,6 +222,76 @@ export class ApiV1 {
       return { json: { saved: name } };
     });
 
+    // ---------------------------------------------------------------- terrain datasets
+    const terrainDir = () => this.ctx.terrainDir ?? path.join(path.dirname(this.ctx.scenarioDir), 'terrains');
+    r.get(`${P}/terrains`, () => ({ json: listDatasets(terrainDir()) }));
+    r.put(`${P}/terrains/{name}`, (req) => {
+      const name = req.params.name;
+      const ds = obj(req.body) as unknown as TerrainDataset;
+      if (!DATASET_NAME.test(name)) throw new HttpError(400, 'invalid dataset name');
+      if (ds.format !== 'werforces-terrain' || !ds.spec || typeof ds.heightsB64 !== 'string') throw new HttpError(400, 'not a WeRForces terrain dataset (make one with werforces-terrain)');
+      try {
+        Terrain.fromData(ds);
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+      mkdirSync(terrainDir(), { recursive: true });
+      writeFileSync(path.join(terrainDir(), `${name}.json`), JSON.stringify({ ...ds, name, spec: { ...ds.spec, dataset: name } }));
+      return { json: { saved: name } };
+    });
+
+    // ---------------------------------------------------------------- recording & AAR
+    const rec = () => {
+      if (!this.ctx.runner.recorder) throw new HttpError(409, 'recording is disabled (--record-interval 0)');
+      return this.ctx.runner.recorder;
+    };
+    r.get(`${P}/recording`, () => ({ json: rec().summary() }));
+    r.get(`${P}/recording/data`, () => ({ json: rec().toJSON() }));
+    r.get(`${P}/recording/report`, () => ({ json: rec().report() }));
+    r.get(`${P}/recording/state`, (req) => {
+      const s = rec().summary();
+      const t = req.query.get('time') === null ? s.end : num(req.query.get('time'), 'time');
+      const st = rec().stateAt(t);
+      return { json: { time: st.time, entities: st.entities.map((e) => this.entityView(e)), units: st.units.map((u) => this.unitView(u)) } };
+    });
+    r.post(`${P}/recording/bookmarks`, (req) => {
+      const b = obj(req.body);
+      if (typeof b.text !== 'string' || !b.text.trim()) throw new HttpError(400, 'text is required');
+      return { status: 201, json: rec().addBookmark(b.text.trim(), b.time === undefined ? undefined : num(b.time, 'time')) };
+    });
+    r.delete(`${P}/recording/bookmarks/{id}`, (req) => {
+      if (!rec().removeBookmark(req.params.id)) throw new HttpError(404, `unknown bookmark ${req.params.id}`);
+      return { status: 204 };
+    });
+    r.post(`${P}/recording/clear`, () => (rec().clear(), { json: rec().summary() }));
+    r.post(`${P}/recording/load`, (req) => {
+      try {
+        rec().load(obj(req.body) as never);
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+      return { json: rec().summary() };
+    });
+    r.get(`${P}/recordings`, () => ({ json: this.listRecordings() }));
+    r.put(`${P}/recordings/{name}`, (req) => {
+      const name = req.params.name;
+      if (!SCENARIO_NAME.test(name)) throw new HttpError(400, 'invalid recording name');
+      mkdirSync(this.recordingDir, { recursive: true });
+      writeFileSync(path.join(this.recordingDir, `${name}.json`), JSON.stringify(rec().toJSON()));
+      return { json: { saved: name } };
+    });
+    r.post(`${P}/recordings/{name}/load`, (req) => {
+      const name = req.params.name;
+      const file = path.join(this.recordingDir, `${name}.json`);
+      if (!SCENARIO_NAME.test(name) || !existsSync(file)) throw new HttpError(404, `unknown recording ${name}`);
+      try {
+        rec().load(JSON.parse(readFileSync(file, 'utf8')));
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+      return { json: rec().summary() };
+    });
+
     // ---------------------------------------------------------------- catalog
     r.get(`${P}/catalog`, () => ({ json: this.engine.catalog.catalog }));
     r.get(`${P}/catalog/entity-types`, () => ({
@@ -223,6 +340,7 @@ export class ApiV1 {
       const b = obj(req.body);
       if (b.name !== undefined) this.run({ cmd: 'rename', id, name: b.name as string });
       if (b.roe !== undefined) this.run({ cmd: 'setRoe', targetId: id, roe: b.roe as never });
+      if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
       if (b.position !== undefined || b.x !== undefined || b.lat !== undefined) {
         const p = this.point(b.position ?? b);
         this.run({ cmd: 'moveEntity', id, x: p.x, y: p.y, heading: b.heading as number | undefined });
@@ -234,7 +352,7 @@ export class ApiV1 {
       this.run({ cmd: 'deleteObject', id: req.params.id });
       return { status: 204 };
     });
-    r.get(`${P}/entities/{id}/path`, (req) => (this.entity(req.params.id), { json: this.engine.plannedPath(req.params.id) }));
+    r.get(`${P}/entities/{id}/path`, (req) => (this.ownEntity(req.params.id), { json: this.engine.plannedPath(req.params.id) }));
     for (const kind of ['entities', 'units'] as const) {
       const check = (id: string) => (kind === 'entities' ? this.entity(id) : this.unit(id));
       r.post(`${P}/${kind}/{id}/task`, (req) => {
@@ -245,6 +363,18 @@ export class ApiV1 {
       r.post(`${P}/${kind}/{id}/plan`, (req) => {
         check(req.params.id);
         this.run({ cmd: 'assignPlan', targetId: req.params.id, plan: this.resolvePlan(req.body) as never });
+        return { json: this.targetView(req.params.id) };
+      });
+      r.post(`${P}/${kind}/{id}/embark`, (req) => {
+        check(req.params.id);
+        const carrierId = obj(req.body).carrierId;
+        if (typeof carrierId !== 'string') throw new HttpError(400, 'carrierId is required');
+        this.run({ cmd: 'embark', passengerId: req.params.id, carrierId });
+        return { json: this.targetView(req.params.id) };
+      });
+      r.post(`${P}/${kind}/{id}/disembark`, (req) => {
+        check(req.params.id);
+        this.run({ cmd: 'disembark', carrierId: req.params.id });
         return { json: this.targetView(req.params.id) };
       });
       r.post(`${P}/${kind}/{id}/stop`, (req) => {
@@ -292,6 +422,7 @@ export class ApiV1 {
       if (b.name !== undefined) this.run({ cmd: 'rename', id, name: b.name as string });
       if (b.formation !== undefined) this.run({ cmd: 'setFormation', unitId: id, formation: b.formation as never });
       if (b.roe !== undefined) this.run({ cmd: 'setRoe', targetId: id, roe: b.roe as never });
+      if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
       return { json: this.unitView(this.unit(id)) };
     });
     r.delete(`${P}/units/{id}`, (req) => {
@@ -316,7 +447,7 @@ export class ApiV1 {
     });
     r.get(`${P}/graphics/{id}`, (req) => {
       const g = this.engine.graphics.get(req.params.id);
-      if (!g) throw new HttpError(404, `unknown graphic ${req.params.id}`);
+      if (!g || (this.role.kind === 'player' && g.force !== this.role.force && g.force !== 0)) throw new HttpError(404, `unknown graphic ${req.params.id}`);
       return { json: g };
     });
     r.patch(`${P}/graphics/{id}`, (req) => {
@@ -341,6 +472,7 @@ export class ApiV1 {
       const kinds = req.query.get('kinds')?.split(',').filter(Boolean) as SimEventKind[] | undefined;
       const limit = Math.min(1000, Math.max(1, Number(req.query.get('limit') ?? 200) || 200));
       let evs = this.engine.eventsSince(since);
+      if (this.role.kind === 'player') evs = filterEvents(this.engine, evs, this.role.force);
       if (kinds?.length) evs = evs.filter((e) => kinds.includes(e.kind));
       return { json: evs.slice(-limit) };
     });
@@ -452,6 +584,7 @@ export class ApiV1 {
     if (typeof v === 'string') {
       const e = this.engine.entities.get(v);
       if (!e) throw new HttpError(404, `unknown entity ${v}`);
+      this.ownEntity(v);
       return e.eye;
     }
     const p = this.point(v, what);
@@ -473,10 +606,33 @@ export class ApiV1 {
       p.statements = p.statements.map((s) => {
         const st = { ...obj(s) };
         if (st.kind === 'task') st.task = this.resolveTask(st.task);
+        if (st.kind === 'setReactions') st.reactions = this.resolveReactions(st.reactions);
         return st;
       });
     }
     return p;
+  }
+
+  resolveReactions(body: unknown): unknown {
+    const r = { ...obj(body) };
+    if (r.withdrawTo && typeof r.withdrawTo === 'object') r.withdrawTo = this.point(r.withdrawTo, 'withdrawTo');
+    return r;
+  }
+
+  private get recordingDir(): string {
+    return this.ctx.recordingDir ?? path.join(path.dirname(this.ctx.scenarioDir), 'recordings');
+  }
+
+  private listRecordings() {
+    const dir = this.recordingDir;
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => {
+        const name = f.replace(/\.json$/, '');
+        const st = statSync(path.join(dir, f));
+        return { name, bytes: st.size, modified: st.mtime.toISOString() };
+      });
   }
 
   private listScenarios() {
@@ -504,9 +660,9 @@ export class ApiV1 {
   }
 
   /** In-process call (used by the embedded MCP server). */
-  call(method: string, pathAndQuery: string, body?: unknown, baseUrl = '') {
+  call(method: string, pathAndQuery: string, body?: unknown, baseUrl = '', role: Role = CONTROLLER) {
     const u = new URL(pathAndQuery, 'http://local');
-    return this.router.dispatch({ method, path: u.pathname, query: u.searchParams, body, baseUrl });
+    return this.dispatch({ method, path: u.pathname, query: u.searchParams, body, baseUrl, role });
   }
 }
 

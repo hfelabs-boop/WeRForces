@@ -12,9 +12,9 @@ tutorial adds a German **Leopard 2A6**, its gun, and a four-tank platoon.
 
 | Object | Key fields |
 | --- | --- |
-| **Weapon** | `id`, `name`, DIS `munition` type, `minRange`/`maxRange` (m), `reloadTime` (s), `ammo` (rounds or bursts), `projectileSpeed` (m/s), `pk` per armour class, which domains it `targets`, optional `guided` |
+| **Weapon** | `id`, `name`, DIS `munition` type, `minRange`/`maxRange` (m), `reloadTime` (s), `ammo` (rounds or bursts), `projectileSpeed` (m/s), `pk` per armour class, which domains it `targets`; optional `guided`, `commandGuided` (wire guided: misses if the launcher dies or loses sight), and for artillery `indirect`, `blastRadius` and `dispersion` (m) |
 | **Sensor** | `id`, `name`, `maxRange` (m), `fov` (**radians**; 2π = all-round), `detects` (domains), optional `radar` (ignores concealment for air targets) |
-| **Entity type** | `id`, `name`, `description`, `domain`, MIL-STD `symbol`, `armor` class, DIS `dis` type, `maxSpeed`/`cruiseSpeed` (m/s), `acceleration` (m/s²), `turnRate` (**rad/s**), `offroadFactor`, `sensorHeight` (m), `sensors` and `weapons` (ids), `crew`; aircraft also `cruiseAltitude`, `climbRate`, and `minSpeed` for fixed wing |
+| **Entity type** | `id`, `name`, `description`, `domain`, MIL-STD `symbol`, `armor` class, DIS `dis` type, `maxSpeed`/`cruiseSpeed` (m/s), `acceleration` (m/s²), `turnRate` (**rad/s**), `offroadFactor`, `sensorHeight` (m), `sensors` and `weapons` (ids), `crew`; aircraft also `cruiseAltitude`, `climbRate`, and `minSpeed` for fixed wing; optional `capacity` (seats for infantry) and default `reactions` |
 | **Unit template** | `id`, `name`, `echelon`, `members` (entity type ids; the first is the leader), `formation`, `spacing` (m) |
 
 Valid values:
@@ -80,6 +80,7 @@ npm start -- --catalog examples/catalog-extension.json
 ```
 Catalog extension: examples/catalog-extension.json
 WeRForces running at http://127.0.0.1:8080  (scenario: Untitled)
+  Docs http://127.0.0.1:8080/docs/  ·  REST API http://127.0.0.1:8080/api/docs  ·  MCP http://127.0.0.1:8080/mcp
 ```
 
 In the GUI, the **Blue** palette now lists **DE Tank Platoon** and **Leopard

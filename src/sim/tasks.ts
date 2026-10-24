@@ -4,6 +4,7 @@
 import { bearing, dist2d, rotateOffset } from '../shared/math.js';
 import type { TaskSpec, Vec2, WeaponDef } from '../shared/types.js';
 import type { Engine } from './engine.js';
+import { fireIndirect } from './combat.js';
 import type { Entity } from './entity.js';
 
 export type TaskStatus = 'running' | 'done' | 'failed';
@@ -50,6 +51,11 @@ export abstract class Task {
   /** Remaining planned waypoints, for display. */
   get remainingPath(): Vec2[] {
     return [];
+  }
+
+  /** A spec that resumes this task from where it is now (used by checkpoints). */
+  resumeSpec(): TaskSpec {
+    return this.spec;
   }
 }
 
@@ -141,8 +147,13 @@ export class FollowRouteTask extends Task {
     readonly speed: number | undefined,
     readonly reverse: boolean,
     readonly loop: boolean,
+    readonly startIndex?: number,
   ) {
-    super(loop ? { type: 'patrol', routeId, speed } : { type: 'followRoute', routeId, speed, reverse });
+    super(loop ? { type: 'patrol', routeId, speed } : { type: 'followRoute', routeId, speed, reverse, startIndex });
+  }
+
+  override resumeSpec(): TaskSpec {
+    return this.loop ? this.spec : { type: 'followRoute', routeId: this.routeId, speed: this.speed, reverse: this.reverse, startIndex: this.index };
   }
 
   protected override start({ engine, entity }: TaskContext): void {
@@ -153,7 +164,8 @@ export class FollowRouteTask extends Task {
     }
     this.points = this.reverse ? [...g.points].reverse() : [...g.points];
     // Join the route at the nearest point when patrolling, at the start otherwise.
-    if (this.loop) {
+    if (this.startIndex !== undefined) this.index = Math.max(0, Math.min(this.points.length - 1, this.startIndex));
+    else if (this.loop) {
       let best = 0;
       for (let i = 1; i < this.points.length; i++) if (dist2d(entity, this.points[i]) < dist2d(entity, this.points[best])) best = i;
       this.index = best;
@@ -213,6 +225,10 @@ export class WaitTask extends Task {
   describe(): string {
     return `Wait ${Math.max(0, Math.ceil(this.duration - this.elapsed))}s`;
   }
+
+  override resumeSpec(): TaskSpec {
+    return { type: 'wait', duration: Math.max(0, this.duration - this.elapsed) };
+  }
 }
 
 export class FollowEntityTask extends Task {
@@ -255,7 +271,7 @@ export function bestWeaponAgainst(engine: Engine, shooter: Entity, target: Entit
   for (const wid of shooter.type.weapons) {
     if ((shooter.ammo.get(wid) ?? 0) <= 0) continue;
     const w = engine.catalog.weapon(wid);
-    if (!w.targets.includes(target.domain)) continue;
+    if (w.indirect || !w.targets.includes(target.domain)) continue;
     const pk = w.pk[target.type.armor] ?? 0;
     if (pk > bestPk) {
       bestPk = pk;
@@ -349,6 +365,10 @@ export class OrbitTask extends Task {
   describe(): string {
     return `Orbit (${Math.round(this.center.x)}, ${Math.round(this.center.y)}) r=${Math.round(this.radius)}m`;
   }
+
+  override resumeSpec(): TaskSpec {
+    return { type: 'orbit', center: this.center, radius: this.radius, duration: this.duration === undefined ? undefined : Math.max(0, this.duration - this.elapsed) };
+  }
 }
 
 /** Unit subordinate behaviour: hold the assigned slot relative to the unit leader. */
@@ -377,12 +397,164 @@ export class FormationTask extends Task {
   }
 }
 
+export const DEFAULT_MISSION_ROUNDS = 3;
+/** Seconds to lay the weapon on a new target before the first round. */
+export const LAY_TIME = 20;
+
+/** Indirect-fire weapon (with ammunition) that can reach a point from where the entity is. */
+export function indirectWeaponFor(engine: Engine, e: Entity, target: Vec2, weaponId?: string): WeaponDef | undefined {
+  const d = dist2d(e, target);
+  for (const wid of e.type.weapons) {
+    if (weaponId && wid !== weaponId) continue;
+    const w = engine.catalog.weapon(wid);
+    if (!w.indirect || (e.ammo.get(wid) ?? 0) <= 0) continue;
+    if (d >= w.minRange && d <= w.maxRange) return w;
+  }
+  return undefined;
+}
+
+/** Halt, lay on the target, then fire a number of indirect-fire rounds at it. */
+export class FireMissionTask extends Task {
+  private fired = 0;
+  private laidAt?: number;
+  readonly rounds: number;
+
+  constructor(readonly mission: Extract<TaskSpec, { type: 'fireMission' }>) {
+    super(mission);
+    this.rounds = Math.max(1, Math.round(mission.rounds ?? DEFAULT_MISSION_ROUNDS));
+  }
+
+  protected tick({ engine, entity }: TaskContext): TaskStatus {
+    entity.steer = { x: entity.x, y: entity.y, speed: 0, arrive: true };
+    if (entity.firepowerKill) return this.fail('weapon out of action');
+    const w = indirectWeaponFor(engine, entity, this.mission.target, this.mission.weaponId);
+    if (!w) {
+      if (this.fired > 0) return 'done';
+      const any = entity.type.weapons.map((id) => engine.catalog.weapon(id)).filter((x) => x.indirect && (!this.mission.weaponId || x.id === this.mission.weaponId));
+      if (any.length === 0) return this.fail('no indirect-fire weapon');
+      if (any.every((x) => (entity.ammo.get(x.id) ?? 0) <= 0)) return this.fail('out of ammunition');
+      return this.fail('target out of range');
+    }
+    // Lay the weapon once stopped.
+    if (entity.speed > 0.5) return 'running';
+    this.laidAt ??= engine.time + LAY_TIME;
+    if (engine.time < this.laidAt || (entity.weaponReadyAt.get(w.id) ?? 0) > engine.time) return 'running';
+    // Spread the sheaf: rounds land at random points within the mission radius.
+    const r = this.mission.radius ?? 0;
+    let point = this.mission.target;
+    if (r > 0) {
+      const a = engine.rng.range(0, Math.PI * 2);
+      const d = r * Math.sqrt(engine.rng.next());
+      point = { x: point.x + Math.sin(a) * d, y: point.y + Math.cos(a) * d };
+    }
+    fireIndirect(engine, entity, w, point);
+    this.fired++;
+    return this.fired >= this.rounds ? 'done' : 'running';
+  }
+
+  describe(): string {
+    const t = this.mission.target;
+    const at = `Fire mission at (${Math.round(t.x)}, ${Math.round(t.y)})`;
+    return this.fired === 0 ? `${at}, ${this.rounds} round${this.rounds > 1 ? 's' : ''}` : `${at}: ${this.fired}/${this.rounds} fired`;
+  }
+
+  override resumeSpec(): TaskSpec {
+    return { ...this.mission, rounds: this.rounds - this.fired };
+  }
+}
+
+/** Walk to a carrier and board it. A unit id as carrier picks the nearest member with a free seat. */
+export class MountTask extends Task {
+  private path = new PathFollower();
+  private replanIn = 0;
+  /** The carrier entity actually boarding (resolved from a unit id at start). */
+  carrier?: string;
+
+  constructor(readonly carrierId: string) {
+    super({ type: 'mount', carrierId });
+  }
+
+  protected override start({ engine, entity }: TaskContext): void {
+    if (entity.domain !== 'lifeform') {
+      this.fail('only dismounted infantry can mount');
+      return;
+    }
+    const unit = engine.units.get(this.carrierId);
+    const candidates = unit ? unit.alive() : [engine.entities.get(this.carrierId)].filter((c): c is Entity => !!c);
+    const free = candidates.filter((c) => c.alive && c !== entity && engine.freeSeats(c, entity) > 0).sort((a, b) => dist2d(entity, a) - dist2d(entity, b));
+    if (free.length === 0) {
+      this.fail(candidates.some((c) => (c.type.capacity ?? 0) > 0) ? 'no free seats' : 'not a carrier');
+      return;
+    }
+    this.carrier = free[0].id;
+  }
+
+  protected tick({ engine, entity, dt }: TaskContext): TaskStatus {
+    const c = this.carrier ? engine.entities.get(this.carrier) : undefined;
+    if (!c || c.destroyed) return this.fail('carrier destroyed');
+    if (engine.freeSeats(c, entity) <= 0) return this.fail(`${c.name} is full`);
+    const d = dist2d(entity, c);
+    const landed = c.domain !== 'air' || c.z - engine.terrain.surfaceHeight(c.x, c.y) < 5;
+    if (d <= 20 && c.speed < 1 && landed) {
+      engine.embark(entity, c);
+      return 'done';
+    }
+    if (d < 300) {
+      entity.steer = { x: c.x, y: c.y, speed: entity.cruiseSpeed, arrive: true };
+      return 'running';
+    }
+    this.replanIn -= dt;
+    if (this.replanIn <= 0) {
+      this.replanIn = 10;
+      this.path.plan(entity, engine, c);
+    }
+    this.path.step(entity, engine, dt, entity.cruiseSpeed, true);
+    return 'running';
+  }
+
+  describe(engine: Engine): string {
+    return `Mount ${engine.entities.get(this.carrier ?? this.carrierId)?.name ?? engine.units.get(this.carrierId)?.name ?? this.carrierId}`;
+  }
+
+  override resumeSpec(): TaskSpec {
+    return { type: 'mount', carrierId: this.carrier ?? this.carrierId };
+  }
+
+  override get remainingPath(): Vec2[] {
+    return this.path.remaining;
+  }
+}
+
+/** Stop (helicopters land) and let every passenger out. */
+export class DismountTask extends Task {
+  constructor() {
+    super({ type: 'dismount' });
+  }
+
+  protected tick({ engine, entity }: TaskContext): TaskStatus {
+    entity.steer = { x: entity.x, y: entity.y, speed: 0, arrive: true };
+    if (entity.speed > 0.5) return 'running';
+    if (entity.domain === 'air' && entity.z - engine.terrain.surfaceHeight(entity.x, entity.y) > 5) {
+      // Helicopters set down first (fixed-wing aircraft cannot hover to land).
+      if ((entity.type.minSpeed ?? 0) > 0) return this.fail('fixed-wing aircraft cannot land to dismount');
+      entity.altitudeOverride = 0;
+      return 'running';
+    }
+    engine.dismountAll(entity);
+    return 'done';
+  }
+
+  describe(): string {
+    return 'Dismount passengers';
+  }
+}
+
 export function createTask(spec: TaskSpec): Task {
   switch (spec.type) {
     case 'moveTo':
       return new MoveToTask(spec.target, spec.speed);
     case 'followRoute':
-      return new FollowRouteTask(spec.routeId, spec.speed, spec.reverse ?? false, false);
+      return new FollowRouteTask(spec.routeId, spec.speed, spec.reverse ?? false, false, spec.startIndex);
     case 'patrol':
       return new FollowRouteTask(spec.routeId, spec.speed, false, true);
     case 'wait':
@@ -395,5 +567,11 @@ export function createTask(spec: TaskSpec): Task {
       return new OrbitTask(spec.center, spec.radius, spec.duration);
     case 'formation':
       return new FormationTask(spec.leaderId);
+    case 'fireMission':
+      return new FireMissionTask(spec);
+    case 'mount':
+      return new MountTask(spec.carrierId);
+    case 'dismount':
+      return new DismountTask();
   }
 }

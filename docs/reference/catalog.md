@@ -20,6 +20,8 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | `ru-brdm2` | BRDM-2 — Russian amphibious scout car | 94 / 58 km/h | light | 12.7mm heavy machine gun (burst) | Binoculars | 1.1.222.3.1.0.0 |
 | `ru-ural` | Ural-4320 — Russian cargo truck | 83 / 50 km/h | soft | — | Unaided eye | 1.1.222.7.1.0.0 |
 | `ru-sa8` | 9K33 Osa (SA-8) — Russian mobile short-range SAM system | 79 / 43 km/h | light | 9K33 Osa SAM | Search/track radar<br>Unaided eye | 1.1.222.28.1.0.0 |
+| `us-m109a7` | M109A7 Paladin — US 155mm self-propelled howitzer | 61 / 36 km/h | light | 155mm M284 howitzer (M795 HE)<br>12.7mm heavy machine gun (burst) | Unaided eye | 1.1.225.4.1.7.0 |
+| `ru-2s19` | 2S19 Msta-S — Russian 152mm self-propelled howitzer | 59 / 36 km/h | light | 152mm 2A64 howitzer (OF-45 HE)<br>12.7mm heavy machine gun (burst) | Unaided eye | 1.1.222.4.1.3.0 |
 | `civ-car` | Civilian Car — Neutral civilian sedan | 108 / 50 km/h | soft | — | — | 1.1.0.81.1.0.0 |
 
 ### Dismounted
@@ -29,6 +31,10 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | `us-rifleman` | US Rifleman — Dismounted infantry with rifle and AT4 | 14 / 6 km/h | lifeform | 5.56mm rifle<br>AT4 84mm anti-armor | Binoculars | 3.1.225.1.1.0.0 |
 | `us-stinger-team` | Stinger Team — US MANPADS air-defense team | 13 / 5 km/h | lifeform | FIM-92 Stinger<br>5.56mm rifle | Binoculars | 3.1.225.1.3.0.0 |
 | `ru-rifleman` | Russian Rifleman — Dismounted infantry with rifle and RPG | 14 / 6 km/h | lifeform | 5.45mm rifle<br>RPG-7 | Binoculars | 3.1.222.1.1.0.0 |
+| `us-mortar-team` | 81mm Mortar Team — US dismounted 81mm mortar team | 11 / 5 km/h | lifeform | 81mm M252 mortar (M821 HE)<br>5.56mm rifle | Unaided eye | 3.1.225.1.6.0.0 |
+| `us-fo-team` | Forward Observer Team — US forward observers; call for fire on enemies they see | 14 / 6 km/h | lifeform | 5.56mm rifle | Observer optics (thermal, laser rangefinder) | 3.1.225.1.7.0.0 |
+| `ru-mortar-team` | 120mm Mortar Team — Russian dismounted 120mm 2B11 mortar team | 11 / 4 km/h | lifeform | 120mm 2B11 mortar (OF-843 HE)<br>5.45mm rifle | Unaided eye | 3.1.222.1.6.0.0 |
+| `ru-artillery-observer` | Artillery Observer — Russian artillery reconnaissance team; calls for fire on enemies it sees | 14 / 6 km/h | lifeform | 5.45mm rifle | Observer optics (thermal, laser rangefinder) | 3.1.222.1.7.0.0 |
 | `civ-person` | Civilian — Neutral civilian pedestrian | 11 / 5 km/h | lifeform | — | — | 3.1.0.0.0.0.0 |
 
 ### Aircraft
@@ -77,6 +83,10 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `sam-osa` | 9K33 Osa SAM | 1500–10000 m | 10 s | 6 | yes | air | air 0.6 |
 | `naval-127mm` | 127mm Mk 45 naval gun | 200–15000 m | 3 s | 600 | no | surface, ground, lifeform | ship 0.15, light 0.3, soft 0.5, armored 0.1, lifeform 0.3 |
 | `sm2` | RIM-66 SM-2 SAM | 2000–70000 m | 5 s | 32 | yes | air | air 0.75 |
+| `how-155mm` | 155mm M284 howitzer (M795 HE) | 2000–22000 m | 15 s | 39 | no | ground, lifeform, surface | armored 0.3, light 0.65, soft 0.85, lifeform 0.75, ship 0.1 |
+| `how-152mm` | 152mm 2A64 howitzer (OF-45 HE) | 2000–24700 m | 12 s | 50 | no | ground, lifeform, surface | armored 0.28, light 0.6, soft 0.85, lifeform 0.75, ship 0.1 |
+| `mortar-81mm` | 81mm M252 mortar (M821 HE) | 80–5600 m | 5 s | 30 | no | ground, lifeform | armored 0.02, light 0.2, soft 0.65, lifeform 0.7 |
+| `mortar-120mm` | 120mm 2B11 mortar (OF-843 HE) | 480–7100 m | 6 s | 24 | no | ground, lifeform | armored 0.06, light 0.35, soft 0.75, lifeform 0.75 |
 
 ## Sensors
 
@@ -89,6 +99,7 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `eo-turret` | EO/IR turret | 10000 m | 360° | ground, lifeform, surface | no |
 | `air-radar` | Fire-control radar | 60000 m | 120° | air | yes |
 | `sam-radar` | Search/track radar | 25000 m | 360° | air | yes |
+| `observer-optics` | Observer optics (thermal, laser rangefinder) | 6000 m | 360° | ground, lifeform, surface | no |
 | `naval-radar` | Naval surface/air radar | 80000 m | 360° | air, surface | yes |
 
 ## Unit templates
@@ -101,9 +112,13 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `us-scout-section` | US Scout Section | section | 2× M1151 HMMWV | column | 60 m |
 | `us-attack-team` | Apache Team | team | 2× AH-64D Apache | echelonRight | 200 m |
 | `us-fighter-flight` | F-16 Flight | flight | 2× F-16C Fighting Falcon | echelonRight | 600 m |
+| `us-paladin-platoon` | Paladin Platoon | platoon | 4× M109A7 Paladin | line | 100 m |
+| `us-mortar-section` | US 81mm Mortar Section | section | 2× 81mm Mortar Team | line | 40 m |
 | `ru-tank-platoon` | RU Tank Platoon | platoon | 3× T-72B3 | wedge | 80 m |
 | `ru-mech-platoon` | RU Mech Platoon | platoon | 3× BMP-2 | line | 80 m |
 | `ru-rifle-squad` | RU Rifle Squad | section | 8× Russian Rifleman | wedge | 12 m |
 | `ru-recon-patrol` | RU Recon Patrol | section | 2× BRDM-2 | column | 60 m |
 | `ru-supply-convoy` | RU Supply Convoy | section | 1× BRDM-2, 3× Ural-4320 | column | 50 m |
+| `ru-msta-battery` | 2S19 Battery | platoon | 6× 2S19 Msta-S | line | 100 m |
+| `ru-mortar-battery` | RU 120mm Mortar Battery | platoon | 4× 120mm Mortar Team | line | 40 m |
 | `ru-flanker-flight` | Su-27 Flight | flight | 2× Su-27 Flanker | echelonRight | 600 m |

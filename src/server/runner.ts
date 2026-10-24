@@ -2,12 +2,15 @@
 
 import type { DisGateway } from '../dis/gateway.js';
 import { DEFAULT_DT, type Engine } from '../sim/engine.js';
+import { Recorder } from '../sim/recorder.js';
 import type { SimState } from '../shared/types.js';
 
 export class SimRunner {
   running = false;
   timeScale = 1;
   gateway: DisGateway | null = null;
+  /** Continuous recording for playback and after-action review (null when disabled). */
+  recorder: Recorder | null;
   private timer: NodeJS.Timeout | null = null;
   private last = 0;
   private accumulator = 0;
@@ -17,7 +20,10 @@ export class SimRunner {
     readonly engine: Engine,
     readonly dt = DEFAULT_DT,
     readonly frameMs = 50,
-  ) {}
+    recordInterval = 1,
+  ) {
+    this.recorder = recordInterval > 0 ? new Recorder(engine, { interval: recordInterval }) : null;
+  }
 
   start(): void {
     if (this.timer) return;

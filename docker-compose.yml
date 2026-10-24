@@ -1,0 +1,41 @@
+# WeRForces behind Caddy, which serves HTTPS (and secure WebSockets) and proxies to the
+# simulator. For a public host name, Caddy fetches a Let's Encrypt certificate:
+#   WERFORCES_DOMAIN=sim.example.org WERFORCES_API_KEY=$(openssl rand -hex 16) docker compose up -d
+# Without a domain it serves https://localhost with Caddy's own local CA.
+services:
+  werforces:
+    build: .
+    image: werforces:latest
+    restart: unless-stopped
+    environment:
+      WERFORCES_API_KEY: ${WERFORCES_API_KEY:?set WERFORCES_API_KEY}
+    # Extra options, e.g. a scenario, players or DIS:
+    # command: ["--scenario", "calloway-crossroads", "--player", "blue:${BLUE_KEY}", "--player", "red:${RED_KEY}"]
+    volumes:
+      - scenarios:/app/scenarios
+      - recordings:/app/recordings
+    expose:
+      - '8080'
+    # DIS uses UDP broadcast on the host's network; for DIS, run with network_mode: host instead.
+    # ports:
+    #   - '3000:3000/udp'
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [werforces]
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      WERFORCES_DOMAIN: ${WERFORCES_DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  scenarios:
+  recordings:
+  caddy-data:
+  caddy-config:

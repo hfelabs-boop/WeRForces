@@ -26,6 +26,13 @@ export function buildOpenApi(baseUrl: string): Schema {
       post: op(tag, `Assign a plan`, { parameters: [idParam()], ...body(ref('Plan')) }),
     },
     [`/api/v1/${kind}/{id}/stop`]: { post: op(tag, 'Stop the current task and plan', { parameters: [idParam()] }) },
+    [`/api/v1/${kind}/{id}/embark`]: {
+      post: op(tag, 'Put this infantry into a carrier now (scenario setup); a unit carrier shares out seats', {
+        parameters: [idParam()],
+        ...body({ type: 'object', required: ['carrierId'], properties: { carrierId: { type: 'string', description: 'carrier entity or unit id' } } }),
+      }),
+    },
+    [`/api/v1/${kind}/{id}/disembark`]: { post: op(tag, "Let this carrier's (or unit's carriers') passengers out now", { parameters: [idParam()] }) },
   });
 
   return {
@@ -41,7 +48,7 @@ export function buildOpenApi(baseUrl: string): Schema {
     },
     servers: [{ url: baseUrl || '/' }],
     security: [{ bearer: [] }, { apiKey: [] }],
-    tags: ['Simulation', 'Scenario', 'Catalog', 'Entities', 'Units', 'Graphics', 'Events', 'Terrain', 'Integrations', 'Export'].map((name) => ({ name })),
+    tags: ['Simulation', 'Scenario', 'Recording', 'Catalog', 'Entities', 'Units', 'Graphics', 'Events', 'Terrain', 'Integrations', 'Export'].map((name) => ({ name })),
     paths: {
       '/api/v1/simulation': { get: op('Simulation', 'Status, strength per force, terrain and towns', {}, ok(ref('Simulation'))) },
       '/api/v1/simulation/run': { post: op('Simulation', 'Run in real time', {}, ok(ref('Simulation'))) },
@@ -58,7 +65,7 @@ export function buildOpenApi(baseUrl: string): Schema {
         put: op('Scenario', 'Load a scenario file', body(ref('Scenario'))),
       },
       '/api/v1/scenario/new': {
-        post: op('Scenario', 'Start an empty scenario', body({ type: 'object', properties: { name: { type: 'string' }, terrain: { type: 'object' } } })),
+        post: op('Scenario', 'Start an empty scenario', body({ type: 'object', properties: { name: { type: 'string' }, terrain: { type: 'object', description: 'generation settings (seed, size, cellSize, relief, waterFraction, forestFraction, towns, origin) or {"dataset": name} for imported terrain' } } })),
       },
       '/api/v1/scenarios': { get: op('Scenario', 'List scenarios stored on the server') },
       '/api/v1/scenarios/{name}': {
@@ -66,6 +73,27 @@ export function buildOpenApi(baseUrl: string): Schema {
         put: op('Scenario', 'Save the current state under a name', { parameters: [idParam('name')] }),
       },
       '/api/v1/scenarios/{name}/load': { post: op('Scenario', 'Load a stored scenario', { parameters: [idParam('name')] }) },
+      '/api/v1/terrains': { get: op('Terrain', 'Imported real-world terrain datasets (use one with POST /scenario/new {"terrain":{"dataset":name}})') },
+      '/api/v1/terrains/{name}': { put: op('Terrain', 'Upload a terrain dataset made with werforces-terrain', { parameters: [idParam('name')], ...body({ type: 'object' }) }) },
+      '/api/v1/recording': { get: op('Recording', 'Recording summary: time span, frames, bookmarks, live or reviewing a loaded recording') },
+      '/api/v1/recording/data': { get: op('Recording', 'The whole recording (frames, events, bookmarks) as JSON, for saving or replaying elsewhere') },
+      '/api/v1/recording/report': { get: op('Recording', 'After-action report: strength per force, losses, kills with killer and weapon, rounds fired, strength over time') },
+      '/api/v1/recording/state': {
+        get: op('Recording', 'Recorded positions and damage of every entity and unit at a past time (interpolated)', {
+          parameters: [{ name: 'time', in: 'query', schema: { type: 'number' }, description: 'simulation time in seconds (default: end of the recording)' }],
+        }),
+      },
+      '/api/v1/recording/bookmarks': {
+        post: op('Recording', 'Add a bookmark (note) to the recording', {
+          ...body({ type: 'object', required: ['text'], properties: { text: { type: 'string' }, time: { type: 'number', description: 'default: now' } } }),
+        }),
+      },
+      '/api/v1/recording/bookmarks/{id}': { delete: { tags: ['Recording'], summary: 'Remove a bookmark', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } } },
+      '/api/v1/recording/clear': { post: op('Recording', 'Discard the recording (or stop reviewing a loaded one) and record live from now') },
+      '/api/v1/recording/load': { post: op('Recording', 'Review a recording sent in the body (live recording is suspended until clear)', { ...body({ type: 'object' }) }) },
+      '/api/v1/recordings': { get: op('Recording', 'Saved recordings on the server') },
+      '/api/v1/recordings/{name}': { put: op('Recording', 'Save the current recording under a name', { parameters: [idParam('name')] }) },
+      '/api/v1/recordings/{name}/load': { post: op('Recording', 'Review a saved recording', { parameters: [idParam('name')] }) },
       '/api/v1/catalog': { get: op('Catalog', 'Full simulation object model') },
       '/api/v1/catalog/entity-types': { get: op('Catalog', 'Entity types (summary)') },
       '/api/v1/catalog/unit-templates': { get: op('Catalog', 'Unit templates') },
@@ -88,7 +116,7 @@ export function buildOpenApi(baseUrl: string): Schema {
         patch: op(
           'Entities',
           'Rename, reposition or set ROE',
-          { parameters: [idParam()], ...body({ type: 'object', properties: { name: { type: 'string' }, roe: ref('Roe'), position: ref('Position'), heading: { type: 'number' } } }) },
+          { parameters: [idParam()], ...body({ type: 'object', properties: { name: { type: 'string' }, roe: ref('Roe'), position: ref('Position'), heading: { type: 'number' }, reactions: ref('Reactions') } }) },
           ok(ref('Entity')),
         ),
         delete: { tags: ['Entities'], summary: 'Delete an entity', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } },
@@ -104,7 +132,7 @@ export function buildOpenApi(baseUrl: string): Schema {
       },
       '/api/v1/units/{id}': {
         get: op('Units', 'Get a unit with its members', { parameters: [idParam()] }),
-        patch: op('Units', 'Rename, set formation or ROE', { parameters: [idParam()], ...body({ type: 'object', properties: { name: { type: 'string' }, formation: ref('Formation'), roe: ref('Roe') } }) }),
+        patch: op('Units', 'Rename, set formation, ROE or reactions', { parameters: [idParam()], ...body({ type: 'object', properties: { name: { type: 'string' }, formation: ref('Formation'), roe: ref('Roe'), reactions: ref('Reactions') } }) }),
         delete: { tags: ['Units'], summary: 'Delete a unit and its members', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } },
       },
       ...taskable('units', 'Units'),
@@ -193,12 +221,31 @@ export function buildOpenApi(baseUrl: string): Schema {
         Task: {
           oneOf: [
             { type: 'object', required: ['type', 'target'], properties: { type: { const: 'moveTo' }, target: ref('Position'), speed: { type: 'number', description: 'm/s' } } },
-            { type: 'object', required: ['type', 'routeId'], properties: { type: { const: 'followRoute' }, routeId: { type: 'string' }, speed: { type: 'number' }, reverse: { type: 'boolean' } } },
+            { type: 'object', required: ['type', 'routeId'], properties: { type: { const: 'followRoute' }, routeId: { type: 'string' }, speed: { type: 'number' }, reverse: { type: 'boolean' }, startIndex: { type: 'integer' } } },
             { type: 'object', required: ['type', 'routeId'], properties: { type: { const: 'patrol' }, routeId: { type: 'string' }, speed: { type: 'number' } } },
             { type: 'object', required: ['type', 'duration'], properties: { type: { const: 'wait' }, duration: { type: 'number' } } },
             { type: 'object', required: ['type', 'targetId'], properties: { type: { const: 'follow' }, targetId: { type: 'string' }, distance: { type: 'number' } } },
             { type: 'object', required: ['type', 'targetId'], properties: { type: { const: 'attack' }, targetId: { type: 'string' } } },
             { type: 'object', required: ['type', 'center', 'radius'], properties: { type: { const: 'orbit' }, center: ref('Position'), radius: { type: 'number' }, duration: { type: 'number' } } },
+            {
+              type: 'object',
+              required: ['type', 'carrierId'],
+              description: 'Infantry walk to the carrier (or the nearest member of a carrier unit with free seats) and board it. On a unit, seats are shared out.',
+              properties: { type: { const: 'mount' }, carrierId: { type: 'string' } },
+            },
+            { type: 'object', required: ['type'], description: 'A carrier stops (a helicopter lands) and lets all passengers out.', properties: { type: { const: 'dismount' } } },
+            {
+              type: 'object',
+              required: ['type', 'target'],
+              description: 'Indirect fire (artillery, mortars) on a location. On a unit every tube that can reach the target fires.',
+              properties: {
+                type: { const: 'fireMission' },
+                target: ref('Position'),
+                rounds: { type: 'integer', minimum: 1, maximum: 100, description: 'rounds per tube (default 3)' },
+                radius: { type: 'number', minimum: 0, maximum: 1000, description: 'spread rounds over this radius in m (default 0)' },
+                weaponId: { type: 'string', description: 'indirect-fire weapon to use (default: first that can reach)' },
+              },
+            },
           ],
         },
         PlanStatement: {
@@ -208,6 +255,7 @@ export function buildOpenApi(baseUrl: string): Schema {
             { type: 'object', required: ['kind', 'speed'], properties: { kind: { const: 'setSpeed' }, speed: { type: 'number' } } },
             { type: 'object', required: ['kind', 'altitude'], properties: { kind: { const: 'setAltitude' }, altitude: { type: 'number' } } },
             { type: 'object', required: ['kind', 'formation'], properties: { kind: { const: 'setFormation' }, formation: ref('Formation') } },
+            { type: 'object', required: ['kind', 'reactions'], properties: { kind: { const: 'setReactions' }, reactions: ref('Reactions') } },
             {
               type: 'object',
               required: ['kind', 'condition'],
@@ -215,11 +263,26 @@ export function buildOpenApi(baseUrl: string): Schema {
                 kind: { const: 'waitUntil' },
                 condition: {
                   type: 'object',
-                  properties: { type: { enum: ['simTime', 'inArea', 'enemyDetected', 'underFire', 'entityDestroyed'] }, time: { type: 'number' }, areaId: { type: 'string' }, entityId: { type: 'string' } },
+                  properties: {
+                    type: { enum: ['simTime', 'inArea', 'enemyInArea', 'enemyDetected', 'underFire', 'strengthBelow', 'entityDestroyed'] },
+                    time: { type: 'number' },
+                    areaId: { type: 'string' },
+                    entityId: { type: 'string' },
+                    fraction: { type: 'number', minimum: 0, maximum: 1 },
+                  },
                 },
               },
             },
           ],
+        },
+        Reactions: {
+          type: 'object',
+          properties: {
+            onContact: { enum: ['continue', 'halt'], description: 'halt: stop and fight while a hostile is within weapon range, then resume' },
+            withdrawBelow: { type: 'number', minimum: 0, maximum: 1, description: 'units: fall back when strength drops below this fraction; entities: when weapons are knocked out' },
+            withdrawTo: ref('Position'),
+            callForFire: { type: 'boolean', description: 'request fire missions from idle friendly artillery on hostiles this entity sees' },
+          },
         },
         Plan: { type: 'object', required: ['statements'], properties: { name: { type: 'string' }, loop: { type: 'boolean' }, statements: { type: 'array', items: ref('PlanStatement') } } },
         CreateEntity: {

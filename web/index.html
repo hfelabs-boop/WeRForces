@@ -9,7 +9,7 @@
   <body>
     <header id="toolbar">
       <div class="brand">WeRForces</div>
-      <div class="menu">
+      <div class="menu" data-controller-only>
         <button id="btn-file">File ▾</button>
         <div class="menu-items" id="menu-file">
           <button data-action="new">New scenario</button>
@@ -17,11 +17,12 @@
           <button data-action="import">Import from file…</button>
           <button data-action="export">Export to file</button>
           <button data-action="save-server">Save on server…</button>
+          <button data-action="review-recording">Review saved recording…</button>
         </div>
       </div>
       <span id="scenario-name" class="scenario-name">—</span>
       <div class="sep"></div>
-      <div class="sim-controls">
+      <div class="sim-controls" data-controller-only>
         <button id="btn-rewind" title="Rewind to the last loaded or saved state">⏮</button>
         <button id="btn-run" class="primary" title="Run / pause (Space)">▶ Run</button>
         <button id="btn-step" title="Step 1 s">⏭</button>
@@ -65,17 +66,19 @@
         <button data-view="3d">3D</button>
         <button data-view="split">Split</button>
       </div>
-      <button id="btn-integrations" title="API, MCP, TAK, webhooks and GIS export">Integrations</button>
-      <a id="btn-help" class="button-link" href="/docs/" target="_blank" title="Documentation and tutorials">Help</a>
+      <button id="btn-aar" data-controller-only title="Replay the recording: after-action review">AAR</button>
+      <button id="btn-integrations" data-controller-only title="API, MCP, TAK, webhooks and GIS export">Integrations</button>
+      <a id="btn-help" class="button-link" href="/docs/" target="_blank" title="Documentation and tutorials">?</a>
       <div class="spacer"></div>
       <span id="dis-status" class="pill">DIS off</span>
+      <span id="role-status" class="pill hidden"></span>
       <span id="conn-status" class="pill bad">offline</span>
     </header>
 
     <main>
       <aside id="left">
         <nav class="tabs">
-          <button data-tab="create" class="active">Create</button>
+          <button data-tab="create" class="active" data-controller-only>Create</button>
           <button data-tab="objects">Objects</button>
         </nav>
         <section id="tab-create" class="tab active">

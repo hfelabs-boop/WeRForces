@@ -25,13 +25,21 @@ export function detectionProbability(engine: Engine, observer: Entity, target: E
 
 export function updateSensors(engine: Engine, observer: Entity): void {
   const now = engine.time;
-  if (observer.alive && !observer.remote && observer.type.sensors.length > 0) {
+  if (observer.alive && !observer.remote && !observer.embarkedIn && observer.type.sensors.length > 0) {
     const eye = observer.eye;
-    for (const target of engine.entities.values()) {
-      if (target === observer || target.force === observer.force || target.destroyed) continue;
-      const range = Math.hypot(target.x - observer.x, target.y - observer.y, target.z - observer.z);
-      for (const sid of observer.type.sensors) {
-        const s = engine.catalog.sensors.get(sid)!;
+    const sensors = observer.type.sensors.map((sid) => engine.catalog.sensors.get(sid)!);
+    let reach = 0;
+    for (const s of sensors) reach = Math.max(reach, s.maxRange);
+    engine.spatial.build(engine.entities.values(), engine.time);
+    for (const target of engine.spatial.query(observer.x, observer.y, reach, observer.force)) {
+      if (target === observer || target.destroyed || target.embarkedIn) continue;
+      const dx = target.x - observer.x;
+      const dy = target.y - observer.y;
+      const dz = target.z - observer.z;
+      const range2 = dx * dx + dy * dy + dz * dz;
+      if (range2 > reach * reach) continue;
+      const range = Math.sqrt(range2);
+      for (const s of sensors) {
         if (range > s.maxRange || !s.detects.includes(target.domain)) continue;
         if (s.fov < Math.PI * 2 - 1e-6) {
           const off = Math.abs(angleDiff(observer.heading, bearing(observer, target)));

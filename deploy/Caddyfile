@@ -1,0 +1,12 @@
+# HTTPS front end for WeRForces. Caddy obtains and renews certificates automatically
+# (Let's Encrypt for a public domain, its internal CA for localhost) and proxies
+# HTTP and WebSocket traffic to the simulator.
+{$WERFORCES_DOMAIN:localhost} {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+	reverse_proxy werforces:8080
+}

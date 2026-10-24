@@ -1,6 +1,6 @@
 // Remote-control command dispatcher shared by the REST and WebSocket APIs.
 
-import type { Command, CommandResult, Condition, ForceId, Formation, Plan, PlanStatement, Roe, TaskSpec, Vec2 } from '../shared/types.js';
+import type { Command, CommandResult, Condition, ForceId, Formation, Plan, PlanStatement, Reactions, Roe, TaskSpec, Vec2 } from '../shared/types.js';
 import type { SimRunner } from './runner.js';
 
 const FORCES = new Set([0, 1, 2, 3]);
@@ -48,7 +48,13 @@ export function validateTask(v: unknown): TaskSpec {
     case 'moveTo':
       return { type: 'moveTo', target: vec(t.target, 'target'), speed };
     case 'followRoute':
-      return { type: 'followRoute', routeId: str(t.routeId, 'routeId'), speed, reverse: t.reverse === true };
+      return {
+        type: 'followRoute',
+        routeId: str(t.routeId, 'routeId'),
+        speed,
+        reverse: t.reverse === true,
+        startIndex: t.startIndex === undefined ? undefined : Math.max(0, Math.floor(num(t.startIndex, 'startIndex'))),
+      };
     case 'patrol':
       return { type: 'patrol', routeId: str(t.routeId, 'routeId'), speed };
     case 'wait':
@@ -64,6 +70,17 @@ export function validateTask(v: unknown): TaskSpec {
         radius: num(t.radius, 'radius'),
         duration: t.duration === undefined ? undefined : num(t.duration, 'duration'),
       };
+    case 'mount':
+      return { type: 'mount', carrierId: str(t.carrierId, 'carrierId') };
+    case 'dismount':
+      return { type: 'dismount' };
+    case 'fireMission': {
+      const rounds = t.rounds === undefined ? undefined : Math.floor(num(t.rounds, 'rounds'));
+      if (rounds !== undefined && (rounds < 1 || rounds > 100)) throw new ValidationError('rounds must be between 1 and 100');
+      const radius = t.radius === undefined ? undefined : num(t.radius, 'radius');
+      if (radius !== undefined && (radius < 0 || radius > 1000)) throw new ValidationError('radius must be between 0 and 1000 m');
+      return { type: 'fireMission', target: vec(t.target, 'target'), rounds, radius, weaponId: t.weaponId === undefined ? undefined : str(t.weaponId, 'weaponId') };
+    }
     default:
       throw new ValidationError(`unknown task type ${String(t.type)}`);
   }
@@ -83,9 +100,37 @@ function validateCondition(v: unknown): Condition {
       return { type: 'underFire' };
     case 'entityDestroyed':
       return { type: 'entityDestroyed', entityId: str(c.entityId, 'entityId') };
+    case 'enemyInArea':
+      return { type: 'enemyInArea', areaId: str(c.areaId, 'areaId') };
+    case 'strengthBelow': {
+      const fraction = num(c.fraction, 'fraction');
+      if (fraction <= 0 || fraction > 1) throw new ValidationError('fraction must be in (0, 1]');
+      return { type: 'strengthBelow', fraction };
+    }
     default:
       throw new ValidationError(`unknown condition ${String(c.type)}`);
   }
+}
+
+export function validateReactions(v: unknown): Reactions {
+  if (!v || typeof v !== 'object') throw new ValidationError('reactions must be an object');
+  const r = v as Record<string, unknown>;
+  const out: Reactions = {};
+  if (r.onContact !== undefined) {
+    if (r.onContact !== 'continue' && r.onContact !== 'halt') throw new ValidationError("onContact must be 'continue' or 'halt'");
+    out.onContact = r.onContact;
+  }
+  if (r.withdrawBelow !== undefined && r.withdrawBelow !== null) {
+    const f = num(r.withdrawBelow, 'withdrawBelow');
+    if (f < 0 || f > 1) throw new ValidationError('withdrawBelow must be between 0 and 1');
+    if (f > 0) out.withdrawBelow = f;
+  }
+  if (r.withdrawTo !== undefined) out.withdrawTo = vec(r.withdrawTo, 'withdrawTo');
+  if (r.callForFire !== undefined) {
+    if (typeof r.callForFire !== 'boolean') throw new ValidationError('callForFire must be a boolean');
+    if (r.callForFire) out.callForFire = true;
+  }
+  return out;
 }
 
 export function validatePlan(v: unknown): Plan {
@@ -107,6 +152,8 @@ export function validatePlan(v: unknown): Plan {
         return { kind: 'setFormation', formation: formation(st.formation) };
       case 'waitUntil':
         return { kind: 'waitUntil', condition: validateCondition(st.condition) };
+      case 'setReactions':
+        return { kind: 'setReactions', reactions: validateReactions(st.reactions) };
       default:
         throw new ValidationError(`unknown plan statement ${String(st.kind)}`);
     }
@@ -115,6 +162,13 @@ export function validatePlan(v: unknown): Plan {
 }
 
 export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
+  const result = runCommand(runner, raw);
+  // Keep the recording's current frame in step with edits made while paused.
+  if (result.ok) runner.recorder?.touch();
+  return result;
+}
+
+function runCommand(runner: SimRunner, raw: unknown): CommandResult {
   const engine = runner.engine;
   return engine.safely(() => {
     if (!raw || typeof raw !== 'object') throw new ValidationError('command must be an object');
@@ -184,6 +238,7 @@ export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
       case 'moveEntity': {
         const e = engine.entities.get(str(c.id, 'id'));
         if (!e || e.remote) throw new ValidationError('unknown local entity');
+        if (e.embarkedIn) throw new ValidationError(`${e.name} is mounted in ${engine.nameOf(e.embarkedIn)}; dismount it first`);
         const x = num(c.x, 'x');
         const y = num(c.y, 'y');
         if (!engine.terrain.inBounds(x, y)) throw new ValidationError('position is outside the terrain');
@@ -206,6 +261,19 @@ export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
       case 'setRoe':
         engine.setRoe(str(c.targetId, 'targetId'), roe(c.roe));
         return;
+      case 'setReactions':
+        engine.setReactions(str(c.targetId, 'targetId'), validateReactions(c.reactions));
+        return;
+      case 'embark': {
+        engine.embarkNow(str(c.passengerId, 'passengerId'), str(c.carrierId, 'carrierId'));
+        return;
+      }
+      case 'disembark': {
+        const carriers = engine.units.get(str(c.carrierId, 'carrierId'))?.alive() ?? [engine.entities.get(c.carrierId as string)];
+        if (carriers.some((x) => !x || x.remote)) throw new ValidationError('unknown local carrier');
+        for (const x of carriers) engine.dismountAll(x!);
+        return;
+      }
       case 'setFormation': {
         const u = engine.units.get(str(c.unitId, 'unitId'));
         if (!u) throw new ValidationError('unknown unit');

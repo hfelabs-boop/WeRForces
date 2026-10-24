@@ -13,5 +13,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]
   },
-  "include": ["src", "web", "test", "scripts"]
+  "include": ["src", "web", "test", "scripts", "e2e", "playwright.config.ts"]
 }
