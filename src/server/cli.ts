@@ -12,7 +12,7 @@ import { Engine } from '../sim/engine.js';
 import type { ScenarioFile } from '../shared/types.js';
 import { IntegrationHub, type IntegrationOptions } from '../integrations/hub.js';
 import { parsePlayer } from './fog.js';
-import { datasetLoader } from '../terrain/store.js';
+import { datasetLoader, setTileCacheBytes } from '../terrain/store.js';
 import { SimRunner } from './runner.js';
 import { type OidcOptions, parseRole, parseRoleRule } from './oidc.js';
 import { SimServer } from './server.js';
@@ -52,6 +52,7 @@ Options:
       --cot-interval <s>      Seconds between CoT position reports (default 2)
       --webhook <url>         POST simulation events to a URL (Slack/Discord URLs get chat formatting); repeatable
       --terrains <dir>        Folder of imported terrain datasets (default ./terrains; see werforces-terrain)
+      --terrain-cache <MB>    Memory for each tiled terrain dataset's tile cache (default 192)
       --record-interval <s>   Seconds of simulated time between recorded frames for playback/AAR (default 1, 0 = off)
       --headless              No web server; run the scenario and print events
       --duration <s>          Headless only: simulated seconds to run as fast as possible
@@ -128,6 +129,7 @@ async function main(): Promise<void> {
       'oidc-role': { type: 'string', multiple: true },
       'oidc-default-role': { type: 'string' },
       webhook: { type: 'string', multiple: true },
+      'terrain-cache': { type: 'string' },
       headless: { type: 'boolean', default: false },
       duration: { type: 'string' },
       help: { type: 'boolean', short: 'h', default: false },
@@ -145,6 +147,11 @@ async function main(): Promise<void> {
     console.log(`Catalog extension: ${values.catalog}`);
   }
   const terrainDir = path.resolve(values.terrains ?? path.join(root, 'terrains'));
+  if (values['terrain-cache'] !== undefined) {
+    const mb = Number(values['terrain-cache']);
+    if (!(mb >= 16)) throw new Error('--terrain-cache must be at least 16 (MB)');
+    setTileCacheBytes(mb * 1024 * 1024);
+  }
   const engine = new Engine({ catalog, terrainLoader: datasetLoader(terrainDir) });
   if (values.scenario) engine.loadScenario(loadScenarioArg(values.scenario, scenarioDir));
   else engine.newScenario('Untitled');

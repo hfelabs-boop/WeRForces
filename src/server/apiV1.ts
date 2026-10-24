@@ -15,6 +15,8 @@ import type { BatchManager } from './batch.js';
 import { attachment, eventsCsv, killsCsv, reportPdf, strengthCsv } from './reports.js';
 import { DATASET_NAME, listDatasets } from '../terrain/store.js';
 import { Terrain } from '../sim/terrain.js';
+import { TiledTerrain } from '../sim/tiledTerrain.js';
+import { TileServer } from './tileServer.js';
 import { CONTROLLER, canSee, checkCommand, filterEvents, filterState, ForbiddenError } from './fog.js';
 import { FORCE_NAMES } from '../shared/types.js';
 import { executeCommand } from './commands.js';
@@ -52,7 +54,7 @@ function num(v: unknown, what: string): number {
 /** Routes a player may use (everything else is exercise control only). */
 const PLAYER_ROUTES: [string, RegExp][] = [
   ['GET', /^\/api\/v1\/?$/],
-  ['GET', /^\/api\/v1\/(openapi\.json|simulation|catalog(\/[\w-]+)?|entities|units|graphics|events|terrain(\/point)?)\/?$/],
+  ['GET', /^\/api\/v1\/(openapi\.json|simulation|catalog(\/[\w-]+)?|entities|units|graphics|events|terrain(\/point|\/tiles(\/\d+\/\d+\/\d+)?)?)\/?$/],
   ['GET', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
   ['GET', /^\/api\/v1\/entities\/[^/]+\/path\/?$/],
   ['GET', /^\/api\/v1\/(entities|units)\/[^/]+\/explain\/?$/],
@@ -75,6 +77,7 @@ export class ApiV1 {
   readonly router = new Router();
   /** Role of the request being handled (handlers run synchronously, one at a time). */
   private role: Role = CONTROLLER;
+  private readonly tiles = new TileServer();
 
   constructor(readonly ctx: ApiContext) {
     this.routes();
@@ -331,12 +334,17 @@ export class ApiV1 {
       if (scenario.format !== 'werforces-scenario') throw new HttpError(400, 'not a WeRForces scenario');
       const terrains: Record<string, TerrainData> = {};
       const ds = scenario.terrain?.dataset;
-      if (ds) terrains[ds] = this.engine.terrain.spec.dataset === ds ? this.engine.terrain.toData() : this.engine.terrainLoader!(ds);
+      if (ds) {
+        // Tiled datasets are read from the terrains folder by the batch run itself.
+        const t = this.engine.terrain.spec.dataset === ds ? this.engine.terrain : this.engine.terrainLoader!(ds);
+        if (!(t instanceof TiledTerrain)) terrains[ds] = t instanceof Terrain ? t.toData() : t;
+      }
       const j = batch().start({
         scenario,
         options: { runs, duration, seed: b.seed === undefined ? 1000 : Math.floor(num(b.seed, 'seed')), stopWhenDestroyed: b.stopWhenDestroyed !== false },
         catalog: this.engine.catalog.catalog,
         terrains,
+        terrainDir: terrainDir(),
       });
       return { status: 202, json: { ...j, outcomes: undefined } };
     });
@@ -712,8 +720,10 @@ export class ApiV1 {
     // ---------------------------------------------------------------- terrain
     r.get(`${P}/terrain`, () => {
       const t = this.engine.terrain;
-      return { json: { spec: t.spec, towns: t.towns, roads: t.roads, data: '/api/terrain' } };
+      return { json: { spec: t.spec, towns: t.towns, roads: t.roads, data: '/api/terrain', tiles: t instanceof TiledTerrain ? this.tiles.info(t) : undefined } };
     });
+    r.get(`${P}/terrain/tiles`, () => ({ json: this.tiles.info(this.engine.terrain) }));
+    r.get(`${P}/terrain/tiles/{z}/{x}/{y}`, (req) => this.tiles.tile(this.engine.terrain, req.params.z, req.params.x, req.params.y));
     r.get(`${P}/terrain/point`, (req) => {
       const p = this.point(Object.fromEntries(req.query));
       const t = this.engine.terrain;

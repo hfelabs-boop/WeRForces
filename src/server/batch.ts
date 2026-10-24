@@ -5,12 +5,16 @@ import { Worker } from 'node:worker_threads';
 import type { Catalog, ScenarioFile, TerrainData } from '../shared/types.js';
 import { type BatchOptions, type BatchSummary, type RunOutcome, runOnce, summarise } from '../sim/batch.js';
 import { Engine } from '../sim/engine.js';
+import type { Terrain } from '../sim/terrain.js';
+import { datasetLoader } from '../terrain/store.js';
 
 export interface BatchJobInput {
   scenario: ScenarioFile;
   options: BatchOptions;
   catalog: Catalog;
   terrains: Record<string, TerrainData>;
+  /** Where tiled datasets (not sent in terrains) are read from. */
+  terrainDir?: string;
 }
 
 export interface BatchJob {
@@ -115,7 +119,7 @@ export class BatchManager {
   private inProcess(job: BatchJob, input: BatchJobInput): void {
     job.thread = 'main';
     const started = Date.now();
-    const engine = new Engine({ catalog: input.catalog, terrainLoader: (name) => input.terrains[name] });
+    const engine = new Engine({ catalog: input.catalog, terrainLoader: batchTerrainLoader(input) });
     let cancelled = false;
     this.cancels.set(job.id, () => (cancelled = true));
     const step = (i: number) => {
@@ -136,4 +140,14 @@ export class BatchManager {
     };
     setImmediate(() => step(0));
   }
+}
+
+/** Terrain for batch runs: the datasets sent with the job, else tiled datasets from the terrains folder. */
+export function batchTerrainLoader(input: BatchJobInput): (name: string) => TerrainData | Terrain {
+  const tiled = input.terrainDir ? datasetLoader(input.terrainDir) : null;
+  return (name) => {
+    const d = input.terrains[name] ?? tiled?.(name);
+    if (!d) throw new Error(`terrain dataset "${name}" is not available to the batch run`);
+    return d;
+  };
 }

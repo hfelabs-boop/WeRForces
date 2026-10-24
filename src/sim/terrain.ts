@@ -18,11 +18,11 @@ export const DEFAULT_TERRAIN: TerrainSpec = {
   towns: 7,
 };
 
-const CANOPY_HEIGHT = 15;
+export const CANOPY_HEIGHT = 15;
 /** Metres of forest a sight line can pass through before it is blocked. */
-const FOREST_SEE_THROUGH = 150;
+export const FOREST_SEE_THROUGH = 150;
 /** Metres of built-up area a sight line can pass through (streets, gaps) before buildings block it. */
-const URBAN_SEE_THROUGH = 25;
+export const URBAN_SEE_THROUGH = 25;
 /** A post counts as built-up when buildings cover at least this fraction of its cell. */
 export const URBAN_COVERAGE = 0.25;
 
@@ -38,6 +38,8 @@ const COVER_MOBILITY: Record<number, [number, number]> = {
 export interface TerrainLayers {
   landCover?: Uint8Array | null;
   buildings?: Building[];
+  /** Building cover per post (0-100 % of the cell, mean height in metres), when already rasterised. */
+  urban?: { cover: Uint8Array; height: Uint8Array };
 }
 /** Earth radius in metres. */
 export const EARTH_RADIUS = 6371000;
@@ -56,9 +58,9 @@ export function curvatureDrop(d: number): number {
 }
 
 /** Line-of-sight samples checked against the coarse obstacle grid at a time. */
-const LOS_CHUNK = 8;
+export const LOS_CHUNK = 8;
 /** Posts per side of a coarse obstacle-height block. */
-const LOS_BLOCK = 4;
+export const LOS_BLOCK = 4;
 const TOWN_NAMES = [
   'Alderford',
   'Brenham',
@@ -95,7 +97,7 @@ function valueNoise(x: number, y: number, seed: number): number {
   return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
 }
 
-function fbm(x: number, y: number, seed: number, octaves: number): number {
+export function fbm(x: number, y: number, seed: number, octaves: number): number {
   let sum = 0;
   let amp = 0.5;
   let freq = 1;
@@ -136,8 +138,11 @@ export class Terrain extends TerrainGrid {
     this.towns = towns;
     this.buildings = layers.buildings ?? [];
     this.roadMask = new Uint8Array(heights.length);
-    for (const road of roads) this.rasterizeRoad(road);
-    if (this.buildings.length) {
+    if (heights.length) for (const road of roads) this.rasterizeRoad(road);
+    if (layers.urban) {
+      this.urbanCover = layers.urban.cover;
+      this.urbanHeight = layers.urban.height;
+    } else if (this.buildings.length) {
       this.urbanCover = new Uint8Array(heights.length);
       this.urbanHeight = new Uint8Array(heights.length);
       this.rasterizeBuildings();
@@ -201,6 +206,11 @@ export class Terrain extends TerrainGrid {
     if (!this.urbanCover) return { cover: 0, height: 0 };
     const i = this.nearestPost(x, y);
     return { cover: this.urbanCover[i] / 100, height: this.urbanHeight![i] };
+  }
+
+  /** Fraction (0-1) of the area at a point covered by buildings. */
+  urbanCoverAt(x: number, y: number): number {
+    return this.urbanCover ? this.urbanCover[this.nearestPost(x, y)] / 100 : 0;
   }
 
   /** True where buildings (or built-up land cover) give cover and concealment. */
@@ -404,26 +414,8 @@ export class Terrain extends TerrainGrid {
     const water = this.isWater(x, y);
     if (domain === 'surface') return water ? 1 : 0;
     if (water) return 0;
-    const s = this.slope(x, y);
     const road = this.isRoad(x, y);
-    const cover = this.landCover && !road ? COVER_MOBILITY[this.coverAt(x, y)] : undefined;
-    const urban = this.urbanCover && !road ? this.urbanCover[this.nearestPost(x, y)] / 100 : 0;
-    if (domain === 'lifeform') {
-      if (s > 1.0) return 0;
-      let f = road ? 1 : offroadFactor;
-      if (this.isForest(x, y)) f *= 0.75;
-      if (cover) f *= cover[1];
-      if (urban >= URBAN_COVERAGE) f *= 0.8;
-      return f * Math.max(0.3, 1 - s * 0.8);
-    }
-    if (s > 0.6 && !road) return 0;
-    // Vehicles cannot drive through solid blocks of buildings.
-    if (urban >= 0.5) return 0;
-    let f = road ? 1 : offroadFactor;
-    if (!road && this.isForest(x, y)) f *= 0.45;
-    if (cover) f *= cover[0];
-    if (urban >= URBAN_COVERAGE) f *= 0.4;
-    return f * Math.max(0.2, 1 - s * 1.4);
+    return landMobility(domain, offroadFactor, this.slope(x, y), road, this.isForest(x, y), road ? LAND_COVER.none : this.coverAt(x, y), road ? 0 : this.urbanCoverAt(x, y));
   }
 
   /**
@@ -509,12 +501,10 @@ export class Terrain extends TerrainGrid {
         underCanopy += stepLen;
         if (underCanopy > FOREST_SEE_THROUGH) return { cause: 'forest', ...at };
       }
-      if (this.urbanCover) {
-        const p = this.nearestPost(x, y);
-        if (this.urbanCover[p] >= URBAN_COVERAGE * 100 && ground + this.urbanHeight![p] > z) {
-          amongBuildings += stepLen;
-          if (amongBuildings > URBAN_SEE_THROUGH) return { cause: 'buildings', ...at };
-        }
+      const urban = this.urbanAt(x, y);
+      if (urban.cover >= URBAN_COVERAGE && ground + urban.height > z) {
+        amongBuildings += stepLen;
+        if (amongBuildings > URBAN_SEE_THROUGH) return { cause: 'buildings', ...at };
       }
     }
     return null;
@@ -669,7 +659,7 @@ export class Terrain extends TerrainGrid {
   }
 
   /** Greedy string pulling: skip nodes when a straight segment is not slower. */
-  private smoothPath(pts: Vec2[], domain: Domain, offroadFactor: number, overlay: Float32Array | null): Vec2[] {
+  protected smoothPath(pts: Vec2[], domain: Domain, offroadFactor: number, overlay: Float32Array | null): Vec2[] {
     if (pts.length <= 2) return pts;
     const prefix: number[] = [0];
     for (let i = 1; i < pts.length; i++) {
@@ -691,6 +681,30 @@ export class Terrain extends TerrainGrid {
     }
     return out;
   }
+}
+
+/**
+ * Speed factor on land (0 = impassable) for a domain, from the slope and what is there:
+ * a road, forest, a land cover class and the share of the area covered by buildings.
+ */
+export function landMobility(domain: Domain, offroadFactor: number, s: number, road: boolean, forest: boolean, coverClass: number, urban: number): number {
+  const cover = COVER_MOBILITY[coverClass];
+  if (domain === 'lifeform') {
+    if (s > 1.0) return 0;
+    let f = road ? 1 : offroadFactor;
+    if (forest) f *= 0.75;
+    if (cover) f *= cover[1];
+    if (urban >= URBAN_COVERAGE) f *= 0.8;
+    return f * Math.max(0.3, 1 - s * 0.8);
+  }
+  if (s > 0.6 && !road) return 0;
+  // Vehicles cannot drive through solid blocks of buildings.
+  if (urban >= 0.5) return 0;
+  let f = road ? 1 : offroadFactor;
+  if (!road && forest) f *= 0.45;
+  if (cover) f *= cover[0];
+  if (urban >= URBAN_COVERAGE) f *= 0.4;
+  return f * Math.max(0.2, 1 - s * 1.4);
 }
 
 /** Point-in-polygon for a flat x,y coordinate array. */

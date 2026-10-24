@@ -9,3 +9,5 @@ playwright-report/
 .claude/worktrees/
 hla/vendor/
 hla/build/
+# Tiled terrain datasets (large; generate or import them)
+terrains/*/

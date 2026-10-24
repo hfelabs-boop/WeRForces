@@ -184,10 +184,10 @@ export class Engine {
   environment: Required<Environment> = { ...DEFAULT_ENVIRONMENT };
   /** The environment now (clock and light), updated once a simulated second. */
   env: EnvironmentState = environmentAt(DEFAULT_ENVIRONMENT, 0, 0);
-  /** Loads imported terrain datasets by name (set by the server from its terrains folder). */
-  terrainLoader?: (name: string) => TerrainData;
+  /** Loads imported terrain datasets by name (set by the server from its terrains folder); tiled datasets come as a Terrain. */
+  terrainLoader?: (name: string) => TerrainData | Terrain;
 
-  constructor(opts: { catalog?: Catalog; terrain?: Terrain; seed?: number; terrainLoader?: (name: string) => TerrainData } = {}) {
+  constructor(opts: { catalog?: Catalog; terrain?: Terrain; seed?: number; terrainLoader?: (name: string) => TerrainData | Terrain } = {}) {
     this.terrainLoader = opts.terrainLoader;
     this.baseCatalog = opts.catalog ?? DEFAULT_CATALOG;
     this.catalog = new CatalogIndex(this.baseCatalog);
@@ -1316,7 +1316,8 @@ export class Engine {
       // Real-world terrain: everything but the dataset name comes from the dataset.
       if (this.terrain.spec.dataset !== spec.dataset) {
         if (!this.terrainLoader) throw new Error(`terrain dataset "${spec.dataset}" cannot be loaded here`);
-        terrain = Terrain.fromData(this.terrainLoader(spec.dataset));
+        const data = this.terrainLoader(spec.dataset);
+        terrain = data instanceof Terrain ? data : Terrain.fromData(data);
         spec = terrain.spec;
       } else {
         spec = this.terrain.spec;
