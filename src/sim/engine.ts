@@ -22,6 +22,7 @@ import type {
   SimEventKind,
   SimState,
   TaskSpec,
+  TerrainData,
   TerrainSpec,
   UnitSnapshot,
   UnitTemplate,
@@ -131,7 +132,11 @@ export class Engine {
   private sensorDue = new Map<string, number>();
   private initialScenario: ScenarioFile | null = null;
 
-  constructor(opts: { catalog?: Catalog; terrain?: Terrain; seed?: number } = {}) {
+  /** Loads imported terrain datasets by name (set by the server from its terrains folder). */
+  terrainLoader?: (name: string) => TerrainData;
+
+  constructor(opts: { catalog?: Catalog; terrain?: Terrain; seed?: number; terrainLoader?: (name: string) => TerrainData } = {}) {
+    this.terrainLoader = opts.terrainLoader;
     this.catalog = new CatalogIndex(opts.catalog ?? DEFAULT_CATALOG);
     this.terrain = opts.terrain ?? Terrain.generate();
     this.rng = new Rng(opts.seed ?? this.terrain.spec.seed);
@@ -216,7 +221,7 @@ export class Engine {
       e.z = this.terrain.surfaceHeight(e.x, e.y) + (opts.altitude ?? type.cruiseAltitude ?? 100);
       if ((type.minSpeed ?? 0) > 0) e.speed = type.cruiseSpeed;
     } else if (type.domain === 'surface') {
-      e.z = 0;
+      e.z = this.terrain.surfaceHeight(e.x, e.y);
     } else {
       e.z = this.terrain.elevation(e.x, e.y);
     }
@@ -869,10 +874,23 @@ export class Engine {
   loadScenario(s: ScenarioFile): void {
     if (s.format !== 'werforces-scenario') throw new Error('not a WeRForces scenario file');
     if (s.version !== 1) throw new Error(`unsupported scenario version ${s.version}`);
-    const spec = { ...DEFAULT_TERRAIN, ...s.terrain, origin: { ...DEFAULT_TERRAIN.origin, ...s.terrain?.origin } };
+    let spec: TerrainSpec = { ...DEFAULT_TERRAIN, ...s.terrain, origin: { ...DEFAULT_TERRAIN.origin, ...s.terrain?.origin } };
+    let terrain: Terrain | null = null;
+    if (spec.dataset) {
+      // Real-world terrain: everything but the dataset name comes from the dataset.
+      if (this.terrain.spec.dataset !== spec.dataset) {
+        if (!this.terrainLoader) throw new Error(`terrain dataset "${spec.dataset}" cannot be loaded here`);
+        terrain = Terrain.fromData(this.terrainLoader(spec.dataset));
+        spec = terrain.spec;
+      } else {
+        spec = this.terrain.spec;
+      }
+    } else if (JSON.stringify(spec) !== JSON.stringify(this.terrain.spec)) {
+      terrain = Terrain.generate(spec);
+    }
     this.clear();
-    if (JSON.stringify(spec) !== JSON.stringify(this.terrain.spec)) {
-      this.terrain = Terrain.generate(spec);
+    if (terrain) {
+      this.terrain = terrain;
       this.terrainVersion++;
     }
     this.rng = new Rng(spec.seed);

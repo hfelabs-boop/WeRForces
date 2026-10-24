@@ -5,7 +5,9 @@ import path from 'node:path';
 import { entitiesGeoJSON, frameFor, graphicsGeoJSON, liveKML, sceneKML } from '../integrations/gis.js';
 import type { IntegrationHub } from '../integrations/hub.js';
 import { dist2d } from '../shared/math.js';
-import type { Command, CommandResult, EntitySnapshot, ForceId, Role, SimEventKind, SimState, UnitSnapshot, Vec2 } from '../shared/types.js';
+import type { Command, CommandResult, EntitySnapshot, ForceId, Role, SimEventKind, SimState, TerrainDataset, UnitSnapshot, Vec2 } from '../shared/types.js';
+import { DATASET_NAME, listDatasets } from '../terrain/store.js';
+import { Terrain } from '../sim/terrain.js';
 import { CONTROLLER, canSee, checkCommand, filterEvents, filterState, ForbiddenError } from './fog.js';
 import { FORCE_NAMES } from '../shared/types.js';
 import { executeCommand } from './commands.js';
@@ -19,6 +21,8 @@ export interface ApiContext {
   scenarioDir: string;
   /** Where saved recordings go (default: a "recordings" folder next to scenarioDir). */
   recordingDir?: string;
+  /** Imported terrain datasets (default: a "terrains" folder next to scenarioDir). */
+  terrainDir?: string;
 }
 
 const SCENARIO_NAME = /^[A-Za-z0-9_-]{1,64}$/;
@@ -215,6 +219,24 @@ export class ApiV1 {
       writeFileSync(path.join(this.ctx.scenarioDir, `${name}.json`), JSON.stringify(this.engine.toScenario(), null, 2));
       // Rewind now returns to what was just saved.
       this.engine.markRewindPoint();
+      return { json: { saved: name } };
+    });
+
+    // ---------------------------------------------------------------- terrain datasets
+    const terrainDir = () => this.ctx.terrainDir ?? path.join(path.dirname(this.ctx.scenarioDir), 'terrains');
+    r.get(`${P}/terrains`, () => ({ json: listDatasets(terrainDir()) }));
+    r.put(`${P}/terrains/{name}`, (req) => {
+      const name = req.params.name;
+      const ds = obj(req.body) as unknown as TerrainDataset;
+      if (!DATASET_NAME.test(name)) throw new HttpError(400, 'invalid dataset name');
+      if (ds.format !== 'werforces-terrain' || !ds.spec || typeof ds.heightsB64 !== 'string') throw new HttpError(400, 'not a WeRForces terrain dataset (make one with werforces-terrain)');
+      try {
+        Terrain.fromData(ds);
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+      mkdirSync(terrainDir(), { recursive: true });
+      writeFileSync(path.join(terrainDir(), `${name}.json`), JSON.stringify({ ...ds, name, spec: { ...ds.spec, dataset: name } }));
       return { json: { saved: name } };
     });
 

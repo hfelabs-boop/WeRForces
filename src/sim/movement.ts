@@ -65,7 +65,8 @@ function stepSurfaceBound(e: Entity, terrain: Terrain, dt: number): void {
   }
   e.vz = 0;
   if (e.domain === 'surface') {
-    e.z = 0;
+    // Sea level, or a lake's surface on imported terrain.
+    e.z = terrain.surfaceHeight(e.x, e.y);
     e.pitch = 0;
   } else {
     e.z = terrain.elevation(e.x, e.y);

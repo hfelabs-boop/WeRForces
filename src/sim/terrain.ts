@@ -2,7 +2,7 @@
 // plus mobility, line-of-sight and route planning queries used by the engine.
 
 import { dist2d } from '../shared/math.js';
-import { TerrainGrid } from '../shared/terrainGrid.js';
+import { base64ToBytes, bytesToBase64, decodeHeights, TerrainGrid } from '../shared/terrainGrid.js';
 import type { Domain, TerrainData, TerrainSpec, Town, Vec2, Vec3 } from '../shared/types.js';
 import { gridAStar, simplifyPolyline } from './pathfinding.js';
 import { Rng } from './rng.js';
@@ -83,8 +83,8 @@ export class Terrain extends TerrainGrid {
   /** A* node costs per domain and off-road factor, computed on first use. */
   private readonly costGrids = new Map<string, Float32Array>();
 
-  constructor(spec: TerrainSpec, heights: Float32Array, forest: Uint8Array, roads: Vec2[][], towns: Town[]) {
-    super(spec, heights, forest);
+  constructor(spec: TerrainSpec, heights: Float32Array, forest: Uint8Array, roads: Vec2[][], towns: Town[], water: Uint8Array | null = null) {
+    super(spec, heights, forest, water);
     this.roads = roads;
     this.towns = towns;
     this.roadMask = new Uint8Array(heights.length);
@@ -135,21 +135,27 @@ export class Terrain extends TerrainGrid {
     return new Terrain(spec, heights, base.forest, roads, towns);
   }
 
-  static override fromData(data: TerrainData): Terrain {
-    const grid = TerrainGrid.fromData(data);
-    return new Terrain(data.spec, grid.heights, grid.forest, data.roads, data.towns);
-  }
-
   toData(): TerrainData {
+    const scale = this.heightScale;
     return {
       spec: this.spec,
       cols: this.cols,
       rows: this.rows,
-      heightsB64: this.encodeHeights(),
+      heightsB64: this.encodeHeights(scale),
+      heightScale: scale === 0.1 ? undefined : scale,
       forestB64: this.encodeForest(),
+      waterB64: this.water ? bytesToBase64(this.water) : undefined,
       roads: this.roads,
       towns: this.towns,
     };
+  }
+
+  /** Terrain from an imported dataset (or any transmitted terrain data). */
+  static override fromData(data: TerrainData): Terrain {
+    const spec = data.spec;
+    const cols = Math.round(spec.size / spec.cellSize) + 1;
+    if (data.cols !== cols || data.rows !== cols) throw new Error('terrain dataset grid does not match its size and cell size');
+    return new Terrain(spec, decodeHeights(data), base64ToBytes(data.forestB64), data.roads ?? [], data.towns ?? [], data.waterB64 ? base64ToBytes(data.waterB64) : null);
   }
 
   // ------------------------------------------------------------ generation helpers

@@ -246,6 +246,21 @@ export interface TerrainSpec {
   /** Fraction (0..1) of land covered by forest. */
   forestFraction: number;
   towns: number;
+  /**
+   * Name of an imported real-world terrain dataset (terrains/<name>.json). When set, the
+   * terrain is loaded from it and the generation parameters above are ignored.
+   */
+  dataset?: string;
+}
+
+/** A real-world terrain imported from a DEM and map features (`npm run terrain:import`). */
+export interface TerrainDataset extends TerrainData {
+  format: 'werforces-terrain';
+  version: 1;
+  name: string;
+  title?: string;
+  /** Where the data came from, for attribution. */
+  source?: { dem?: string; features?: string; imported?: string; attribution?: string };
 }
 
 export interface Town {
@@ -254,13 +269,17 @@ export interface Town {
   y: number;
 }
 
-/** Terrain as transmitted to clients. Heights are decimetres in a base64 Int16 array. */
+/** Terrain as transmitted to clients. Heights are a base64 Int16 array in units of `heightScale` metres. */
 export interface TerrainData {
   spec: TerrainSpec;
   cols: number;
   rows: number;
   heightsB64: string;
+  /** Metres per height unit (default 0.1: decimetres). Coarser for terrain above 3 km. */
+  heightScale?: number;
   forestB64: string;
+  /** 1 = inland water (lakes, rivers) per post; sea is wherever elevation is below 0. */
+  waterB64?: string;
   roads: Vec2[][];
   towns: Town[];
 }

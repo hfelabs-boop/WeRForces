@@ -38,6 +38,8 @@ export interface ServerOptions {
   scenarioDir: string;
   /** Saved recordings folder (default: "recordings" next to scenarioDir). */
   recordingDir?: string;
+  /** Imported terrain datasets folder (default: "terrains" next to scenarioDir). */
+  terrainDir?: string;
   /** State broadcasts per second. */
   stateRate?: number;
   /** When set, every /api, /ws and /mcp request must present this key (or a player key). */
@@ -105,7 +107,7 @@ export class SimServer {
   ) {
     this.lastTerrainVersion = runner.engine.terrainVersion;
     this.integrations = new IntegrationHub(runner, opts.integrations);
-    this.api = new ApiV1({ runner, integrations: this.integrations, scenarioDir: opts.scenarioDir, recordingDir: opts.recordingDir });
+    this.api = new ApiV1({ runner, integrations: this.integrations, scenarioDir: opts.scenarioDir, recordingDir: opts.recordingDir, terrainDir: opts.terrainDir });
     this.docs = opts.docsDir ? new DocsSite(opts.docsDir, opts.repoBlobUrl) : null;
     this.http = http.createServer((req, res) => {
       this.handle(req, res).catch((err) => {

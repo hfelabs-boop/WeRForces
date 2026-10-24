@@ -358,7 +358,9 @@ export class View3D {
       const x = pos.getX(i) + half;
       const y = pos.getY(i) + half;
       const h = grid.elevation(x, y);
-      pos.setZ(i, (h < 0 ? h * 0.5 - 3 : h) * this.exaggeration);
+      // Sea floor drops away; inland water (imported lakes) sits just below its banks.
+      const z = h < 0 ? h * 0.5 - 3 : grid.water && grid.isWater(x, y) ? h - 1.5 : h;
+      pos.setZ(i, z * this.exaggeration);
     }
     g.rotateX(-Math.PI / 2);
     g.computeVertexNormals();

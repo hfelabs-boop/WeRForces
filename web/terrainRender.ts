@@ -35,10 +35,23 @@ export function renderTerrain(grid: TerrainGrid, pxPerPost = 3, contourInterval 
   const size = grid.spec.size;
   const mPerPx = size / n;
   const heights = new Float32Array(n * n);
+  let lo = Infinity;
+  let hi = -Infinity;
   for (let py = 0; py < n; py++) {
     const y = size - (py + 0.5) * mPerPx;
-    for (let px = 0; px < n; px++) heights[py * n + px] = grid.elevation((px + 0.5) * mPerPx, y);
+    for (let px = 0; px < n; px++) {
+      const h = grid.elevation((px + 0.5) * mPerPx, y);
+      heights[py * n + px] = h;
+      if (h >= 0) {
+        lo = Math.min(lo, h);
+        hi = Math.max(hi, h);
+      }
+    }
   }
+  // Real terrain can sit hundreds of metres up: spread its own range over the tints.
+  const relative = lo > 60 || hi > 450;
+  const tintOf = (h: number) => tint(relative ? ((h - lo) / Math.max(1, hi - lo)) * 400 : h);
+  if (relative && hi - lo > 600) contourInterval = hi - lo > 1500 ? 100 : 50;
   // Light from the north-west, 45 degrees up.
   const lx = -0.5;
   const ly = 0.5;
@@ -53,8 +66,10 @@ export function renderTerrain(grid: TerrainGrid, pxPerPost = 3, contourInterval 
       const hu = heights[Math.max(0, py - 1) * n + px];
       const hd = heights[Math.min(n - 1, py + 1) * n + px];
       const o = i * 4;
-      if (h < 0) {
-        const depth = Math.min(1, -h / 40);
+      const x = (px + 0.5) * mPerPx;
+      const y = size - (py + 0.5) * mPerPx;
+      if (h < 0 || grid.isWater(x, y)) {
+        const depth = h < 0 ? Math.min(1, -h / 40) : 0.3;
         img.data[o] = 92 - depth * 40;
         img.data[o + 1] = 145 - depth * 50;
         img.data[o + 2] = 200 - depth * 40;
@@ -65,9 +80,7 @@ export function renderTerrain(grid: TerrainGrid, pxPerPost = 3, contourInterval 
       const dy = ((hu - hd) / (2 * mPerPx)) * zScale; // north is up
       const len = Math.hypot(dx, dy, 1);
       const shade = Math.max(0, (-dx * lx - dy * ly + lz) / len);
-      let [r, g, b] = tint(h);
-      const x = (px + 0.5) * mPerPx;
-      const y = size - (py + 0.5) * mPerPx;
+      let [r, g, b] = tintOf(h);
       if (grid.isForest(x, y)) {
         r = r * 0.45 + 50 * 0.55;
         g = g * 0.45 + 110 * 0.55;

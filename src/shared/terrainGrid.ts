@@ -18,6 +18,16 @@ export function base64ToBytes(b64: string): Uint8Array {
 }
 
 /** A regular grid of elevation posts plus a forest mask, with bilinear sampling. */
+/** Heights in metres from transmitted terrain data. */
+export function decodeHeights(data: TerrainData): Float32Array {
+  const raw = base64ToBytes(data.heightsB64);
+  const units = new Int16Array(raw.buffer, raw.byteOffset, raw.byteLength / 2);
+  const scale = data.heightScale ?? 0.1;
+  const heights = new Float32Array(units.length);
+  for (let i = 0; i < units.length; i++) heights[i] = units[i] * scale;
+  return heights;
+}
+
 export class TerrainGrid {
   readonly cols: number;
   readonly rows: number;
@@ -28,6 +38,8 @@ export class TerrainGrid {
     readonly heights: Float32Array,
     /** 1 = forest canopy, per post. */
     readonly forest: Uint8Array,
+    /** 1 = inland water per post (imported terrain); sea is wherever elevation < 0. */
+    readonly water: Uint8Array | null = null,
   ) {
     this.cols = Math.round(spec.size / spec.cellSize) + 1;
     this.rows = this.cols;
@@ -35,16 +47,19 @@ export class TerrainGrid {
   }
 
   static fromData(data: TerrainData): TerrainGrid {
-    const raw = base64ToBytes(data.heightsB64);
-    const dm = new Int16Array(raw.buffer, raw.byteOffset, raw.byteLength / 2);
-    const heights = new Float32Array(dm.length);
-    for (let i = 0; i < dm.length; i++) heights[i] = dm[i] / 10;
-    return new TerrainGrid(data.spec, heights, base64ToBytes(data.forestB64));
+    return new TerrainGrid(data.spec, decodeHeights(data), base64ToBytes(data.forestB64), data.waterB64 ? base64ToBytes(data.waterB64) : null);
   }
 
-  encodeHeights(): string {
+  /** Metres per stored height unit: decimetres unless the terrain is too high for Int16. */
+  get heightScale(): number {
+    let max = 0;
+    for (const h of this.heights) max = Math.max(max, Math.abs(h));
+    return max * 10 < 32000 ? 0.1 : Math.ceil((max / 32000) * 4) / 4;
+  }
+
+  encodeHeights(scale = this.heightScale): string {
     const dm = new Int16Array(this.heights.length);
-    for (let i = 0; i < dm.length; i++) dm[i] = Math.round(this.heights[i] * 10);
+    for (let i = 0; i < dm.length; i++) dm[i] = Math.round(this.heights[i] / scale);
     return bytesToBase64(new Uint8Array(dm.buffer));
   }
 
@@ -78,6 +93,7 @@ export class TerrainGrid {
   }
 
   isWater(x: number, y: number): boolean {
+    if (this.water && this.water[this.nearestPost(x, y)] === 1) return true;
     return this.elevation(x, y) < 0;
   }
 

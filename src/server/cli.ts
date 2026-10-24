@@ -12,6 +12,7 @@ import { Engine } from '../sim/engine.js';
 import type { ScenarioFile } from '../shared/types.js';
 import { IntegrationHub, type IntegrationOptions } from '../integrations/hub.js';
 import { parsePlayer } from './fog.js';
+import { datasetLoader } from '../terrain/store.js';
 import { SimRunner } from './runner.js';
 import { SimServer } from './server.js';
 
@@ -39,6 +40,7 @@ Options:
       --cot <url>             Stream Cursor-on-Target to TAK: udp://239.2.3.1:6969 or tcp://host:8087
       --cot-interval <s>      Seconds between CoT position reports (default 2)
       --webhook <url>         POST simulation events to a URL (Slack/Discord URLs get chat formatting); repeatable
+      --terrains <dir>        Folder of imported terrain datasets (default ./terrains; see werforces-terrain)
       --record-interval <s>   Seconds of simulated time between recorded frames for playback/AAR (default 1, 0 = off)
       --headless              No web server; run the scenario and print events
       --duration <s>          Headless only: simulated seconds to run as fast as possible
@@ -103,6 +105,7 @@ async function main(): Promise<void> {
       cot: { type: 'string' },
       'cot-interval': { type: 'string', default: '2' },
       'record-interval': { type: 'string', default: '1' },
+      terrains: { type: 'string' },
       player: { type: 'string', multiple: true },
       webhook: { type: 'string', multiple: true },
       headless: { type: 'boolean', default: false },
@@ -121,7 +124,8 @@ async function main(): Promise<void> {
     catalog = mergeCatalog(DEFAULT_CATALOG, JSON.parse(readFileSync(values.catalog, 'utf8')));
     console.log(`Catalog extension: ${values.catalog}`);
   }
-  const engine = new Engine({ catalog });
+  const terrainDir = path.resolve(values.terrains ?? path.join(root, 'terrains'));
+  const engine = new Engine({ catalog, terrainLoader: datasetLoader(terrainDir) });
   if (values.scenario) engine.loadScenario(loadScenarioArg(values.scenario, scenarioDir));
   else engine.newScenario('Untitled');
 
@@ -190,6 +194,7 @@ async function main(): Promise<void> {
       host: values.host!,
       webRoot: path.join(root, 'dist', 'web'),
       scenarioDir,
+      terrainDir,
       apiKey: values['api-key'] || undefined,
       docsDir: path.join(root, 'docs'),
       repoBlobUrl: repoBlobUrl(root),

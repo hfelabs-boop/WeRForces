@@ -10,7 +10,8 @@
   "type": "module",
   "bin": {
     "werforces": "dist/server/cli.js",
-    "werforces-mcp": "dist/mcp/stdio.js"
+    "werforces-mcp": "dist/mcp/stdio.js",
+    "werforces-terrain": "dist/terrain/cli.js"
   },
   "scripts": {
     "build": "npm run build:server && npm run build:web",
@@ -24,14 +25,17 @@
     "check": "npm run typecheck && npm test && npm run build",
     "mcp": "node dist/mcp/stdio.js",
     "docs:gen": "tsx scripts/docs-gen.ts",
-    "bench": "tsx scripts/bench.ts"
+    "bench": "tsx scripts/bench.ts",
+    "terrain:import": "tsx src/terrain/cli.ts"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "geotiff": "^3.0.5",
     "marked": "^18.1.1",
+    "proj4": "^2.22.0",
     "three": "^0.186.1",
     "ws": "^8.22.0",
     "zod": "^4.6.7"

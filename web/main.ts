@@ -538,7 +538,14 @@ class App {
     );
   }
 
-  private newScenarioDialog(): void {
+  private async newScenarioDialog(): Promise<void> {
+    const datasets = await this.api.v1<{ name: string; title: string; size: number; cellSize: number }[]>('GET', '/terrains').catch(() => []);
+    const source = h(
+      'select',
+      {},
+      h('option', { value: '', text: 'Generated (settings below)' }),
+      datasets.map((d) => h('option', { value: d.name, text: `${d.title} · ${(d.size / 1000).toFixed(1)} km, ${d.cellSize} m`, selected: this.grid?.spec.dataset === d.name })),
+    ) as HTMLSelectElement;
     const name = h('input', { type: 'text', value: 'New scenario' }) as HTMLInputElement;
     const seed = h('input', { type: 'number', value: String(Math.floor(Math.random() * 100000)) }) as HTMLInputElement;
     const size = h('select', {}, ...[8000, 12000, 16000, 24000].map((s) => h('option', { value: String(s), text: `${s / 1000} km`, selected: s === 16000 }))) as HTMLSelectElement;
@@ -551,7 +558,8 @@ class App {
         'div',
         {},
         h('h3', { text: 'New scenario' }),
-        h('div', { class: 'kv' }, 'Name', name, 'Keep terrain', h('label', {}, keep, ' use current terrain'), 'Terrain seed', seed, 'Extent', size, 'Water %', water, 'Forest %', forest),
+        h('div', { class: 'kv' }, 'Name', name, 'Terrain', source, 'Keep terrain', h('label', {}, keep, ' use current terrain'), 'Terrain seed', seed, 'Extent', size, 'Water %', water, 'Forest %', forest),
+        h('p', { class: 'hint', text: 'Real-world terrains are imported from elevation data and map features with werforces-terrain (see Help → Terrain import).' }),
         h(
           'div',
           { class: 'row' },
@@ -560,7 +568,9 @@ class App {
             text: 'Create',
             onclick: async () => {
               close();
-              const terrain = keep.checked
+              const terrain = source.value
+                ? { dataset: source.value }
+                : keep.checked && !this.grid?.spec.dataset
                 ? this.grid?.spec
                 : { seed: Number(seed.value), size: Number(size.value), waterFraction: Number(water.value) / 100, forestFraction: Number(forest.value) / 100 };
               await this.cmd({ cmd: 'newScenario', name: name.value || 'Untitled', terrain });

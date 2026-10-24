@@ -65,7 +65,7 @@ export function buildOpenApi(baseUrl: string): Schema {
         put: op('Scenario', 'Load a scenario file', body(ref('Scenario'))),
       },
       '/api/v1/scenario/new': {
-        post: op('Scenario', 'Start an empty scenario', body({ type: 'object', properties: { name: { type: 'string' }, terrain: { type: 'object' } } })),
+        post: op('Scenario', 'Start an empty scenario', body({ type: 'object', properties: { name: { type: 'string' }, terrain: { type: 'object', description: 'generation settings (seed, size, cellSize, relief, waterFraction, forestFraction, towns, origin) or {"dataset": name} for imported terrain' } } })),
       },
       '/api/v1/scenarios': { get: op('Scenario', 'List scenarios stored on the server') },
       '/api/v1/scenarios/{name}': {
@@ -73,6 +73,8 @@ export function buildOpenApi(baseUrl: string): Schema {
         put: op('Scenario', 'Save the current state under a name', { parameters: [idParam('name')] }),
       },
       '/api/v1/scenarios/{name}/load': { post: op('Scenario', 'Load a stored scenario', { parameters: [idParam('name')] }) },
+      '/api/v1/terrains': { get: op('Terrain', 'Imported real-world terrain datasets (use one with POST /scenario/new {"terrain":{"dataset":name}})') },
+      '/api/v1/terrains/{name}': { put: op('Terrain', 'Upload a terrain dataset made with werforces-terrain', { parameters: [idParam('name')], ...body({ type: 'object' }) }) },
       '/api/v1/recording': { get: op('Recording', 'Recording summary: time span, frames, bookmarks, live or reviewing a loaded recording') },
       '/api/v1/recording/data': { get: op('Recording', 'The whole recording (frames, events, bookmarks) as JSON, for saving or replaying elsewhere') },
       '/api/v1/recording/report': { get: op('Recording', 'After-action report: strength per force, losses, kills with killer and weapon, rounds fired, strength over time') },
