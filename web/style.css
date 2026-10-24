@@ -1090,3 +1090,7 @@ body.player [data-controller-only] {
 .batch .batch-out {
   margin-top: 10px;
 }
+
+.sim-time.behind {
+  color: var(--warn);
+}

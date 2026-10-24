@@ -2,6 +2,9 @@
 
 import type { Catalog, Command, CommandResult, Role, ServerMessage, SimEvent, SimState, TerrainData } from '../src/shared/types.js';
 
+
+/** Path prefix of the session this page belongs to ("/s/{id}"), or "" for the main session. */
+export const BASE = /^\/s\/[^/]+/.exec(location.pathname)?.[0] ?? '';
 export interface ApiHandlers {
   hello(catalog: Catalog, terrainVersion: number, role: Role): void;
   state(state: SimState): void;
@@ -39,7 +42,7 @@ export class Api {
   /** Make sure we hold a valid API key if the server requires one. */
   async ensureAuth(): Promise<void> {
     for (;;) {
-      const r = await fetch('/api/v1', { headers: this.headers() });
+      const r = await fetch(BASE + '/api/v1', { headers: this.headers() });
       if (r.status !== 401) return;
       const key = prompt('This WeRForces server requires an API key:');
       if (!key) return;
@@ -55,7 +58,7 @@ export class Api {
   /** Call the /api/v1 REST API. */
   /** Fetch a file from the API (with the key) and hand it to the browser as a download. */
   async download(path: string, filename: string): Promise<void> {
-    const r = await fetch(`/api/v1${path}`, { headers: this.headers() });
+    const r = await fetch(`${BASE}/api/v1${path}`, { headers: this.headers() });
     if (!r.ok) throw new Error(((await r.json().catch(() => null)) as { error?: { message?: string } } | null)?.error?.message ?? `HTTP ${r.status}`);
     const url = URL.createObjectURL(await r.blob());
     const a = document.createElement('a');
@@ -68,7 +71,7 @@ export class Api {
   }
 
   async v1<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
-    const r = await fetch(`/api/v1${path}`, { method, headers: this.headers(true), body: body === undefined ? (method === 'GET' || method === 'DELETE' ? undefined : '{}') : JSON.stringify(body) });
+    const r = await fetch(`${BASE}/api/v1${path}`, { method, headers: this.headers(true), body: body === undefined ? (method === 'GET' || method === 'DELETE' ? undefined : '{}') : JSON.stringify(body) });
     if (r.status === 204) return undefined as T;
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data?.error?.message ?? `HTTP ${r.status}`);
@@ -76,8 +79,10 @@ export class Api {
   }
 
   /** URL with the API key appended (for links the browser or Google Earth opens directly). */
+  /** A URL for this session (with the key, if any), for links and the WebSocket. */
   link(path: string): string {
-    return this.key ? `${path}${path.includes('?') ? '&' : '?'}api_key=${encodeURIComponent(this.key)}` : path;
+    const p = path.startsWith('/api') || path === '/ws' ? `${BASE}${path}` : path;
+    return this.key ? `${p}${p.includes('?') ? '&' : '?'}api_key=${encodeURIComponent(this.key)}` : p;
   }
 
   connect(): void {
@@ -129,33 +134,33 @@ export class Api {
   }
 
   async terrain(): Promise<TerrainData> {
-    const r = await fetch('/api/terrain', { headers: this.headers() });
+    const r = await fetch(BASE + '/api/terrain', { headers: this.headers() });
     return r.json();
   }
 
   async plannedPath(id: string): Promise<{ x: number; y: number }[]> {
-    const r = await fetch(`/api/path/${encodeURIComponent(id)}`, { headers: this.headers() });
+    const r = await fetch(`${BASE}/api/path/${encodeURIComponent(id)}`, { headers: this.headers() });
     return r.ok ? r.json() : [];
   }
 
   async scenario(): Promise<unknown> {
-    const r = await fetch('/api/scenario', { headers: this.headers() });
+    const r = await fetch(BASE + '/api/scenario', { headers: this.headers() });
     return r.json();
   }
 
   async listScenarios(): Promise<{ name: string; title: string; description: string }[]> {
-    const r = await fetch('/api/scenarios', { headers: this.headers() });
+    const r = await fetch(BASE + '/api/scenarios', { headers: this.headers() });
     return r.json();
   }
 
   async fetchScenario(name: string): Promise<unknown> {
-    const r = await fetch(`/api/scenarios/${encodeURIComponent(name)}`, { headers: this.headers() });
+    const r = await fetch(`${BASE}/api/scenarios/${encodeURIComponent(name)}`, { headers: this.headers() });
     if (!r.ok) throw new Error(`could not load ${name}`);
     return r.json();
   }
 
   async saveScenarioOnServer(name: string): Promise<CommandResult> {
-    const r = await fetch(`/api/scenarios/${encodeURIComponent(name)}`, { method: 'PUT', headers: this.headers(true), body: '{}' });
+    const r = await fetch(`${BASE}/api/scenarios/${encodeURIComponent(name)}`, { method: 'PUT', headers: this.headers(true), body: '{}' });
     const data = await r.json();
     return r.ok ? { ok: true, id: name } : { ok: false, error: data?.error?.message ?? `HTTP ${r.status}` };
   }

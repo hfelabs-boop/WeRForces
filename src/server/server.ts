@@ -10,15 +10,16 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { WebSocket, WebSocketServer } from 'ws';
 import { IntegrationHub, type IntegrationOptions } from '../integrations/hub.js';
 import { createMcpServer, type ApiCaller } from '../mcp/tools.js';
-import type { ClientMessage, CommandResult, ForceId, Role, ServerMessage, SimEvent, SimState } from '../shared/types.js';
+import type { ClientMessage, CommandResult, ForceId, Role, ScenarioFile, ServerMessage, SimEvent, SimState } from '../shared/types.js';
+import { Engine } from '../sim/engine.js';
 import { ApiV1 } from './apiV1.js';
 import { BatchManager } from './batch.js';
 import { executeCommand } from './commands.js';
 import { DocsSite } from './docs.js';
 import { CONTROLLER, checkCommand, filterEvents, filterState, ForbiddenError } from './fog.js';
 import { docsPage } from './openapi.js';
-import type { RouteResponse } from './router.js';
-import type { SimRunner } from './runner.js';
+import { HttpError, type RouteResponse } from './router.js';
+import { SimRunner } from './runner.js';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -90,37 +91,36 @@ function hostname(hostHeader: string | undefined): string {
   return hostHeader.split(':')[0].toLowerCase();
 }
 
-export class SimServer {
-  readonly http: http.Server;
+/** Session ids: the default session and the ones made with POST /api/v1/sessions. */
+const SESSION_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const MAX_SESSIONS = 8;
+
+/**
+ * One running simulation with its own engine, runner, REST API, recorder and WebSocket
+ * clients. The server hosts a "main" session and may host more, each under /s/{id}/.
+ */
+export class Session {
   readonly api: ApiV1;
   readonly integrations: IntegrationHub;
-  private wss: WebSocketServer;
+  readonly wss: WebSocketServer;
   private terrainCache: { version: number; json: string } | null = null;
   private lastTerrainVersion: number;
   private pendingEvents: SimEvent[] = [];
   private frameCount = 0;
-  private docs: DocsSite | null;
   private wsRoles = new WeakMap<WebSocket, Role>();
+  readonly created = new Date().toISOString();
 
   constructor(
+    readonly id: string,
     readonly runner: SimRunner,
-    readonly opts: ServerOptions,
+    private readonly server: SimServer,
+    integrations?: IntegrationOptions,
   ) {
+    const opts = server.opts;
     this.lastTerrainVersion = runner.engine.terrainVersion;
-    this.integrations = new IntegrationHub(runner, opts.integrations);
-    this.api = new ApiV1({ runner, integrations: this.integrations, scenarioDir: opts.scenarioDir, recordingDir: opts.recordingDir, terrainDir: opts.terrainDir, batch: new BatchManager() });
-    this.docs = opts.docsDir ? new DocsSite(opts.docsDir, opts.repoBlobUrl) : null;
-    this.http = http.createServer((req, res) => {
-      this.handle(req, res).catch((err) => {
-        if (!res.headersSent) this.send(res, { status: 500, json: { error: { status: 500, message: String(err?.message ?? err) } } });
-      });
-    });
-    this.wss = new WebSocketServer({
-      server: this.http,
-      path: '/ws',
-      maxPayload: MAX_BODY,
-      verifyClient: (info: { req: http.IncomingMessage; origin?: string }) => this.allowRequest(info.req, new URL(info.req.url ?? '/', 'http://x')) === null && this.allowWsOrigin(info.req),
-    });
+    this.integrations = new IntegrationHub(runner, integrations);
+    this.api = new ApiV1({ runner, integrations: this.integrations, scenarioDir: opts.scenarioDir, recordingDir: opts.recordingDir, terrainDir: opts.terrainDir, batch: server.batch });
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: MAX_BODY });
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
     runner.engine.on('event', (ev) => this.pendingEvents.push(ev));
     const every = Math.max(1, Math.round(1000 / runner.frameMs / (opts.stateRate ?? 10)));
@@ -138,6 +138,205 @@ export class SimServer {
     });
   }
 
+  close(): void {
+    this.integrations.close();
+    for (const c of this.wss.clients) c.terminate();
+    this.wss.close();
+    this.runner.stop();
+  }
+
+  summary() {
+    const e = this.runner.engine;
+    return {
+      id: this.id,
+      path: this.id === 'main' ? '/' : `/s/${this.id}/`,
+      scenario: e.scenarioName,
+      time: Math.round(e.time * 10) / 10,
+      running: this.runner.running,
+      timeScale: this.runner.timeScale,
+      entities: e.entities.size,
+      clients: this.wss.clients.size,
+      load: this.runner.load,
+      created: this.created,
+    };
+  }
+
+  /** In-process API caller used by the embedded MCP endpoint. */
+  localCaller(baseUrl: string, role: Role = CONTROLLER): ApiCaller {
+    return async (method, p, body) => this.api.call(method, p, body, baseUrl, role);
+  }
+
+  /** Endpoints used by the GUI (and the /api/v1 dispatch) for this session. */
+  async handleGui(server: SimServer, req: http.IncomingMessage, res: http.ServerResponse, p: string, url: URL, method: string, body: unknown, baseUrl: string, corsHeaders: Record<string, string>, role: Role): Promise<void> {
+    const send = (r: RouteResponse & { status: number }) => server.send(res, r, corsHeaders);
+    if (p === '/mcp') return this.handleMcp(req, res, body, baseUrl, corsHeaders, role);
+    if (p.startsWith('/api/v1')) return send(await this.api.dispatch({ method, path: p, query: url.searchParams, body, baseUrl, role }));
+    // Endpoints used by the GUI.
+    const engine = this.runner.engine;
+    const player = role.kind === 'player' ? role.force : undefined;
+    const forbidden = () => server.send(res, { status: 403, json: { ok: false, error: 'exercise control only' } }, corsHeaders);
+    if (method === 'GET' && p === '/api/catalog') return server.send(res, { status: 200, json: engine.catalog.catalog }, corsHeaders);
+    if (method === 'GET' && p === '/api/terrain') return server.send(res, { status: 200, text: this.terrainJson(), contentType: 'application/json' }, corsHeaders);
+    if (method === 'GET' && p === '/api/state') return server.send(res, { status: 200, json: this.stateFor(role) }, corsHeaders);
+    if (method === 'GET' && p === '/api/events') {
+      const evs = engine.eventsSince(Number(url.searchParams.get('since') ?? 0));
+      return server.send(res, { status: 200, json: player === undefined ? evs : filterEvents(engine, evs, player) }, corsHeaders);
+    }
+    if (method === 'GET' && p === '/api/scenario') return player === undefined ? server.send(res, { status: 200, json: engine.toScenario() }, corsHeaders) : forbidden();
+    if (method === 'GET' && p.startsWith('/api/path/')) {
+      const id = decodeURIComponent(p.slice('/api/path/'.length));
+      const own = player === undefined || engine.entities.get(id)?.force === player;
+      return server.send(res, { status: 200, json: own ? engine.plannedPath(id) : [] }, corsHeaders);
+    }
+    if (method === 'POST' && p === '/api/command') {
+      const result = this.command(role, body);
+      return server.send(res, { status: result.ok ? 200 : 400, json: result }, corsHeaders);
+    }
+    // Scenario storage (kept for the GUI; same behaviour as /api/v1/scenarios).
+    if (p === '/api/scenarios' || p.startsWith('/api/scenarios/')) {
+      const v1 = p.replace('/api/', '/api/v1/');
+      const r = await this.api.dispatch({ method, path: v1, query: url.searchParams, body, baseUrl, role });
+      return server.send(res, r, corsHeaders);
+    }
+    return server.send(res, { status: 404, json: { ok: false, error: 'unknown endpoint' } }, corsHeaders);
+  }
+
+  /** Run a command as a role (players are limited to their own force). */
+  private command(role: Role, raw: unknown): CommandResult {
+    try {
+      checkCommand(this.runner.engine, role, raw);
+    } catch (err) {
+      if (err instanceof ForbiddenError) return { ok: false, error: err.message };
+      throw err;
+    }
+    return executeCommand(this.runner, raw);
+  }
+
+  private stateFor(role: Role, full = this.runner.state()): SimState {
+    return role.kind === 'player' ? filterState(this.runner.engine, full, role.force) : full;
+  }
+
+  private async handleMcp(req: http.IncomingMessage, res: http.ServerResponse, body: unknown, baseUrl: string, corsHeaders: Record<string, string>, role: Role): Promise<void> {
+    if (req.method !== 'POST') {
+      return this.server.send(res, { status: 405, json: { jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed (stateless MCP endpoint: use POST)' }, id: null } }, corsHeaders);
+    }
+    for (const [k, v] of Object.entries(corsHeaders)) res.setHeader(k, v);
+    // Stateless mode: a fresh server/transport per request.
+    const server = createMcpServer(this.localCaller(baseUrl, role));
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    res.on('close', () => {
+      void transport.close();
+      void server.close();
+    });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, body);
+  }
+
+  // ------------------------------------------------------------ websocket
+
+  private broadcast(msg: ServerMessage): void {
+    const data = JSON.stringify(msg);
+    for (const c of this.wss.clients) if (c.readyState === WebSocket.OPEN) c.send(data);
+  }
+
+  /** Send each client the message for its role (built once per role). */
+  private broadcastPerRole(build: (role: Role) => ServerMessage | null): void {
+    const cache = new Map<string, string | null>();
+    for (const c of this.wss.clients) {
+      if (c.readyState !== WebSocket.OPEN) continue;
+      const role = this.wsRoles.get(c) ?? CONTROLLER;
+      const key = role.kind === 'player' ? `p${role.force}` : 'c';
+      if (!cache.has(key)) {
+        const msg = build(role);
+        cache.set(key, msg && (msg.type !== 'events' || msg.events.length) ? JSON.stringify(msg) : null);
+      }
+      const data = cache.get(key);
+      if (data) c.send(data);
+    }
+  }
+
+  private broadcastState(): void {
+    const full = this.runner.state();
+    this.broadcastPerRole((role) => ({ type: 'state', state: this.stateFor(role, full) }));
+  }
+
+  private onConnection(ws: WebSocket, req: http.IncomingMessage): void {
+    const engine = this.runner.engine;
+    const role = this.server.roleFor(req, new URL(req.url ?? '/', 'http://x')) ?? CONTROLLER;
+    this.wsRoles.set(ws, role);
+    const hello: ServerMessage = { type: 'hello', catalog: engine.catalog.catalog, scenarioName: engine.scenarioName, terrainVersion: engine.terrainVersion, role };
+    ws.send(JSON.stringify(hello));
+    const recent = engine.eventsSince(0);
+    ws.send(JSON.stringify({ type: 'events', events: (role.kind === 'player' ? filterEvents(engine, recent, role.force) : recent).slice(-200) } satisfies ServerMessage));
+    ws.send(JSON.stringify({ type: 'state', state: this.stateFor(role) } satisfies ServerMessage));
+    ws.on('message', (data) => {
+      let msg: ClientMessage;
+      try {
+        msg = JSON.parse(data.toString());
+      } catch {
+        return;
+      }
+      if (msg?.type !== 'command') return;
+      const result = this.command(role, msg.command);
+      // Push state first, so clients already know about any object the result refers to.
+      this.broadcastState();
+      ws.send(JSON.stringify({ type: 'result', reqId: msg.reqId, result } satisfies ServerMessage));
+    });
+  }
+
+  private terrainJson(): string {
+    const engine = this.runner.engine;
+    if (!this.terrainCache || this.terrainCache.version !== engine.terrainVersion) {
+      this.terrainCache = { version: engine.terrainVersion, json: JSON.stringify(engine.terrain.toData()) };
+    }
+    return this.terrainCache.json;
+  }
+
+}
+
+export class SimServer {
+  readonly http: http.Server;
+  /** Batch jobs, shared by all sessions. */
+  readonly batch = new BatchManager();
+  readonly sessions = new Map<string, Session>();
+  private docs: DocsSite | null;
+
+  constructor(
+    readonly runner: SimRunner,
+    readonly opts: ServerOptions,
+  ) {
+    this.sessions.set('main', new Session('main', runner, this, opts.integrations));
+    this.docs = opts.docsDir ? new DocsSite(opts.docsDir, opts.repoBlobUrl) : null;
+    this.http = http.createServer((req, res) => {
+      this.handle(req, res).catch((err) => {
+        if (!res.headersSent) this.send(res, { status: 500, json: { error: { status: 500, message: String(err?.message ?? err) } } });
+      });
+    });
+    this.http.on('upgrade', (req, socket, head) => {
+      const url = new URL(req.url ?? '/', 'http://x');
+      const routed = this.route(url.pathname);
+      if (!routed || routed.path !== '/ws' || this.allowRequest(req, url) !== null || !this.allowWsOrigin(req)) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      routed.session.wss.handleUpgrade(req, socket, head, (ws) => routed.session.wss.emit('connection', ws, req));
+    });
+  }
+
+  /** The default session. */
+  get main(): Session {
+    return this.sessions.get('main')!;
+  }
+
+  get api(): ApiV1 {
+    return this.main.api;
+  }
+
+  get integrations(): IntegrationHub {
+    return this.main.integrations;
+  }
+
   listen(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.http.once('error', reject);
@@ -149,9 +348,15 @@ export class SimServer {
   }
 
   close(): Promise<void> {
-    this.integrations.close();
-    for (const c of this.wss.clients) c.terminate();
-    this.wss.close();
+    for (const s of this.sessions.values()) {
+      if (s.id === 'main') {
+        s.integrations.close();
+        for (const c of s.wss.clients) c.terminate();
+        s.wss.close();
+      } else {
+        s.close();
+      }
+    }
     return new Promise((resolve) => this.http.close(() => resolve()));
   }
 
@@ -162,7 +367,71 @@ export class SimServer {
 
   /** In-process API caller used by the embedded MCP endpoint. */
   localCaller(baseUrl: string, role: Role = CONTROLLER): ApiCaller {
-    return async (method, p, body) => this.api.call(method, p, body, baseUrl, role);
+    return this.main.localCaller(baseUrl, role);
+  }
+
+  /** Which session a path belongs to (/s/{id}/... or the main session), and the path within it. */
+  private route(p: string): { session: Session; path: string } | null {
+    const m = /^\/s\/([^/]+)(\/.*)?$/.exec(p);
+    if (!m) return { session: this.main, path: p };
+    const session = this.sessions.get(m[1]);
+    return session ? { session, path: m[2] ?? '/' } : null;
+  }
+
+  /** Start another session: its own engine and runner, with a stored scenario or an empty one. */
+  createSession(id: string | undefined, scenario?: ScenarioFile): Session {
+    if (this.sessions.size >= MAX_SESSIONS) throw new HttpError(409, `at most ${MAX_SESSIONS} sessions`);
+    const sid = id ?? `s${Date.now().toString(36)}`;
+    if (!SESSION_ID.test(sid)) throw new HttpError(400, 'session id: lower-case letters, digits and -, up to 32');
+    if (this.sessions.has(sid)) throw new HttpError(409, `session ${sid} exists`);
+    const main = this.main.runner;
+    const engine = new Engine({ catalog: main.engine.catalog.catalog, terrainLoader: main.engine.terrainLoader });
+    if (scenario) engine.loadScenario(scenario);
+    else engine.newScenario(`Session ${sid}`);
+    const runner = new SimRunner(engine, main.dt, main.frameMs, main.recordInterval);
+    runner.setTimeScale(main.timeScale);
+    runner.start();
+    const s = new Session(sid, runner, this);
+    this.sessions.set(sid, s);
+    return s;
+  }
+
+  deleteSession(id: string): void {
+    if (id === 'main') throw new HttpError(400, 'the main session cannot be deleted');
+    const s = this.sessions.get(id);
+    if (!s) throw new HttpError(404, `unknown session ${id}`);
+    s.close();
+    this.sessions.delete(id);
+  }
+
+  /** /api/v1/sessions: list, create and delete sessions (exercise control only). */
+  private async handleSessions(p: string, method: string, body: unknown, role: Role): Promise<RouteResponse & { status: number }> {
+    try {
+      if (role.kind !== 'controller') throw new HttpError(403, 'exercise control only');
+      if (p === '/api/v1/sessions') {
+        if (method === 'GET') return { status: 200, json: [...this.sessions.values()].map((s) => s.summary()) };
+        if (method === 'POST') {
+          const b = (body ?? {}) as Record<string, unknown>;
+          const scenario = typeof b.scenario === 'string' ? (this.main.api.readScenario(b.scenario) as ScenarioFile) : undefined;
+          return { status: 201, json: this.createSession(typeof b.id === 'string' ? b.id : undefined, scenario).summary() };
+        }
+      } else {
+        const id = decodeURIComponent(p.slice('/api/v1/sessions/'.length));
+        if (method === 'GET') {
+          const s = this.sessions.get(id);
+          if (!s) throw new HttpError(404, `unknown session ${id}`);
+          return { status: 200, json: s.summary() };
+        }
+        if (method === 'DELETE') {
+          this.deleteSession(id);
+          return { status: 204 };
+        }
+      }
+      throw new HttpError(405, 'method not allowed');
+    } catch (err) {
+      if (err instanceof HttpError) return { status: err.status, json: { error: { status: err.status, message: err.message } } };
+      return { status: 400, json: { error: { status: 400, message: (err as Error).message } } };
+    }
   }
 
   // ------------------------------------------------------------ security
@@ -173,8 +442,9 @@ export class SimServer {
     if (LOOPBACK.has(this.opts.host) && !LOOPBACK.has(hostname(req.headers.host))) {
       return { status: 403, json: { error: { status: 403, message: 'host not allowed' } } };
     }
-    const protectedPath = url.pathname.startsWith('/api/') || url.pathname === '/ws' || url.pathname === '/mcp';
-    if (protectedPath && url.pathname !== '/api/docs' && !this.roleFor(req, url)) {
+    const inner = this.route(url.pathname)?.path ?? url.pathname;
+    const protectedPath = inner.startsWith('/api/') || inner === '/ws' || inner === '/mcp';
+    if (protectedPath && inner !== '/api/docs' && !this.roleFor(req, url)) {
       return { status: 401, json: { error: { status: 401, message: 'missing or invalid API key' } } };
     }
     return null;
@@ -218,7 +488,7 @@ export class SimServer {
 
   // ------------------------------------------------------------ dispatch
 
-  private send(res: http.ServerResponse, r: RouteResponse & { status: number }, extraHeaders: Record<string, string> = {}): void {
+  send(res: http.ServerResponse, r: RouteResponse & { status: number }, extraHeaders: Record<string, string> = {}): void {
     const headers: Record<string, string> = { 'Cache-Control': 'no-store', ...extraHeaders, ...r.headers };
     if (r.status === 204) {
       res.writeHead(204, headers);
@@ -241,7 +511,17 @@ export class SimServer {
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    const p = url.pathname;
+    const routed = this.route(url.pathname);
+    if (!routed) return this.send(res, { status: 404, json: { error: { status: 404, message: 'unknown session' } } });
+    // The app's assets are relative: a session's page must end in a slash.
+    if (/^\/s\/[^/]+$/.test(url.pathname)) {
+      res.writeHead(302, { Location: `${url.pathname}/${url.search}` });
+      res.end();
+      return;
+    }
+    // Paths inside a session (/s/{id}/...) are handled like the main session's.
+    const p = routed.path;
+    const session = routed.session;
     const method = req.method ?? 'GET';
     const cors = this.corsOrigin(req);
     const corsHeaders: Record<string, string> = cors
@@ -286,132 +566,8 @@ export class SimServer {
     const baseUrl = `http://${req.headers.host ?? 'localhost'}`;
     const role = this.roleFor(req, url) ?? CONTROLLER;
 
-    if (p === '/mcp') return this.handleMcp(req, res, body, baseUrl, corsHeaders, role);
-
-    if (p.startsWith('/api/v1')) {
-      const r = await this.api.dispatch({ method, path: p, query: url.searchParams, body, baseUrl, role });
-      return this.send(res, r, corsHeaders);
-    }
-
-    // Endpoints used by the GUI.
-    const engine = this.runner.engine;
-    const player = role.kind === 'player' ? role.force : undefined;
-    const forbidden = () => this.send(res, { status: 403, json: { ok: false, error: 'exercise control only' } }, corsHeaders);
-    if (method === 'GET' && p === '/api/catalog') return this.send(res, { status: 200, json: engine.catalog.catalog }, corsHeaders);
-    if (method === 'GET' && p === '/api/terrain') return this.send(res, { status: 200, text: this.terrainJson(), contentType: 'application/json' }, corsHeaders);
-    if (method === 'GET' && p === '/api/state') return this.send(res, { status: 200, json: this.stateFor(role) }, corsHeaders);
-    if (method === 'GET' && p === '/api/events') {
-      const evs = engine.eventsSince(Number(url.searchParams.get('since') ?? 0));
-      return this.send(res, { status: 200, json: player === undefined ? evs : filterEvents(engine, evs, player) }, corsHeaders);
-    }
-    if (method === 'GET' && p === '/api/scenario') return player === undefined ? this.send(res, { status: 200, json: engine.toScenario() }, corsHeaders) : forbidden();
-    if (method === 'GET' && p.startsWith('/api/path/')) {
-      const id = decodeURIComponent(p.slice('/api/path/'.length));
-      const own = player === undefined || engine.entities.get(id)?.force === player;
-      return this.send(res, { status: 200, json: own ? engine.plannedPath(id) : [] }, corsHeaders);
-    }
-    if (method === 'POST' && p === '/api/command') {
-      const result = this.command(role, body);
-      return this.send(res, { status: result.ok ? 200 : 400, json: result }, corsHeaders);
-    }
-    // Scenario storage (kept for the GUI; same behaviour as /api/v1/scenarios).
-    if (p === '/api/scenarios' || p.startsWith('/api/scenarios/')) {
-      const v1 = p.replace('/api/', '/api/v1/');
-      const r = await this.api.dispatch({ method, path: v1, query: url.searchParams, body, baseUrl, role });
-      return this.send(res, r, corsHeaders);
-    }
-    return this.send(res, { status: 404, json: { ok: false, error: 'unknown endpoint' } }, corsHeaders);
-  }
-
-  /** Run a command as a role (players are limited to their own force). */
-  private command(role: Role, raw: unknown): CommandResult {
-    try {
-      checkCommand(this.runner.engine, role, raw);
-    } catch (err) {
-      if (err instanceof ForbiddenError) return { ok: false, error: err.message };
-      throw err;
-    }
-    return executeCommand(this.runner, raw);
-  }
-
-  private stateFor(role: Role, full = this.runner.state()): SimState {
-    return role.kind === 'player' ? filterState(this.runner.engine, full, role.force) : full;
-  }
-
-  private async handleMcp(req: http.IncomingMessage, res: http.ServerResponse, body: unknown, baseUrl: string, corsHeaders: Record<string, string>, role: Role): Promise<void> {
-    if (req.method !== 'POST') {
-      return this.send(res, { status: 405, json: { jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed (stateless MCP endpoint: use POST)' }, id: null } }, corsHeaders);
-    }
-    for (const [k, v] of Object.entries(corsHeaders)) res.setHeader(k, v);
-    // Stateless mode: a fresh server/transport per request.
-    const server = createMcpServer(this.localCaller(baseUrl, role));
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-    res.on('close', () => {
-      void transport.close();
-      void server.close();
-    });
-    await server.connect(transport);
-    await transport.handleRequest(req, res, body);
-  }
-
-  // ------------------------------------------------------------ websocket
-
-  private broadcast(msg: ServerMessage): void {
-    const data = JSON.stringify(msg);
-    for (const c of this.wss.clients) if (c.readyState === WebSocket.OPEN) c.send(data);
-  }
-
-  /** Send each client the message for its role (built once per role). */
-  private broadcastPerRole(build: (role: Role) => ServerMessage | null): void {
-    const cache = new Map<string, string | null>();
-    for (const c of this.wss.clients) {
-      if (c.readyState !== WebSocket.OPEN) continue;
-      const role = this.wsRoles.get(c) ?? CONTROLLER;
-      const key = role.kind === 'player' ? `p${role.force}` : 'c';
-      if (!cache.has(key)) {
-        const msg = build(role);
-        cache.set(key, msg && (msg.type !== 'events' || msg.events.length) ? JSON.stringify(msg) : null);
-      }
-      const data = cache.get(key);
-      if (data) c.send(data);
-    }
-  }
-
-  private broadcastState(): void {
-    const full = this.runner.state();
-    this.broadcastPerRole((role) => ({ type: 'state', state: this.stateFor(role, full) }));
-  }
-
-  private onConnection(ws: WebSocket, req: http.IncomingMessage): void {
-    const engine = this.runner.engine;
-    const role = this.roleFor(req, new URL(req.url ?? '/', 'http://x')) ?? CONTROLLER;
-    this.wsRoles.set(ws, role);
-    const hello: ServerMessage = { type: 'hello', catalog: engine.catalog.catalog, scenarioName: engine.scenarioName, terrainVersion: engine.terrainVersion, role };
-    ws.send(JSON.stringify(hello));
-    const recent = engine.eventsSince(0);
-    ws.send(JSON.stringify({ type: 'events', events: (role.kind === 'player' ? filterEvents(engine, recent, role.force) : recent).slice(-200) } satisfies ServerMessage));
-    ws.send(JSON.stringify({ type: 'state', state: this.stateFor(role) } satisfies ServerMessage));
-    ws.on('message', (data) => {
-      let msg: ClientMessage;
-      try {
-        msg = JSON.parse(data.toString());
-      } catch {
-        return;
-      }
-      if (msg?.type !== 'command') return;
-      const result = this.command(role, msg.command);
-      // Push state first, so clients already know about any object the result refers to.
-      this.broadcastState();
-      ws.send(JSON.stringify({ type: 'result', reqId: msg.reqId, result } satisfies ServerMessage));
-    });
-  }
-
-  private terrainJson(): string {
-    const engine = this.runner.engine;
-    if (!this.terrainCache || this.terrainCache.version !== engine.terrainVersion) {
-      this.terrainCache = { version: engine.terrainVersion, json: JSON.stringify(engine.terrain.toData()) };
-    }
-    return this.terrainCache.json;
+    if (p === '/api/v1/sessions' || p.startsWith('/api/v1/sessions/')) return this.send(res, await this.handleSessions(p, method, body, role), corsHeaders);
+    return session.handleGui(this, req, res, p, url, method, body, baseUrl, corsHeaders, role);
   }
 
   private serveStatic(p: string, res: http.ServerResponse): void {

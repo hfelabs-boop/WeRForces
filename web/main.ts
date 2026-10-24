@@ -27,7 +27,7 @@ import type {
   Vec2,
 } from '../src/shared/types.js';
 import { FORCE_NAMES } from '../src/shared/types.js';
-import { Api } from './api.js';
+import { Api, BASE } from './api.js';
 import { $, clear, fmtDeg, fmtGrid, fmtLatLon, fmtTime, h } from './dom.js';
 import { MapView } from './map.js';
 import { setSymbolStyle, type SymbolStyle, symbolCanvas } from './symbols.js';
@@ -197,6 +197,11 @@ class App {
     this.catalog = catalog;
     this.types = new Map(catalog.entityTypes.map((t) => [t.id, t]));
     this.map.sidcOf = (id) => this.types.get(id)?.sidc;
+    if (BASE) {
+      const pill = $('#session-name');
+      pill.textContent = `session ${decodeURIComponent(BASE.slice(3))}`;
+      pill.classList.remove('hidden');
+    }
     this.map.losCheck = async (a, b) => {
       try {
         const r = await this.api.v1<{ visible: boolean }>('POST', '/terrain/line-of-sight', { from: { x: a.x, y: a.y }, to: { x: b.x, y: b.y } });
@@ -230,7 +235,12 @@ class App {
     }
     this.map.setState(s);
     this.view3d?.setState(s);
-    $('#sim-time').textContent = fmtTime(s.time);
+    const clock = $('#sim-time');
+    clock.textContent = fmtTime(s.time);
+    // The server cannot keep up with the time scale: say so.
+    const behind = s.running && (s.load ?? 0) > 0.9;
+    clock.classList.toggle('behind', behind);
+    clock.title = behind ? `The server is busy ${Math.round((s.load ?? 0) * 100)}% of the time: the simulation runs slower than ${s.timeScale}x` : 'Simulation time';
     this.renderEnvironment(s.environment);
     $('#scenario-name').textContent = s.scenarioName;
     const run = $('#btn-run');
@@ -414,6 +424,7 @@ class App {
       if (action === 'settings') void this.settingsDialog();
       if (action === 'undo' || action === 'redo') void this.undoRedo(action);
       if (action === 'batch') void this.batchDialog();
+      if (action === 'sessions') void this.sessionsDialog();
     });
     ($('#file-input') as HTMLInputElement).addEventListener('change', async (e) => {
       const input = e.target as HTMLInputElement;
@@ -815,7 +826,8 @@ class App {
 
   private async integrationsDialog(): Promise<void> {
     let close = () => {};
-    const origin = location.origin;
+    // The REST and MCP endpoints of this session (sessions other than main live under /s/{id}).
+    const origin = location.origin + BASE;
     const keyArg = this.api.key ? ` --header "Authorization: Bearer ${this.api.key}"` : '';
     const snippet = (text: string) => h('pre', { class: 'snippet', text });
     const status = await this.api.v1<{ cot: CotView; webhooks: WebhookView[] }>('GET', '/integrations').catch((e: Error) => {
@@ -1484,6 +1496,87 @@ class App {
       h('div', { class: 'section' }, h('h4', { text: 'Members' }), h('div', { 'data-bind': 'members' })),
       h('div', { class: 'section row' }, h('button', { text: 'Center', onclick: () => this.centerOn(u.id) }), h('button', { class: 'danger', text: 'Delete unit', onclick: () => this.deleteSelected() })),
     );
+  }
+
+  /** Other exercises running on the same server, each in its own session. */
+  private async sessionsDialog(): Promise<void> {
+    type S = { id: string; path: string; scenario: string; time: number; running: boolean; entities: number; clients: number };
+    const stored = await this.api.v1<{ name: string; title?: string }[]>('GET', '/scenarios').catch(() => []);
+    const list = h('div', {});
+    const render = async () => {
+      // Sessions are listed by the server as a whole, whichever session this page is in.
+      const r = await fetch('/api/v1/sessions', { headers: this.api.headers() });
+      const sessions = r.ok ? ((await r.json()) as S[]) : [];
+      clear(list);
+      list.append(
+        h(
+          'table',
+          { class: 'aar-table' },
+          h('thead', {}, h('tr', {}, ['Session', 'Scenario', 'Time', 'Entities', 'Viewers', ''].map((c) => h('th', { text: c })))),
+          h(
+            'tbody',
+            {},
+            sessions.map((s) =>
+              h(
+                'tr',
+                {},
+                h('td', { text: s.id === 'main' ? 'main' : s.id }),
+                h('td', { text: s.scenario }),
+                h('td', { text: `${fmtTime(s.time)}${s.running ? ' ▶' : ''}` }),
+                h('td', { text: String(s.entities) }),
+                h('td', { text: String(s.clients) }),
+                h(
+                  'td',
+                  {},
+                  (s.path === '/' ? BASE === '' : BASE === s.path.slice(0, -1)) ? h('span', { class: 'hint', text: 'this page' }) : h('a', { href: this.api.link(s.path), text: 'Open' }),
+                  s.id === 'main'
+                    ? null
+                    : h('button', {
+                        class: 'danger',
+                        text: 'Delete',
+                        onclick: async () => {
+                          if (!confirm(`Stop and delete session ${s.id}?`)) return;
+                          await fetch(`/api/v1/sessions/${encodeURIComponent(s.id)}`, { method: 'DELETE', headers: this.api.headers() });
+                          void render();
+                        },
+                      }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    };
+    const id = h('input', { type: 'text', placeholder: 'e.g. red-cell', maxlength: '32' }) as HTMLInputElement;
+    const scenario = h('select', {}, h('option', { value: '', text: 'Empty scenario' }), stored.map((s) => h('option', { value: s.name, text: s.title ?? s.name }))) as HTMLSelectElement;
+    let close = () => {};
+    close = this.modal(
+      h(
+        'div',
+        { class: 'settings' },
+        h('h3', { text: 'Sessions' }),
+        h('p', { class: 'hint', text: 'Each session is a separate exercise with its own scenario, clock, recording, REST API (/s/{id}/api/v1) and MCP endpoint (/s/{id}/mcp). DIS and CoT run in the main session only.' }),
+        list,
+        h('h4', { text: 'New session' }),
+        h('div', { class: 'env-grid' }, h('label', { text: 'Name' }), id, h('label', { text: 'Scenario' }), scenario),
+        h(
+          'div',
+          { class: 'row' },
+          h('button', {
+            class: 'primary',
+            text: 'Create and open',
+            onclick: async () => {
+              const r = await fetch('/api/v1/sessions', { method: 'POST', headers: this.api.headers(true), body: JSON.stringify({ id: id.value.trim().toLowerCase() || undefined, scenario: scenario.value || undefined }) });
+              const j = (await r.json()) as S & { error?: { message: string } };
+              if (!r.ok) return this.toast(j.error?.message ?? 'could not create the session');
+              location.href = this.api.link(j.path);
+            },
+          }),
+          h('button', { text: 'Close', onclick: () => close() }),
+        ),
+      ),
+    );
+    await render();
   }
 
   /** Monte Carlo runs of a scenario in the background, with the outcome statistics. */

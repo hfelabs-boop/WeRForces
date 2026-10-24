@@ -638,6 +638,8 @@ export interface SimState {
   orders?: { targetId: string; text: string; due: number }[];
   /** Edits that can be undone and redone. */
   history?: { undo: number; redo: number };
+  /** Share of wall-clock time the server spends simulating (near 1: it cannot keep up with the time scale). */
+  load?: number;
   /** Plan steps waiting for a set time, soonest first (for the timeline). */
   schedule?: { targetId: string; time: number; text: string }[];
   dis?: DisStatus;

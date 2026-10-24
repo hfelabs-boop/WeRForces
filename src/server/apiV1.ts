@@ -171,6 +171,8 @@ export class ApiV1 {
       time: s.time,
       running: s.running,
       timeScale: s.timeScale,
+      /** Share of wall-clock time spent simulating (near 1: the server cannot keep up with the time scale). */
+      load: this.ctx.runner.load,
       strength,
       entities: s.entities.length,
       units: s.units.length,
