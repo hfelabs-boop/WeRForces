@@ -40,10 +40,12 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 
 | Method | Path | Body | Returns |
 | --- | --- | --- | --- |
-| GET | `/simulation` | | Status: scenario, time, running, timeScale, strength per force, terrain (size, origin, towns), DIS, `lastEventSeq` |
+| GET | `/simulation` | | Status: scenario, time, running, timeScale, `load` (share of time spent simulating), strength per force, terrain (size, origin, towns), environment (local time, light, visibility), DIS, `lastEventSeq` |
 | POST | `/simulation/run` · `/pause` · `/rewind` | | Status |
 | POST | `/simulation/step` | `{"seconds": 300}` (≤ 3600) | Status after stepping immediately |
 | PUT | `/simulation/time-scale` | `{"scale": 8}` | Status |
+| GET / PUT | `/simulation/rules` | `{"suppression": true, "morale": true, "fuel": true, "orderDelay": false}` (any subset) | The rules ([optional models](../concepts.md#optional-models)) |
+| GET / PUT | `/simulation/environment` | `{"date": "2026-06-21", "time": 4.5, "visibility": 800, "precipitation": "rain", "windSpeed": 6, "windFrom": 270}` (any subset) | The environment plus `localDate`, `localTime`, `sunAltitude`, `light`, `period` |
 
 ### Scenarios
 
@@ -55,6 +57,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | GET | `/scenarios` | Scenarios stored on the server |
 | GET / PUT | `/scenarios/{name}` | Read one / save the current state under that name |
 | POST | `/scenarios/{name}/load` | Load a stored scenario |
+| POST | `/scenario/undo` · `/scenario/redo` | Take back the last edit, or redo it (30 steps). Returns `{undo, redo, time}` |
 
 ### Objects
 
@@ -71,10 +74,10 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | GET | `/entities/{id}/path` | remaining planned waypoints |
 | GET | `/units` | `?force=` |
 | POST | `/units` | `{"templateId", "force", "position", "heading"?, "name"?}` or `{"entityIds": [...], "name"?, "formation"?}` |
-| GET / PATCH / DELETE | `/units/{id}` | PATCH: `{"name"?, "formation"?, "roe"?, "reactions"?}`. DELETE removes the members too |
+| GET / PATCH / DELETE | `/units/{id}` | PATCH: `{"name"?, "formation"?, "roe"?, "reactions"?, "superiorId"?}` (`superiorId`: put under another unit, `null` for none). DELETE removes the members too; its subordinates become independent |
 | POST | `/units/{id}/task` · `/plan` · `/stop` · `/embark` · `/disembark` | as for entities. A unit embarking into a carrier unit shares out the seats |
-| GET / POST | `/graphics` | POST `{"kind": "route\|area\|phaseLine\|point", "points": [...], "name"?, "force"?}` |
-| GET / PATCH / DELETE | `/graphics/{id}` | PATCH `{"name"?, "points"?}` |
+| GET / POST | `/graphics` | POST `{"kind": "route\|area\|phaseLine\|point\|minefield\|obstacle", "points": [...], "name"?, "force"?, "density"?}` (`density`: minefields, strikes per 100 m) |
+| GET / PATCH / DELETE | `/graphics/{id}` | PATCH `{"name"?, "points"?, "density"?}` |
 
 ### Tasks
 
@@ -89,7 +92,19 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 {"type": "fireMission", "target": {"x": 9200, "y": 11400}, "rounds": 4, "radius": 50}
 {"type": "mount", "carrierId": "U3"}
 {"type": "dismount"}
+{"type": "moveTo", "target": {"x": 9000, "y": 7000}, "covered": true}
+{"type": "fireMission", "target": {"x": 9200, "y": 11400}, "rounds": 2, "smoke": true}
+{"type": "breach", "graphicId": "G4"}
+{"type": "resupply", "supplierId": "E30"}
+{"type": "overwatch", "position": {"x": 6000, "y": 9000}, "facing": 45, "duration": 600}
+{"type": "defend", "position": {"town": "Calloway"}, "facing": 0, "width": 800}
+{"type": "ambush", "position": {"x": 6000, "y": 9000}, "killZoneId": "G2"}
+{"type": "screen", "position": {"x": 6000, "y": 9000}, "facing": 90, "breakContact": 2000, "fallback": {"x": 3000, "y": 9000}}
+{"type": "search", "areaId": "G3", "spacing": 600}
 ```
+
+See [Concepts](../concepts.md#tasks) for what each one does. Positions can be
+`{"x", "y"}`, `{"lat", "lon"}` or `{"town"}`.
 
 ### Reactions
 
@@ -120,7 +135,8 @@ Setting statements: `setRoe` (`fireAtWill|returnFire|holdFire`), `setSpeed` (m/s
 `setAltitude` (m above ground), `setFormation` (`column|line|wedge|vee|echelonRight`),
 `setReactions` (`{"reactions": {...}}`).
 Conditions: `simTime {time}`, `inArea {areaId}`, `enemyInArea {areaId}`,
-`enemyDetected`, `underFire`, `strengthBelow {fraction}`, `entityDestroyed {entityId}`.
+`enemyDetected`, `underFire`, `strengthBelow {fraction}`, `fuelBelow {fraction}`,
+`ammoBelow {fraction}`, `entityDestroyed {entityId}`.
 Semantics are described in [Concepts](../concepts.md#plans).
 
 ### Recording and after-action review
@@ -131,7 +147,9 @@ Semantics are described in [Concepts](../concepts.md#plans).
 | GET | `/recording/data` | The whole recording as JSON (frames of 8 numbers per entity: index, x, y, z, heading, speed, flags, carrier) |
 | GET | `/recording/state` | `?time=` → every entity and unit as recorded then (interpolated), with lat/lon |
 | GET | `/recording/report` | After-action report: per force start/end strength, losses, kills and rounds fired; every kill with killer and weapon; rounds per weapon; strength over time; bookmarks |
-| POST | `/recording/bookmarks` | `{"text", "time"?}` (default now) → 201 with the bookmark |
+| GET | `/recording/report.pdf` | The report as a printable PDF |
+| GET | `/recording/events.csv` · `/kills.csv` · `/strength.csv` | The event log, kills, and alive entities per force over time, as CSV |
+| POST | `/recording/bookmarks` | `{"text", "time"?}` (default now) → 201 with the bookmark. With DIS on, also sent as a Comment PDU |
 | DELETE | `/recording/bookmarks/{id}` | |
 | POST | `/recording/clear` | Discard it (or stop reviewing a loaded one) and record afresh from now |
 | POST | `/recording/load` | Review a recording sent in the body; live recording pauses until `clear` |
@@ -141,6 +159,27 @@ Semantics are described in [Concepts](../concepts.md#plans).
 
 Returns 409 when the server runs with `--record-interval 0`.
 
+### Batch runs
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| POST | `/batch` | `{"scenario"?: name or scenario file (default: the current state), "runs": 20, "duration": 1800, "seed"?: 1000, "stopWhenDestroyed"?: true}` → 202 with the job. Runs in a worker thread |
+| GET | `/batch` | Jobs: status (`running`, `done`, `failed`, `cancelled`), `done`/`runs` |
+| GET | `/batch/{id}` | Progress, and when done the `summary`: per force losses (`mean`, `sd`, `ci95`, `min`, `max`, `histogram`), `exchangeRatio`, area control, shots, end time. `?outcomes=true` adds every run |
+| GET | `/batch/{id}/runs.csv` | One row per run |
+| DELETE | `/batch/{id}` | Cancel |
+
+### Sessions
+
+Exercise control only. Every endpoint on this page also exists per session
+under `/s/{id}/api/v1`; the unprefixed paths are the `main` session.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/sessions` | `id`, `path`, scenario, time, running, entities, viewers, load |
+| POST | `/sessions` | `{"id"?: "red-cell", "scenario"?: "calloway-crossroads"}` → 201. At most 8 |
+| GET / DELETE | `/sessions/{id}` | Any session but `main` can be deleted |
+
 ### Events, terrain, catalog
 
 | Method | Path | Notes |
@@ -149,7 +188,7 @@ Returns 409 when the server runs with `--record-interval 0`.
 | GET | `/terrain` | spec, towns, road polylines |
 | GET | `/terrain/point` | `?x=&y=` / `?lat=&lon=` / `?town=` → elevation, water, forest, road, slope, nearest town |
 | POST | `/terrain/line-of-sight` | `{"from": "E1" or position, "to": ...}`. Positions take an optional `height` above ground (default 2 m) |
-| POST | `/terrain/route` | `{"from", "to", "domain": "ground\|lifeform\|surface\|air"}` → waypoints and length |
+| POST | `/terrain/route` | `{"from", "to", "domain": "ground\|lifeform\|surface\|air", "force"?, "covered"?}` → waypoints and length. With `force`, round obstacles and the minefields it knows; with `covered` too, out of sight of the enemies it knows |
 | GET | `/catalog` · `/catalog/entity-types` · `/catalog/unit-templates` | see the [catalog](catalog.md) |
 | GET | `/terrains` | Imported terrain datasets ([Terrain import](../terrain-import.md)) |
 | PUT | `/terrains/{name}` | Upload a dataset made with `werforces-terrain` (body: the dataset JSON, up to 8 MB) |
@@ -177,6 +216,8 @@ The browser app uses a few unversioned endpoints, which you can also use:
 - `GET /api/path/{id}`;
 - `POST /api/command` takes a command object (see `Command` in
   `src/shared/types.ts`);
+- `GET /auth/config` says whether sign-in is used and who is signed in; `/auth/login`,
+  `/auth/callback` and `/auth/logout` are the sign-in flow;
 - the **`/ws`** WebSocket:
   - on connect it sends `hello`, then recent `events`, then `state`;
   - `state` follows at 10 Hz and `events` as they happen;
@@ -202,6 +243,10 @@ The browser app uses a few unversioned endpoints, which you can also use:
   integrations, creating or moving entities) answers **403**. The routes a
   player may use are the object, task, plan, graphics, events, terrain and
   catalog routes.
+- **OpenID Connect.** With `--oidc-issuer`, browsers sign in with your identity
+  provider and get an HttpOnly, SameSite=Lax session cookie, accepted on `/api`,
+  `/ws` and `/mcp` with the role their claims map to (see
+  [Deployment](../deployment.md#sign-in-with-openid-connect)). API keys still work.
 - **JSON-only writes.** Requiring `Content-Type: application/json` on `POST`/`PUT`
   means a web page on another origin can only send them after a CORS preflight,
   which is refused unless you allowed that origin with `--cors`.

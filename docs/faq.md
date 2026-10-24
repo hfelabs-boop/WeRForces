@@ -104,6 +104,7 @@ server. **Export to file** downloads the same JSON to your computer.
 ### Can I use real terrain or maps?
 
 Yes. Import a GeoTIFF elevation model and, optionally, OpenStreetMap features
+and buildings (a file, or straight from Overpass) and ESA WorldCover land cover
 with `npm run terrain:import`, then pick the terrain in **File → New
 scenario**. A 10 km Fulda sample is included. See
 [Terrain import](terrain-import.md). Generated terrain also converts to real
@@ -136,3 +137,35 @@ UH-60 11, Mi-24 8, Ural 20). The task fails with *no free seats* otherwise.
 The recording starts when a scenario is loaded and samples once per simulated
 second. Run or step the simulation first. A server started with
 `--record-interval 0` does not record.
+
+### Does WeRForces speak HLA?
+
+Yes, through a separate bridge federate in `hla/`: a small Java program that
+joins an HLA 1516e (HLA Evolved) federation with a subset of the RPR FOM 2.0,
+and relays entities, fire and detonations between the federation and
+WeRForces' DIS gateway. `npm run hla:build` downloads the open-source OHLA RTI
+and builds the bridge with plain `javac` (Java 17 or later). It is tested with
+OHLA only; other RTIs (Pitch pRTI, MAK RTI, Portico) should work through the
+standard API but are untested. Radio and simulation management PDUs are not
+bridged. See [HLA](hla.md).
+
+### The simulation clock runs slower than the time scale I set
+
+The scenario is more than one core can simulate at that speed. The server keeps
+responding, but the clock falls behind; `load` in `GET /api/v1/simulation` is
+near 1. Lower the time scale, use a coarser terrain grid, or split the exercise
+into sessions. `npm run bench` shows what your machine can do.
+
+### Sign-in says *has no role in this exercise*
+
+The user signed in at your identity provider, but no `--oidc-role` rule matched
+their ID token. Check which claims the provider puts in the ID token (a group
+claim often has to be enabled) and that the rule names that claim and value
+exactly, or set `--oidc-default-role`. See
+[Deployment → Sign in with OpenID Connect](deployment.md#sign-in-with-openid-connect).
+
+### The radio or DIS log shows *start/resume (ignored)*
+
+Another simulation on the DIS network sent a simulation-management PDU, and
+WeRForces was started with `--dis-ignore-siman`. Without that flag it runs and
+pauses with the simulation manager.

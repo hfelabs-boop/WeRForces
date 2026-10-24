@@ -5,7 +5,9 @@ protocol (IEEE 1278.1) that a CGF needs to share a battlespace:
 
 - publishing its entities;
 - reflecting other simulations' entities;
-- exchanging fire and detonation events.
+- exchanging fire and detonation events;
+- radio presence and text messages;
+- simulation management (run, pause, comments).
 
 Code: `src/dis/`. For a walkthrough see [Tutorial 6](../tutorials/06-dis-interoperability.md).
 
@@ -16,6 +18,13 @@ Code: `src/dis/`. For a walkthrough see [Tutorial 6](../tutorials/06-dis-interop
 | Entity State | 1 | Entity Information (1) | 144 bytes | yes | yes (variable parameters skipped) |
 | Fire | 2 | Warfare (2) | 96 bytes | yes | yes (logged; marks the target as under fire) |
 | Detonation | 3 | Warfare (2) | 104 bytes | yes | yes (damage applied to local targets) |
+| Start/Resume | 13 | Simulation Management (5) | 44 bytes | with `--dis-announce` | yes (runs the clock) |
+| Stop/Freeze | 14 | Simulation Management (5) | 40 bytes | with `--dis-announce` | yes (pauses the clock) |
+| Acknowledge | 15 | Simulation Management (5) | 32 bytes | in answer to Start/Resume and Stop/Freeze | no |
+| Comment | 22 | Simulation Management (5) | variable | bookmarks | yes (logged) |
+| Transmitter | 25 | Radio Communications (4) | 104 bytes | yes | yes (tracked) |
+| Signal | 26 | Radio Communications (4) | variable | yes (text) | yes (text logged; audio ignored) |
+| Receiver | 27 | Radio Communications (4) | 36 bytes | yes | no |
 
 - Version 7 (IEEE 1278.1-2012) is sent; versions 4–7 are accepted.
 - All fields are big-endian.
@@ -102,6 +111,49 @@ followed and attacked, but not tasked.
   WeRForces applies damage. It uses the Pk of the catalog weapon with the same
   munition type if there is one, otherwise 0.3.
 
+## Radio
+
+Each **unit leader**, and each entity that is not in a unit, carries one radio
+(radio number 1) on its force's net:
+
+| Force | Frequency |
+| --- | --- |
+| Blue | 30 MHz |
+| Red | 32 MHz |
+| Neutral | 34 MHz |
+| Other | 36 MHz |
+
+- A **Transmitter PDU** (state *on, not transmitting*; AM, generic radio) and a
+  **Receiver PDU** (state *on, idle*) are sent for each radio on the same 5 s
+  heartbeat as Entity State. When the entity is destroyed, deleted, mounts
+  a vehicle or stops leading its unit, a Transmitter PDU with state *off* is
+  sent.
+- **Radio messages** — contact reports, calls for fire, "wilco" when an order
+  arrives (all shown with the `radio` event kind) — key the radio: Transmitter
+  *transmitting*, then a **Signal PDU** with encoding class 1 (raw binary) that
+  carries the text as UTF-8 (at most 1000 characters), then Transmitter *on*
+  again.
+- Received **Signal PDUs** with raw-binary or application-specific data are
+  decoded as text and logged as `radio` events from the sending entity (or its
+  `site:application:entity` if it is not known). Encoded audio (voice) is
+  ignored. Remote radios are tracked from their Transmitter PDUs and dropped
+  after 12 s of silence.
+
+## Simulation management
+
+| Received | What WeRForces does |
+| --- | --- |
+| Start/Resume addressed to all or to this site/application | Runs the clock, logs it, and answers with an **Acknowledge** (response 1, *able to comply*) |
+| Stop/Freeze | Pauses the clock, the same way |
+| Either one, with `--dis-ignore-siman` | Logs it as ignored and answers with response 2 (*unable to comply*) |
+| Comment | Logs its text (variable datums of any id) as an `info` event |
+
+With `--dis-announce`, WeRForces acts as a simulation manager itself: running
+the clock sends Start/Resume (with the simulation time), pausing sends
+Stop/Freeze (reason 1, *recess*), both addressed to all simulations. Adding a
+recording **bookmark** sends a Comment PDU `Bookmark: <text>` so the other
+simulations' logs line up with the after-action review.
+
 ## Network setup
 
 | Situation | Options |
@@ -116,9 +168,10 @@ applications can share the port.
 
 ## Limitations
 
-- No HLA (the gateway is designed so an HLA/RPR-FOM binding can be added
-  alongside it).
-- Received variable parameters (articulated parts), Collision, Signal/Transmitter
-  and Simulation Management PDUs are ignored.
+- HLA is a separate bridge process, not part of this gateway: see [HLA](../hla.md).
+- Received variable parameters (articulated parts) and Collision PDUs are ignored.
+  So are Create/Remove Entity, Set/Data Query and other Simulation Management
+  PDUs besides those above.
+- Voice is not transmitted or played; radios carry text only.
 - Entity-type enumerations are representative. Check them against SISO-REF-010
   before joining a federation that depends on exact types.

@@ -1,6 +1,6 @@
 {
   "name": "werforces",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "WeRForces - an open computer-generated forces (CGF) simulator inspired by VR-Forces: scenario editor, tasking, sensors, combat and DIS interoperability.",
   "private": true,
   "repository": {

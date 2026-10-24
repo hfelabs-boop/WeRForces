@@ -35,11 +35,14 @@ These pages are also served by a running server at **`/docs`** (toolbar → **He
 
 - [User guide](user-guide.md): every part of the GUI (2D map, 3D view, panels,
   menus, keyboard).
-- [Concepts](concepts.md): coordinates, forces, entities and units, tasks and
-  plans, sensors, combat and damage, and time.
-- [Terrain import](terrain-import.md): real elevation data and map features.
+- [Concepts](concepts.md): coordinates, terrain, forces, entities and units,
+  the chain of command, tasks and plans, sensors, combat and damage,
+  suppression and morale, night and weather, obstacles, supply, and time.
+- [Terrain import](terrain-import.md): real elevation data, map features,
+  buildings and land cover.
 - [Deployment](deployment.md): Docker, HTTPS, exercise-control and player keys,
-  sizing.
+  OpenID Connect sign-in, several sessions, sizing.
+- [HLA](hla.md): the HLA 1516e bridge federate.
 - [Architecture](architecture.md): how the code is organised, the simulation
   loop, and how to add features.
 - [FAQ and troubleshooting](faq.md)
@@ -52,7 +55,7 @@ These pages are also served by a running server at **`/docs`** (toolbar → **He
 - [MCP tools](reference/mcp-tools.md) *(generated)*
 - [Catalog: entity types, weapons, sensors, unit templates](reference/catalog.md) *(generated)*
 - [Scenario file format](reference/scenario-format.md)
-- [DIS](reference/dis.md)
+- [DIS](reference/dis.md): entity state, fire, detonation, radio and simulation management
 - [Integrations: CoT, webhooks, GIS](reference/integrations.md)
 
 ## Examples
