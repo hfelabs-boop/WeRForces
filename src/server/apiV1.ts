@@ -57,6 +57,7 @@ const PLAYER_ROUTES: [string, RegExp][] = [
   ['GET', /^\/api\/v1\/(entities|units)\/[^/]+\/explain\/?$/],
   ['GET', /^\/api\/v1\/alerts\/?$/],
   ['POST', /^\/api\/v1\/orders\/?$/],
+  ['POST', /^\/api\/v1\/entities\/[^/]+\/drive\/?$/],
   ['GET', /^\/api\/v1\/codewords\/?$/],
   ['GET', /^\/api\/v1\/sync-matrix\/?$/],
   ['PUT', /^\/api\/v1\/sync-matrix\/[^/]+\/?$/],
@@ -494,6 +495,11 @@ export class ApiV1 {
       return { status: 204 };
     });
     r.get(`${P}/entities/{id}/path`, (req) => (this.ownEntity(req.params.id), { json: this.engine.plannedPath(req.params.id) }));
+    r.post(`${P}/entities/{id}/drive`, (req) => {
+      const b = obj(req.body);
+      this.run({ cmd: 'drive', id: req.params.id, throttle: b.throttle as number | undefined, turn: b.turn as number | undefined, targetId: b.targetId as string | null | undefined });
+      return { json: this.entityView(this.entity(req.params.id)) };
+    });
     r.get(`${P}/entities/{id}/explain`, (req) => {
       this.ownEntity(req.params.id);
       return { json: explainEntity(this.engine, this.engine.entities.get(req.params.id)!, { omniscient: this.role.kind === 'controller' }) };

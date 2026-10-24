@@ -77,6 +77,8 @@ export function validateTask(v: unknown): TaskSpec {
       return { type: 'mount', carrierId: str(t.carrierId, 'carrierId') };
     case 'dismount':
       return { type: 'dismount' };
+    case 'manual':
+      return { type: 'manual' };
     case 'fireMission': {
       const rounds = t.rounds === undefined ? undefined : Math.floor(num(t.rounds, 'rounds'));
       if (rounds !== undefined && (rounds < 1 || rounds > 100)) throw new ValidationError('rounds must be between 1 and 100');
@@ -283,7 +285,7 @@ export function validatePlan(v: unknown): Plan {
 }
 
 /** Commands that do not change the scenario, so are not undone. */
-const NOT_EDITS = new Set(['run', 'pause', 'step', 'setTimeScale', 'undo', 'redo', 'ackAlert', 'sendCodeword']);
+const NOT_EDITS = new Set(['run', 'pause', 'step', 'setTimeScale', 'undo', 'redo', 'ackAlert', 'sendCodeword', 'drive']);
 
 export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
   const cmd = raw && typeof raw === 'object' ? (raw as { cmd?: unknown }).cmd : undefined;
@@ -440,6 +442,21 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
       case 'setReactions':
         engine.setReactions(str(c.targetId, 'targetId'), validateReactions(c.reactions));
         return;
+      case 'drive': {
+        const e = engine.entities.get(str(c.id, 'id'));
+        if (!e || e.remote) throw new ValidationError('unknown local entity');
+        if (!e.alive) throw new ValidationError(`${e.name} is destroyed`);
+        if (e.embarkedIn) throw new ValidationError(`${e.name} is mounted; drive its carrier`);
+        const input: { throttle?: number; turn?: number; targetId?: string | null } = {};
+        if (c.throttle !== undefined) input.throttle = num(c.throttle, 'throttle');
+        if (c.turn !== undefined) input.turn = num(c.turn, 'turn');
+        if (c.targetId !== undefined) {
+          if (c.targetId !== null && !engine.entities.has(str(c.targetId, 'targetId'))) throw new ValidationError(`unknown entity ${String(c.targetId)}`);
+          input.targetId = c.targetId;
+        }
+        engine.drive(e, input);
+        return;
+      }
       case 'setJamming': {
         const e = engine.entities.get(str(c.id, 'id'));
         if (!e || e.remote) throw new ValidationError('unknown local entity');

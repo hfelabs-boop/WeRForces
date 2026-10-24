@@ -211,6 +211,9 @@ export function buildOpenApi(baseUrl: string): Schema {
       '/api/v1/alerts': { get: op('Events', 'The attention queue: open alerts (unit idle, broken, out of fuel or ammunition, leader lost, losses, task failed, under fire, first contact), newest first. `?all=true` includes acknowledged ones', { parameters: [{ name: 'all', in: 'query', schema: { type: 'boolean' } }] }) },
       '/api/v1/alerts/acknowledge': { post: op('Events', 'Acknowledge every open alert (players: their own force\'s)') },
       '/api/v1/alerts/{id}/acknowledge': { post: op('Events', 'Acknowledge one alert', { parameters: [idParam()] }) },
+      '/api/v1/entities/{id}/drive': {
+        post: op('Entities', 'Direct control: drive an entity by hand. Body: {throttle 0..1, turn -1..1 (let go after 1.5 s without input), targetId: entity to fire at, or null}. The first call puts it under direct control (replacing its task and plan); any other task ends it', { parameters: [idParam()], ...body({ type: 'object', properties: { throttle: { type: 'number' }, turn: { type: 'number' }, targetId: { type: ['string', 'null'] } } }) }),
+      },
       '/api/v1/entities/{id}/explain': { get: op('Entities', 'Why the entity is or is not moving, firing and detecting: findings by severity (block, warn, info), with fixes. Exercise control is also told about enemies the entity has not detected, and why', { parameters: [idParam()] }) },
       '/api/v1/units/{id}/explain': { get: op('Units', "Why the unit is or is not moving and firing: its strength, morale and orders, its leader's findings, and how many members share each problem", { parameters: [idParam()] }) },
       ...taskable('entities', 'Entities'),

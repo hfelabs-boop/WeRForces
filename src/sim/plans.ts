@@ -56,6 +56,8 @@ export function describeStatement(st: PlanStatement, engine?: Engine): string {
           return `Ambush ${engine?.graphics.get(t.killZoneId)?.name ?? t.killZoneId} from (${Math.round(t.position.x)}, ${Math.round(t.position.y)})`;
         case 'search':
           return `Search ${engine?.graphics.get(t.areaId)?.name ?? t.areaId}`;
+        case 'manual':
+          return 'Direct control';
         case 'fireMission':
           return `${t.smoke ? 'Smoke' : 'Fire'} mission at (${Math.round(t.target.x)}, ${Math.round(t.target.y)}), ${t.rounds ?? DEFAULT_MISSION_ROUNDS} rounds`;
       }

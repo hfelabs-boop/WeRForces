@@ -41,6 +41,7 @@ import { Timeline } from './timeline.js';
 import { QuickBar } from './quickbar.js';
 import { PlanEditor } from './planeditor.js';
 import { SyncMatrixDialog } from './syncmatrix.js';
+import { DriveMode } from './drive.js';
 import { OrderLine } from './orderline.js';
 import { orderContext } from '../src/shared/orders.js';
 import type { CotStatus as CotView } from '../src/integrations/cot.js';
@@ -83,6 +84,7 @@ class App {
   readonly map: MapView;
   private quick!: QuickBar;
   private syncDialog!: SyncMatrixDialog;
+  private driveMode!: DriveMode;
   private orderLine!: OrderLine;
   catalog: Catalog | null = null;
   types = new Map<string, EntityTypeDef>();
@@ -208,6 +210,17 @@ class App {
       toast: (m, info) => this.toast(m, info),
     });
     $('#btn-sync').addEventListener('click', () => void this.syncDialog.open());
+    this.driveMode = new DriveMode($('#drive-hud'), {
+      entity: (id) => this.entity(id),
+      cmd: (c) => this.cmd(c),
+      pickEntity: (label, onPick) => this.map.setMode({ kind: 'pickEntity', label, onPick }),
+      follow: (id) => {
+        const e = this.entity(id);
+        if (e) this.map.centerOn(e);
+      },
+      weaponName: (id) => this.catalog?.weapons.find((w) => w.id === id)?.name ?? id,
+      toast: (m, info) => this.toast(m, info),
+    });
     this.orderLine = new OrderLine($('#orderline'), {
       context: () =>
         this.state && this.terrainData
@@ -327,6 +340,7 @@ class App {
     this.renderAlerts();
     this.quick.update();
     this.renderPhase(s);
+    this.driveMode.update();
     $('#scenario-name').textContent = s.scenarioName;
     const run = $('#btn-run');
     run.textContent = s.running ? '⏸ Pause' : '▶ Run';
@@ -588,6 +602,7 @@ class App {
       if (e.key === 'f' && this.selectedId) this.centerOn(this.selectedId);
       if (e.key === 'm' && !e.ctrlKey && !e.metaKey) this.map.setMode({ kind: 'measure', points: [] });
       if (e.key === 'n' && !e.ctrlKey && !e.metaKey) this.nextAlert();
+      if (e.key === 'g' && !e.ctrlKey && !e.metaKey && this.entity(this.selectedId)) this.driveMode.start(this.selectedId!);
       if (!e.ctrlKey && !e.metaKey && !e.altKey && this.quick.key(e.key)) e.preventDefault();
       if (e.key === '/' && !this.aar.active) {
         e.preventDefault();
@@ -1667,6 +1682,7 @@ class App {
         { class: 'section row' },
         h('button', { text: 'Center', onclick: () => this.centerOn(e.id) }),
         h('button', { text: 'Viewshed', title: 'Show the ground it can see, and its dead ground, out to its sensor range', onclick: () => void this.showViewshed(e.id) }),
+        h('button', { text: 'Drive', title: 'Drive it yourself: W/S throttle, A/D turn, T pick a target, Esc hand back (G)', onclick: () => this.driveMode.start(e.id) }),
         h('button', { class: 'danger', text: 'Delete', onclick: () => this.deleteSelected() }),
       ),
     );

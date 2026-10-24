@@ -217,7 +217,9 @@ export type TaskSpec =
   /** Infantry walk to a carrier (entity, or any member of a unit with free seats) and board it. */
   | { type: 'mount'; carrierId: string }
   /** A carrier stops and lets all its passengers out. */
-  | { type: 'dismount' };
+  | { type: 'dismount' }
+  /** Direct control: a person drives it (throttle 0..1, turn -1..1) and picks what it shoots at. */
+  | { type: 'manual'; throttle?: number; turn?: number; targetId?: string };
 
 export type Condition =
   | { type: 'simTime'; time: number }
@@ -873,6 +875,8 @@ export type Command =
   | { cmd: 'setRoe'; targetId: string; roe: Roe }
   /** Acknowledge an alert, or all of them (players: their own force's). */
   | { cmd: 'ackAlert'; id?: string; all?: boolean }
+  /** Direct control: drive an entity and pick its target. Starts manual control if it is not under it. */
+  | { cmd: 'drive'; id: string; throttle?: number; turn?: number; targetId?: string | null }
   /** Switch a jammer on or off. */
   | { cmd: 'setJamming'; id: string; on: boolean }
   /** Background civilians to keep on the map (0 for none). */

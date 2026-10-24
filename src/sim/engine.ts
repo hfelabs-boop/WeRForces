@@ -50,7 +50,7 @@ import { Smoke } from './smoke.js';
 import { ThreatMap } from './threats.js';
 import { burnFuel, updateResupply } from './supply.js';
 import { SpatialIndex } from './spatial.js';
-import { createTask, MountTask, type Task, type TaskStatus } from './tasks.js';
+import { createTask, ManualTask, MountTask, type Task, type TaskStatus } from './tasks.js';
 import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
 import { formationOffset, perMemberTask, splitOrder, Unit } from './units.js';
 import { Alerts } from './alerts.js';
@@ -526,6 +526,29 @@ export class Engine {
     this.graphics.set(gid, g);
     if (kind === 'minefield' || kind === 'obstacle') this.obstacles.changed();
     return g;
+  }
+
+  /** Direct control: start it (logged once) or update the throttle, turn and target. */
+  drive(e: Entity, input: { throttle?: number; turn?: number; targetId?: string | null }): void {
+    if (!(e.task instanceof ManualTask) || e.task.status !== 'running') {
+      // Driving a unit's leader drives the unit: its own orders stop.
+      const u = e.unit;
+      if (u && u.leader === e) {
+        u.plan = null;
+        u.assignedPlan = undefined;
+        u.assignedTask = undefined;
+        u.taskSpec = null;
+        u.leaderTask = null;
+        this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== u.id);
+      }
+      this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== e.id);
+      e.plan = null;
+      e.assignedPlan = undefined;
+      e.assignedTask = { type: 'manual' };
+      this.setEntityTask(e, new ManualTask({ type: 'manual' }));
+      this.log('task', `${e.name}: under direct control`, e.id);
+    }
+    (e.task as ManualTask).input(this, input);
   }
 
   /** Remove an entity without a "deleted" event (background civilians). */

@@ -5,7 +5,7 @@ import type { ForceId, Formation, MoraleState, Plan, PlanStatement, Reactions, T
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import type { PlanExecutor, Taskable } from './plans.js';
-import { createTask, FormationTask, indirectWeaponFor, type Task, type TaskStatus } from './tasks.js';
+import { createTask, FormationTask, indirectWeaponFor, ManualTask, type Task, type TaskStatus } from './tasks.js';
 import { needsSupply } from './supply.js';
 
 /** Body-frame offset (x = right, y = forward) for follower k (1-based) in a formation. */
@@ -211,6 +211,8 @@ export class Unit implements Taskable {
     const leader = this.leader;
     if (!leader) return;
     for (const f of this.followers()) {
+      // Someone driving it by hand keeps it.
+      if (f.task instanceof ManualTask && f.task.status === 'running') continue;
       if (!(f.task instanceof FormationTask) || f.task.leaderId !== leader.id || f.task.status !== 'running') {
         engine.setEntityTask(f, new FormationTask(leader.id));
       }

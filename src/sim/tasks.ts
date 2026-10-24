@@ -752,6 +752,67 @@ export function createTask(spec: TaskSpec): Task {
       return new ScreenTask(spec);
     case 'search':
       return new SearchTask(spec);
+    case 'manual':
+      return new ManualTask(spec);
+  }
+}
+
+/** Seconds without input after which a held turn is let go (the keys were released). */
+const MANUAL_INPUT_TIMEOUT = 1.5;
+
+/**
+ * Direct control: a person steers it with a throttle and a turn, and chooses what it
+ * fires at (it shoots only at that target, on its own ROE otherwise held).
+ */
+export class ManualTask extends Task {
+  throttle: number;
+  turn: number;
+  targetId?: string;
+  private lastInput = -Infinity;
+
+  constructor(spec: Extract<TaskSpec, { type: 'manual' }>) {
+    super(spec);
+    this.throttle = spec.throttle ?? 0;
+    this.turn = spec.turn ?? 0;
+    this.targetId = spec.targetId;
+  }
+
+  input(engine: Engine, i: { throttle?: number; turn?: number; targetId?: string | null }): void {
+    if (i.throttle !== undefined) this.throttle = Math.max(0, Math.min(1, i.throttle));
+    if (i.turn !== undefined) this.turn = Math.max(-1, Math.min(1, i.turn));
+    if (i.targetId !== undefined) this.targetId = i.targetId ?? undefined;
+    this.lastInput = engine.time;
+  }
+
+  protected override start({ engine }: TaskContext): void {
+    this.lastInput = engine.time;
+  }
+
+  protected tick({ engine, entity }: TaskContext): TaskStatus {
+    if (engine.time - this.lastInput > MANUAL_INPUT_TIMEOUT) this.turn = 0;
+    const heading = entity.heading + this.turn * (Math.PI / 3);
+    const speed = this.throttle * entity.type.maxSpeed;
+    const ahead = { x: entity.x + Math.sin(heading) * 200, y: entity.y + Math.cos(heading) * 200 };
+    // Stopped, a turn pivots it on the spot (vehicles that can).
+    entity.steer = speed > 0.2 ? { ...ahead, speed, arrive: false } : { x: entity.x, y: entity.y, speed: 0, arrive: true, finalHeading: this.turn ? heading : undefined };
+    if (entity.domain === 'air' && speed <= 0.2) entity.steer = { ...ahead, speed: entity.type.minSpeed ?? 0, arrive: false };
+    const t = this.targetId ? engine.entities.get(this.targetId) : undefined;
+    entity.attackTargetId = t && t.alive ? t.id : undefined;
+    return 'running';
+  }
+
+  override cancel(entity: Entity): void {
+    super.cancel(entity);
+    entity.attackTargetId = undefined;
+  }
+
+  override resumeSpec(): TaskSpec {
+    return { type: 'manual', throttle: this.throttle, turn: 0, targetId: this.targetId };
+  }
+
+  describe(engine: Engine): string {
+    const t = this.targetId ? engine.entities.get(this.targetId) : undefined;
+    return `Direct control${this.throttle > 0 ? `, ${Math.round(this.throttle * 100)}% throttle` : ', stopped'}${t ? `, engaging ${t.name}` : ''}`;
   }
 }
 

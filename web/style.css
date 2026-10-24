@@ -1447,3 +1447,27 @@ body.player [data-controller-only] {
 .viewshed-chip.hidden {
   display: none;
 }
+
+/* Drive mode */
+.drive-hud {
+  position: absolute;
+  right: 10px;
+  top: 48px;
+  width: 260px;
+  background: rgba(20, 25, 31, 0.94);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 8px 10px;
+  z-index: 6;
+  font-size: 12px;
+}
+.drive-hud.hidden {
+  display: none;
+}
+.drive-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.drive-keys {
+  margin-top: 6px;
+}

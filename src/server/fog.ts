@@ -142,6 +142,7 @@ const PLAYER_COMMANDS = new Set<Command['cmd']>([
   'setSyncMatrix',
   'startPhase',
   'setJamming',
+  'drive',
 ]);
 
 /**
@@ -205,6 +206,10 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
       return;
     case 'setFormation':
       ownObject(c.unitId, 'unit');
+      return;
+    case 'drive':
+      ownObject(c.id, 'object');
+      if (c.targetId) visible(c.targetId);
       return;
     case 'setJamming':
     case 'rename':
