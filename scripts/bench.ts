@@ -1,10 +1,10 @@
 // Performance benchmark: a mixed scenario of N entities (ground units in formation
 // advancing and fighting across 24 km, aircraft, civilians; see bench-scenario.ts), run
-// with the recorder attached and a state snapshot serialised every step, as the server
-// does at 1x real time with a GUI connected (10 Hz). Reports simulated seconds per wall
-// second and where the time goes.
+// with the recorder attached and state snapshots serialised as the server sends them to a
+// GUI at 1x real time (10 Hz, or less when a broadcast would take more than a tenth of the
+// time). Reports simulated seconds per wall second and where the time goes.
 //   npm run bench                                   1000, 2000 and 5000 entities
-//   npx tsx scripts/bench.ts 5000 --seconds 120     one size, longer run
+//   npx tsx scripts/bench.ts 5000 --seconds 120     one size, longer run (default 60 s after 30 s warm-up)
 //   npx tsx scripts/bench.ts 5000 --no-profile      timing only (no CPU profiler)
 //   npx tsx scripts/bench.ts 5000 --sim-only        no recorder and no snapshots
 
@@ -20,6 +20,8 @@ const option = (name: string, def: number) => {
 };
 const sizes = args.filter((a, i) => /^\d+$/.test(a) && !args[i - 1]?.startsWith('--')).map(Number);
 const seconds = option('--seconds', 60);
+/** Simulated seconds before measuring: the first routes, civilians setting off, first contacts. */
+const warmup = option('--warmup', 30);
 const profile = !flag('--no-profile');
 const simOnly = flag('--sim-only');
 /** `--callers <subsystem>`: also list the call chains that spend that subsystem's time. */
@@ -120,11 +122,24 @@ for (const n of sizes.length ? sizes : [1000, 2000, 5000]) {
   const { engine, counts } = buildBenchScenario(n);
   const setupMs = performance.now() - t0;
   const recorder = simOnly ? null : new Recorder(engine);
-  if (!simOnly) engine.on('step', () => serialise(engine.snapshot()));
-  // Warm up (route planning happens on the first ticks), then measure.
-  engine.runFor(5);
+  // At 1x a step is 100 ms of wall time; like the server (STATE_BUDGET in server.ts), a
+  // broadcast may use at most a tenth of the time until the next one.
+  let steps = 0;
+  let stateDue = 0;
+  let states = 0;
+  if (!simOnly) {
+    engine.on('step', () => {
+      if (++steps < stateDue) return;
+      const ts = performance.now();
+      serialise(engine.snapshot());
+      states++;
+      stateDue = steps + Math.max(1, Math.ceil((performance.now() - ts) / 0.1 / 100));
+    });
+  }
+  engine.runFor(warmup);
   if (session) await session.post('Profiler.start');
   const t1 = performance.now();
+  states = 0;
   engine.runFor(seconds);
   const wall = (performance.now() - t1) / 1000;
   const prof = session ? ((await session.post('Profiler.stop')) as { profile: Parameters<typeof breakdown>[0] }).profile : null;
@@ -135,9 +150,9 @@ for (const n of sizes.length ? sizes : [1000, 2000, 5000]) {
   console.log(
     `${String(counts.entities).padStart(5)} entities (${counts.units} units, ${counts.air} aircraft, ${counts.civilians} civilians): ` +
       `${(seconds / wall).toFixed(2)}x real time, ${((wall * 1000) / seconds).toFixed(1)} ms per simulated second` +
-      `${simOnly ? ' (simulation only)' : `, snapshot ${(snapshotBytes / 1e6).toFixed(2)} MB`}`,
+      `${simOnly ? ' (simulation only)' : `, state ${(snapshotBytes / 1e6).toFixed(2)} MB at ${(states / seconds).toFixed(1)} Hz`}`,
   );
-  console.log(`       setup ${(setupMs / 1000).toFixed(1)} s; after ${seconds + 6} s: ${alive.length} alive, losses blue ${lost(1)} red ${lost(2)}, ${Math.round(contacts / Math.max(1, alive.length))} contacts per entity`);
+  console.log(`       setup ${(setupMs / 1000).toFixed(1)} s; after ${seconds + warmup + 1} s: ${alive.length} alive, losses blue ${lost(1)} red ${lost(2)}, ${Math.round(contacts / Math.max(1, alive.length))} contacts per entity`);
   if (prof) {
     const rows = breakdown(prof);
     const total = rows.reduce((s, [, us]) => s + us, 0);

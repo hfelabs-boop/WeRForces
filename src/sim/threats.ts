@@ -11,6 +11,11 @@ const THREAT_COST = 8;
 const MAX_REACH = 5000;
 /** At most this many line-of-sight samples across a threat's range. */
 const SAMPLES_ACROSS = 120;
+/**
+ * Most sight lines one rebuild traces: a large set of threats (a big battle) is sampled
+ * more coarsely, halving the samples across down to a quarter, to keep rebuilds quick.
+ */
+const LOS_BUDGET = 2_000_000;
 /** A threat map is rebuilt at most this often, or when the threats change. */
 const REBUILD_EVERY = 10;
 
@@ -96,14 +101,16 @@ export class ThreatMap {
       this.viewsheds.clear();
       this.viewshedTerrain = this.engine.terrainVersion;
     }
+    let across = SAMPLES_ACROSS;
+    while (across > SAMPLES_ACROSS / 4 && threats.length * across * across > LOS_BUDGET) across /= 2;
     for (const th of threats) {
       const reach = Math.ceil(th.range / cs);
-      const stride = Math.max(1, Math.ceil((2 * reach) / SAMPLES_ACROSS));
+      const stride = Math.max(1, Math.ceil((2 * reach) / across));
       const c0 = Math.max(0, Math.floor(th.x / cs) - reach);
       const c1 = Math.min(cols - 1, Math.ceil(th.x / cs) + reach);
       const r0 = Math.max(0, Math.floor(th.y / cs) - reach);
       const r1 = Math.min(rows - 1, Math.ceil(th.y / cs) + reach);
-      const vkey = `${th.x}:${th.y}:${th.z}:${th.range}`;
+      const vkey = `${th.x}:${th.y}:${th.z}:${th.range}:${stride}`;
       const known = this.viewsheds.get(vkey);
       const seen = known ?? new Uint8Array(Math.ceil((Math.ceil((r1 - r0 + 1) / stride) * Math.ceil((c1 - c0 + 1) / stride)) / 8));
       if (!known) this.viewsheds.set(vkey, seen);

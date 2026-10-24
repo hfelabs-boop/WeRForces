@@ -129,6 +129,12 @@ class EntityTaskable implements Taskable {
   }
 }
 
+function hostilityTable(pairs: [ForceId, ForceId][]): Uint8Array {
+  const t = new Uint8Array(16);
+  for (const [a, b] of pairs) if (a !== b) t[a * 4 + b] = t[b * 4 + a] = 1;
+  return t;
+}
+
 export class Engine {
   catalog: CatalogIndex;
   /** The catalog the engine was made with (defaults plus any --catalog extension). */
@@ -166,6 +172,8 @@ export class Engine {
   readonly ew = new Ew(this);
 
   private hostilities = new Set<string>(['1-2']);
+  /** Hostility by force pair (a * 4 + b), for isHostile, which runs for every contact every tick. */
+  private hostileTable = hostilityTable([[1, 2]]);
   private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
   private shots: Shot[] = [];
   private events: SimEvent[] = [];
@@ -245,11 +253,12 @@ export class Engine {
   // ------------------------------------------------------------ hostility
 
   isHostile(a: ForceId, b: ForceId): boolean {
-    return a !== b && this.hostilities.has(`${Math.min(a, b)}-${Math.max(a, b)}`);
+    return this.hostileTable[a * 4 + b] === 1;
   }
 
   setHostilities(pairs: [ForceId, ForceId][]): void {
     this.hostilities = new Set(pairs.map(([a, b]) => `${Math.min(a, b)}-${Math.max(a, b)}`));
+    this.hostileTable = hostilityTable(pairs);
   }
 
   // ------------------------------------------------------------ object creation
@@ -963,8 +972,7 @@ export class Engine {
 
   /** Line of sight through terrain, canopy and smoke (radar sees through smoke). */
   lineOfSight(a: Vec3, b: Vec3, radar = false): boolean {
-    // Smoke first: it is the cheaper test, and the answer is the same either way.
-    return (radar || !this.smoke.blocks(a, b)) && this.terrain.lineOfSight(a, b);
+    return this.terrain.lineOfSight(a, b) && (radar || !this.smoke.blocks(a, b));
   }
 
   /** A route for a domain, avoiding obstacles and the minefields `force` knows about. */

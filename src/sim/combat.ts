@@ -65,7 +65,12 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
   const candidates: Entity[] = [];
   const explicit = shooter.attackTargetId ? engine.entities.get(shooter.attackTargetId) : undefined;
   if (explicit && explicit.alive) candidates.push(explicit);
-  if (shooter.roe !== 'holdFire') {
+  // Nothing within reach of a loaded direct-fire weapon: no shot (a shortcut, same outcome).
+  const reach = directReach(engine, shooter);
+  let inReach = false;
+  const within = (t: Entity) => Math.hypot(t.x - shooter.x, t.y - shooter.y, t.z - shooter.z) <= reach;
+  if (explicit && explicit.alive) inReach = within(explicit);
+  if (shooter.roe !== 'holdFire' && reach > 0) {
     for (const c of shooter.contacts.values()) {
       const t = engine.entities.get(c.id);
       if (!t || t.destroyed || t.embarkedIn || t === explicit || !engine.isHostile(shooter.force, t.force)) continue;
@@ -74,9 +79,10 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
         if (last === undefined || now - last > 60) continue;
       }
       candidates.push(t);
+      if (!inReach) inReach = within(t);
     }
   }
-  if (candidates.length === 0) {
+  if (candidates.length === 0 || !inReach) {
     shooter.engagingId = undefined;
     return;
   }
@@ -127,6 +133,17 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
     return;
   }
   shooter.engagingId = undefined;
+}
+
+/** Longest range of the direct-fire weapons a shooter has rounds for (0: none). */
+function directReach(engine: Engine, shooter: Entity): number {
+  let reach = 0;
+  for (const wid of shooter.type.weapons) {
+    if ((shooter.ammo.get(wid) ?? 0) <= 0) continue;
+    const w = engine.catalog.weapon(wid);
+    if (!w.indirect && w.maxRange > reach) reach = w.maxRange;
+  }
+  return reach;
 }
 
 function fire(engine: Engine, shooter: Entity, target: Entity, w: WeaponDef, range: number): void {

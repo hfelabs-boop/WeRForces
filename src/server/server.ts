@@ -32,6 +32,8 @@ const MIME: Record<string, string> = {
   '.png': 'image/png',
 };
 const MAX_BODY = 8 * 1024 * 1024;
+/** Most of the server's time spent on state broadcasts (fraction). */
+const STATE_BUDGET = 0.1;
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 
 export interface ServerOptions {
@@ -110,6 +112,8 @@ export class Session {
   private lastTerrainVersion: number;
   private pendingEvents: SimEvent[] = [];
   private frameCount = 0;
+  /** Frame at which the next state broadcast is due. */
+  private nextStateFrame = 0;
   private wsRoles = new WeakMap<WebSocket, Role>();
   readonly created = new Date().toISOString();
 
@@ -137,7 +141,14 @@ export class Session {
         this.pendingEvents = [];
         this.broadcastPerRole((role) => ({ type: 'events', events: role.kind === 'player' ? filterEvents(this.runner.engine, events, role.force) : events }));
       }
-      if (++this.frameCount % every === 0 && this.wss.clients.size > 0) this.broadcastState();
+      if (++this.frameCount >= this.nextStateFrame && this.wss.clients.size > 0) {
+        const t0 = performance.now();
+        this.broadcastState();
+        // Big scenarios: building and sending the state may take at most STATE_BUDGET of the
+        // server's time, so clients get fewer updates instead of the simulation falling behind.
+        const ms = performance.now() - t0;
+        this.nextStateFrame = this.frameCount + Math.max(every, Math.ceil(ms / STATE_BUDGET / runner.frameMs));
+      }
     });
   }
 
