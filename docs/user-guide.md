@@ -118,6 +118,10 @@ Over the map:
 Imported terrain can show land cover (built-up grey, wetland, shrub, bare,
 snow) and, when zoomed in, building footprints.
 
+Large (tiled) terrain is drawn a view at a time: the whole map from an overview,
+sharpening as the tiles for what is on screen arrive, so a 200 km map opens as
+fast as a small one.
+
 The readout in the bottom-right corner shows the cursor position as grid
 (km east/north), latitude/longitude, elevation, and whether the ground is open,
 forest or water.
@@ -154,6 +158,9 @@ Click **3D** (or **Split** for 2D and 3D side by side). The 3D view shows:
 - objective areas, minefields and obstacles drawn as translucent curtains, and
   breached lanes as white lines;
 - extruded buildings on imported terrain;
+- on large (tiled) terrain, the whole map from the overview and, when you come
+  closer than about 20 km, the full-detail ground (with roads and buildings)
+  for some 23 km around the point you look at;
 - smoke clouds, and a darker sky and closer haze at night or in poor visibility;
 - tracers and detonations.
 
@@ -554,8 +561,8 @@ situation, the inspector is read-only, and editing and orders are disabled.
 
 File → **Simulation settings…** (or click the time-of-day chip):
 
-- **Models**: suppression, morale and fuel (on by default) and order delay (off
-  by default). Turning one off is useful for comparison runs. See
+- **Models**: suppression, morale, fuel and earth curvature (on by default) and
+  order delay (off by default). Turning one off is useful for comparison runs. See
   [Concepts](concepts.md#optional-models).
 - **Time and weather** at the scenario start: date, time of day, visibility,
   precipitation and wind. See [Concepts](concepts.md#night-and-weather).

@@ -37,6 +37,7 @@ node dist/server/cli.js [options] # equivalent
 | `--webhook <url>` | none | POST events to a URL. `hooks.slack.com` and `discord.com/api/webhooks` URLs are formatted for chat. Repeatable |
 | `--record-interval <s>` | `1` | Simulated seconds between recorded frames for the after-action review. `0` turns recording off |
 | `--terrains <dir>` | `./terrains` | Folder of imported terrain datasets ([Terrain import](../terrain-import.md)) |
+| `--terrain-cache <MB>` | 192 | Memory for each tiled terrain dataset's tile cache ([large areas](../terrain-import.md#large-areas-tiled-datasets)) |
 | `--headless` | off | No web server. Runs in real time and prints events to the terminal |
 | `--duration <s>` | – | With `--headless`: simulate this many seconds as fast as possible, print a summary and exit |
 | `-h, --help` | | Show help |
@@ -84,6 +85,7 @@ npm start -- -s calloway-crossroads --headless --duration 3000
 
 ```bash
 npm run terrain:import -- --dem area.tif [--features area.geojson] --name myarea [options]
+npm run terrain:import -- --synthetic --name synthetic200 --size 200000 --cell 30
 node dist/terrain/cli.js ...   # the same, after npm run build (bin: werforces-terrain)
 ```
 
@@ -99,10 +101,13 @@ node dist/terrain/cli.js ...   # the same, after npm run build (bin: werforces-t
 | `--name <name>` | Dataset name; scenarios use `"terrain": {"dataset": "<name>"}` |
 | `--title <text>` | Display title |
 | `--center <lat,lon>` | Centre of the extent (default: the DEM's centre) |
-| `--size <m>` | Extent (default: largest square in the DEM, at most 40 km) |
-| `--cell <m>` | Grid spacing (default: about the DEM's resolution, at least 20 m; at most 1201 posts a side) |
+| `--size <m>` | Extent (default: largest square in the DEM, at most 40 km; no limit with `--tiled`) |
+| `--cell <m>` | Grid spacing (default: about the DEM's resolution, at least 20 m; at most 1201 posts a side unless `--tiled`) |
 | `--attribution <text>` | Data credit stored in the dataset |
 | `--out <dir>` | Output folder (default `./terrains`) |
+| `--tiled` | Write a tiled dataset (`<out>/<name>/`), loaded on demand, for large areas |
+| `--synthetic` | Generate a synthetic tiled terrain of `--size` metres at `--cell` metres (default 50 km at 30 m); no DEM |
+| `--seed <n>` | Seed for `--synthetic` (default 2026) |
 
 See [Terrain import](../terrain-import.md).
 
@@ -129,6 +134,7 @@ See [Tutorial 5](../tutorials/05-ai-agents-with-mcp.md).
 | `npm run mcp` | Run the MCP stdio bridge |
 | `npm run e2e` | Browser end-to-end tests (Playwright; build first) |
 | `npm run bench -- [n…]` | Wall-clock cost per simulated second for *n* entities (default 100 500 1000) |
+| `npm run bench:terrain -- [--out dir] [--size m] [--cell m] [--cache MB]` | Large terrain: makes the synthetic 200 km dataset on first use, then times tile reads, line of sight, routes and a short scenario |
 | `npm run terrain:import` | Import a real terrain (see above) |
 | `npm run golden:update` | Re-record the golden runs after an intended model change ([Testing](../architecture.md#testing)) |
 | `npm run hla:build` | Download OHLA and build the HLA bridge ([HLA](../hla.md)) |

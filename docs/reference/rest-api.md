@@ -44,7 +44,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | POST | `/simulation/run` · `/pause` · `/rewind` | | Status |
 | POST | `/simulation/step` | `{"seconds": 300}` (≤ 3600) | Status after stepping immediately |
 | PUT | `/simulation/time-scale` | `{"scale": 8}` | Status |
-| GET / PUT | `/simulation/rules` | `{"suppression": true, "morale": true, "fuel": true, "orderDelay": false}` (any subset) | The rules ([optional models](../concepts.md#optional-models)) |
+| GET / PUT | `/simulation/rules` | `{"suppression": true, "morale": true, "fuel": true, "orderDelay": false, "curvature": true}` (any subset) | The rules ([optional models](../concepts.md#optional-models)) |
 | GET / PUT | `/simulation/pattern-of-life` | `{"vehicles": 20, "pedestrians": 40}` (0–300 each; either) | The numbers of background civilians kept on the map ([pattern of life](../concepts.md#pattern-of-life)) |
 | GET / PUT | `/simulation/environment` | `{"date": "2026-06-21", "time": 4.5, "visibility": 800, "precipitation": "rain", "windSpeed": 6, "windFrom": 270}` (any subset) | The environment plus `localDate`, `localTime`, `sunAltitude`, `light`, `period` |
 
@@ -319,7 +319,9 @@ under `/s/{id}/api/v1`; the unprefixed paths are the `main` session.
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/events` | `?since=<seq>&kinds=destroyed,damaged&limit=200`. Keep the highest `seq` you have seen and pass it as `since` to poll |
-| GET | `/terrain` | spec, towns, road polylines |
+| GET | `/terrain` | spec, towns, road polylines (for a tiled terrain, its main roads), and `tiles` (as below) when the terrain is tiled |
+| GET | `/terrain/tiles` | How the terrain is tiled: `tiled` (a tiled dataset, or tiles cut from a small terrain), `tileSize` (cells per tile side; tiles have one more post per side and share their edge posts), `cols` (posts per side of the whole grid), `cellSize`, `maxZoom`, `levels` (per level `z`: tiles `across`, `cellSize` between posts, `span` of a tile in metres), `layers`, `elevation` range, `url` template, and for tiled datasets the server's tile `cache` (tiles, bytes, capacity, loads, evictions) |
+| GET | `/terrain/tiles/{z}/{x}/{y}` | One tile: level `z` (0 is one tile over the whole terrain; `maxZoom` holds every post; each level between keeps every second post of the one below), column `x` from the west and row `y` from the south. Binary (`application/vnd.werforces.tile`), sent gzipped (`Content-Encoding: gzip`). Layout in [Terrain import](../terrain-import.md#tile-format). 404 outside the pyramid |
 | GET | `/terrain/point` | `?x=&y=` / `?lat=&lon=` / `?town=` → elevation, water, forest, road, slope, nearest town |
 | POST | `/terrain/line-of-sight` | `{"from": "E1" or position, "to": ..., "radar"?: true}`. Positions take an optional `height` above ground (default 2 m). Terrain, forest, buildings and smoke block it (`radar` sees through smoke) |
 | POST | `/terrain/viewshed` | `{"from": "E2" or position, "radius"?: 3000, "targetHeight"?: 2, "radar"?: false}` → a grid of cells around the eye (`x0`, `y0`, `cell`, `cols`, `rows`, `cellsB64`: one byte per cell, row by row from the south-west, 0 out of range or water, 1 hidden, 2 seen), `eye`, `radius` and `visibleFraction`. From an entity the radius defaults to its best sensor's range now (1–10 km); from a point (2 m above the ground, or `height`), 3 km. 100–20000 m. At most 161 cells across |
@@ -350,7 +352,8 @@ See [Integrations](integrations.md) for the payload formats.
 The browser app uses a few unversioned endpoints, which you can also use:
 
 - `GET /api/state` returns the full snapshot;
-- `GET /api/terrain` returns the terrain grid (base64);
+- `GET /api/terrain` returns the terrain grid (base64); for a tiled terrain, only
+  its description and `tiles` (the GUI then fetches tiles for what is in view);
 - `GET /api/path/{id}`;
 - `POST /api/command` takes a command object (see `Command` in
   `src/shared/types.ts`). `{"cmd": "batch", "commands": [...]}` runs several
