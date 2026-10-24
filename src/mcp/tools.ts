@@ -195,6 +195,13 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'give_order',
+    'Give an order in plain words, the way a commander would say it: "<who> <verb> <where/what> [modifiers]". Who: unit or entity names (join several with "and"). Verbs: move to (covered, fast, slowly, at N km/h), attack, follow, defend/overwatch/screen <place> [facing <direction>] [width <m>], ambush <area> [from <place>], search <area>, patrol <route>, follow route <route>, fire [N rounds] on <place>, smoke <place>, orbit <place> [radius N km], mount <carrier>, dismount, resupply [from X], breach <minefield>, wait N min, stop, hold fire, return fire, fire at will. Places: town or graphic names, objects, "x y", or "2 km north of Brenham". Use dryRun to check how it is understood. Prefer this for simple orders; use assign_task for details it cannot express.',
+    { text: z.string().describe('The order, e.g. "Team ARMOR move to Calloway covered"'), dryRun: z.boolean().optional() },
+    async ({ text, dryRun }) => api('POST', '/api/v1/orders', { text, dryRun }),
+  );
+
+  tool(
     'get_alerts',
     'The attention queue: what needs looking at now (units idle after finishing their orders, broken, out of fuel or ammunition, leader lost, losses, failed tasks, under fire, first contact), newest first. Pass acknowledge: true to clear them once handled.',
     { acknowledge: z.boolean().optional().describe('Acknowledge all open alerts after reading them') },

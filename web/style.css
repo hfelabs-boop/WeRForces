@@ -1275,3 +1275,56 @@ body.player [data-controller-only] {
   align-items: center;
   padding: 2px 0;
 }
+
+/* Order line */
+.orderline {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 140px));
+  z-index: 6;
+}
+.order-input {
+  width: 100%;
+  background: rgba(20, 25, 31, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text);
+  font-size: 13px;
+}
+.order-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.order-suggestions {
+  margin-top: 2px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  max-height: 260px;
+  overflow-y: auto;
+}
+.order-suggestions.hidden {
+  display: none;
+}
+.order-suggestion,
+.order-preview {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.order-suggestion {
+  cursor: pointer;
+}
+.order-suggestion:hover,
+.order-suggestion.active {
+  background: var(--panel-2);
+}
+.order-preview {
+  color: var(--warn);
+}
+.order-preview.ok {
+  color: var(--good);
+}

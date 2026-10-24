@@ -38,6 +38,8 @@ import type { View3D } from './view3d.js';
 import { AarPlayer } from './aar.js';
 import { Timeline } from './timeline.js';
 import { QuickBar } from './quickbar.js';
+import { OrderLine } from './orderline.js';
+import { orderContext } from '../src/shared/orders.js';
 import type { CotStatus as CotView } from '../src/integrations/cot.js';
 import type { Webhook as WebhookView } from '../src/integrations/webhooks.js';
 
@@ -104,6 +106,7 @@ class App {
   readonly api: Api;
   readonly map: MapView;
   private quick!: QuickBar;
+  private orderLine!: OrderLine;
   catalog: Catalog | null = null;
   types = new Map<string, EntityTypeDef>();
   state: SimState | null = null;
@@ -178,6 +181,24 @@ class App {
                 : what === 'carrier'
                   ? this.isCarrier(id)
                   : this.canBreach(id),
+      toast: (m, info) => this.toast(m, info),
+      nameOf: (id) => this.entity(id)?.name ?? this.unit(id)?.name ?? id,
+    });
+    this.orderLine = new OrderLine($('#orderline'), {
+      context: () =>
+        this.state && this.terrainData
+          ? orderContext(this.state, this.terrainData.towns, this.terrainData.spec.size, (id) => this.types.get(id), this.role.kind === 'player' ? this.role.force : undefined)
+          : null,
+      selectedNames: () => this.quick.targetsNames(),
+      send: async (text) => {
+        try {
+          const r = await this.api.v1<{ description: string }>('POST', '/orders', { text });
+          this.refreshPath();
+          return r;
+        } catch (err) {
+          return { error: err instanceof Error ? err.message : String(err) };
+        }
+      },
       toast: (m, info) => this.toast(m, info),
     });
     this.timeline = new Timeline($('#timeline-strip'), {
@@ -542,6 +563,10 @@ class App {
       if (e.key === 'm' && !e.ctrlKey && !e.metaKey) this.map.setMode({ kind: 'measure', points: [] });
       if (e.key === 'n' && !e.ctrlKey && !e.metaKey) this.nextAlert();
       if (!e.ctrlKey && !e.metaKey && !e.altKey && this.quick.key(e.key)) e.preventDefault();
+      if (e.key === '/' && !this.aar.active) {
+        e.preventDefault();
+        this.orderLine.focus();
+      }
     });
   }
 

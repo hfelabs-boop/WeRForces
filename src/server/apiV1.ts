@@ -8,6 +8,7 @@ import { dist2d } from '../shared/math.js';
 import type { Command, CommandResult, EntitySnapshot, ForceId, Role, ScenarioFile, SimEventKind, SimState, TerrainData, TerrainDataset, UnitSnapshot, Vec2 } from '../shared/types.js';
 import { outcomesCsv } from '../sim/batch.js';
 import { explainEntity, explainUnit } from '../sim/explain.js';
+import { OrderError, orderContext, parseOrder } from '../shared/orders.js';
 import type { BatchManager } from './batch.js';
 import { attachment, eventsCsv, killsCsv, reportPdf, strengthCsv } from './reports.js';
 import { DATASET_NAME, listDatasets } from '../terrain/store.js';
@@ -53,6 +54,7 @@ const PLAYER_ROUTES: [string, RegExp][] = [
   ['GET', /^\/api\/v1\/entities\/[^/]+\/path\/?$/],
   ['GET', /^\/api\/v1\/(entities|units)\/[^/]+\/explain\/?$/],
   ['GET', /^\/api\/v1\/alerts\/?$/],
+  ['POST', /^\/api\/v1\/orders\/?$/],
   ['POST', /^\/api\/v1\/alerts\/([^/]+\/)?acknowledge\/?$/],
   ['POST', /^\/api\/v1\/(entities|units)\/[^/]+\/(task|plan|stop|embark|disembark)\/?$/],
   ['POST', /^\/api\/v1\/(graphics|terrain\/line-of-sight|terrain\/route)\/?$/],
@@ -565,6 +567,21 @@ export class ApiV1 {
     });
 
     // ---------------------------------------------------------------- events
+    r.post(`${P}/orders`, (req) => {
+      const b = obj(req.body);
+      const text = typeof b.text === 'string' ? b.text : '';
+      const force = this.role.kind === 'player' ? this.role.force : undefined;
+      const t = this.engine.terrain;
+      let parsed;
+      try {
+        parsed = parseOrder(text, orderContext(this.state(), t.towns, t.spec.size, (id) => this.engine.catalog.types.get(id), force));
+      } catch (err) {
+        if (err instanceof OrderError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      if (b.dryRun !== true) for (const c of parsed.commands) this.run(c);
+      return { json: { description: parsed.description, targets: parsed.targets.map((o) => o.id), commands: parsed.commands, executed: b.dryRun !== true } };
+    });
     r.get(`${P}/alerts`, (req) => {
       const all = req.query.get('all') === 'true' || req.query.get('all') === '1';
       let list = all ? this.engine.alerts.all() : this.engine.alerts.open();

@@ -15,6 +15,7 @@ export interface QuickHost {
   pickEntity(label: string, onPick: (id: string) => void): void;
   can(id: string, what: 'indirect' | 'smoke' | 'air' | 'ground' | 'carrier' | 'breach'): boolean;
   toast(msg: string, info?: boolean): void;
+  nameOf(id: string): string;
 }
 
 interface QuickAction {
@@ -146,6 +147,11 @@ export class QuickBar {
       this.el.append(b);
     });
     this.el.append(h('button', { class: 'quick config', title: 'Choose the buttons', text: '⚙', onclick: () => this.configure() }));
+  }
+
+  /** Names of the things the bar orders (for the order line). */
+  targetsNames(): string[] {
+    return this.host.targets().map((id) => this.host.nameOf(id));
   }
 
   /** A digit key: run that slot's action. Returns true when handled. */
