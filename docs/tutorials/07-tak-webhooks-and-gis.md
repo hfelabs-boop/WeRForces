@@ -127,9 +127,9 @@ the events:
 ```
 webhook receiver on http://127.0.0.1:9000/hook (verifying signatures)
 [Calloway Crossroads] destroyed  Tank Plt 1 Lead destroyed by Gunslinger Lead
-[Calloway Crossroads] destroyed  Tank Plt 1 3 destroyed by Gunslinger Lead
-[Calloway Crossroads] destroyed  Tank Plt 1 2 destroyed by Gunslinger 2
+[Calloway Crossroads] destroyed  Tank Plt 1 3 destroyed by Gunslinger 2
 [Calloway Crossroads] destroyed  Convoy 7 Lead destroyed by Gunslinger 2
+[Calloway Crossroads] destroyed  Convoy 7 2 destroyed by Gunslinger 2
 …
 ```
 

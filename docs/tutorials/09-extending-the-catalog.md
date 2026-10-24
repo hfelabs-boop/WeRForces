@@ -12,10 +12,10 @@ tutorial adds a German **Leopard 2A6**, its gun, and a four-tank platoon.
 
 | Object | Key fields |
 | --- | --- |
-| **Weapon** | `id`, `name`, DIS `munition` type, `minRange`/`maxRange` (m), `reloadTime` (s), `ammo` (rounds or bursts), `projectileSpeed` (m/s), `pk` per armour class, which domains it `targets`; optional `guided`, `commandGuided` (wire guided: misses if the launcher dies or loses sight), and for artillery `indirect`, `blastRadius` and `dispersion` (m) |
-| **Sensor** | `id`, `name`, `maxRange` (m), `fov` (**radians**; 2π = all-round), `detects` (domains), optional `radar` (ignores concealment for air targets) |
-| **Entity type** | `id`, `name`, `description`, `domain`, MIL-STD `symbol`, `armor` class, DIS `dis` type, `maxSpeed`/`cruiseSpeed` (m/s), `acceleration` (m/s²), `turnRate` (**rad/s**), `offroadFactor`, `sensorHeight` (m), `sensors` and `weapons` (ids), `crew`; aircraft also `cruiseAltitude`, `climbRate`, and `minSpeed` for fixed wing; optional `capacity` (seats for infantry) and default `reactions` |
-| **Unit template** | `id`, `name`, `echelon`, `members` (entity type ids; the first is the leader), `formation`, `spacing` (m) |
+| **Weapon** | `id`, `name`, DIS `munition` type, `minRange`/`maxRange` (m), `reloadTime` (s), `ammo` (rounds or bursts), `projectileSpeed` (m/s), `pk` per armour class, which domains it `targets`; optional `guided`, `commandGuided` (wire guided: misses if the launcher dies or loses sight), and for artillery `indirect`, `blastRadius`, `dispersion` (m) and `smoke` (smoke rounds) |
+| **Sensor** | `id`, `name`, `maxRange` (m), `fov` (**radians**; 2π = all-round), `detects` (domains), optional `radar` (ignores concealment for air targets), `thermal` (unaffected by darkness) or `nightVision` (keeps much of its range at night) |
+| **Entity type** | `id`, `name`, `description`, `domain`, MIL-STD `symbol`, `armor` class, DIS `dis` type, `maxSpeed`/`cruiseSpeed` (m/s), `acceleration` (m/s²), `turnRate` (**rad/s**), `offroadFactor`, `sensorHeight` (m), `sensors` and `weapons` (ids), `crew`; aircraft also `cruiseAltitude`, `climbRate`, and `minSpeed` for fixed wing; optional `capacity` (seats for infantry), default `reactions`, `smokeGrenades` (salvos), `endurance` (`{"km": …}` for vehicles, `{"hours": …}` for aircraft; without it the type never runs out of fuel) and `sidc` (a MIL-STD-2525C symbol code overriding `symbol`) |
+| **Unit template** | `id`, `name`, `echelon`, `members` (entity type ids; the first is the leader), `formation`, `spacing` (m); optional `subunits` (template ids, e.g. a company's platoons) |
 
 Valid values:
 
@@ -23,7 +23,7 @@ Valid values:
 | --- | --- |
 | `domain` | `ground`, `lifeform`, `air`, `surface` |
 | `armor` | `lifeform`, `soft`, `light`, `armored`, `air`, `ship` |
-| `symbol` | `armor`, `mech`, `infantry`, `recon`, `wheeled`, `air-defense`, `artillery`, `rotary`, `fixed-wing`, `uav`, `ship`, `boat`, `generic` |
+| `symbol` | `armor`, `mech`, `infantry`, `recon`, `wheeled`, `air-defense`, `artillery`, `engineer`, `supply`, `rotary`, `fixed-wing`, `uav`, `ship`, `boat`, `generic` |
 
 How these numbers drive the simulation is described in
 [Concepts](../concepts.md). The most important is **Pk**: the chance that one
@@ -133,10 +133,12 @@ npx tsx examples/custom-catalog.ts
 ```
 1106s  T-72 Plt 2 destroyed by Leo Plt Lead
 1118s  T-72 Plt Lead destroyed by Leo Plt Lead
-1124s  T-72 Plt 3 destroyed by Leo Plt Lead
 Leopards: 4/4 survive
-T-72s: 0/3 survive
+T-72s: 1/3 survive
 ```
+
+After losing two tanks the T-72 platoon breaks and its last tank falls back out
+of sight (it rallies a minute later), so it survives.
 
 Combine this with [Tutorial 8](08-batch-and-monte-carlo.md) to study how one
 parameter (gun range, armour, sensor range) changes outcomes across hundreds of
@@ -168,5 +170,6 @@ The defaults are representative, not authoritative. When adding equipment:
 - **Off-road factor** decides whether a vehicle sticks to roads (low values) or
   drives cross-country (high values).
 
-**You have finished the tutorials.** See the [user guide](../user-guide.md)
-and the [reference](../README.md#reference) for everything else.
+**Next:** [Tutorial 10: Fire support and mechanized infantry](10-fire-support-and-mech-infantry.md).
+For everything else, see the [user guide](../user-guide.md) and the
+[reference](../README.md#reference).

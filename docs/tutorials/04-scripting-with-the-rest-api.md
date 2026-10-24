@@ -34,6 +34,7 @@ The response describes the scenario:
   "time": 0,
   "running": false,
   "timeScale": 1,
+  "load": 0,
   "strength": [],
   "entities": 0,
   "units": 0,
@@ -44,6 +45,7 @@ The response describes the scenario:
     "note": "Local coordinates are metres: x east, y north, from the south-west corner (0,0) to (size,size).",
     "towns": [ { "name": "Alderford", "x": 1849, "y": 14485 }, { "name": "Brenham", "x": 13791, "y": 6777 }, "…" ]
   },
+  "environment": { "localTime": "12:00", "period": "day", "light": 1, "visibility": 20000, "precipitation": "none" },
   "dis": { "enabled": false },
   "lastEventSeq": 1
 }
@@ -129,11 +131,11 @@ Output (the simulation is deterministic, so the same version gives the same resu
 Terrain 16 km square; towns: Alderford, Brenham, Calloway, Dunmore, Eastwick, Fallow Cross, Greystone
 Created Blue Armor (U1, 4 tanks) and Red Mech (U2, 3 BMPs)
   00:06:57  Red Mech 3 destroyed by Blue Armor Lead
-  00:07:01  Blue Armor Lead destroyed by Red Mech Lead
   00:07:03  Red Mech 2 destroyed by Blue Armor 3
-  00:07:37  Red Mech Lead destroyed by Blue Armor 2
+  00:07:06  Red Mech Lead destroyed by Blue Armor Lead
+  00:07:51  Blue Armor: plan Seize Brenham complete
 
-After 00:08:00: Blue 3/4, Red 0/3
+After 00:08:00: Blue 4/4, Red 0/3
 ```
 
 Its `api()` helper is all you need to start your own client:
@@ -180,7 +182,7 @@ Every event has an increasing `seq`. To follow the log:
 3. Remember the highest `seq` you received and pass it next time.
 
 Filter with `kinds=` (`fire`, `detonation`, `damaged`, `destroyed`, `detected`,
-`task`, `created`, `deleted`, `info`).
+`task`, `created`, `deleted`, `info`, `radio`).
 
 For push instead of polling, either:
 

@@ -47,7 +47,8 @@ missiles, so it is dangerous to tanks at long range.
 Open the **Objects** tab. It lists both units and their members. Click
 **US Tank Platoon**. The inspector on the right shows:
 
-- **Strength 4/4**, the **Leader**, and **Formation: wedge**;
+- **Strength 4/4**, **Morale 100% · steady**, the **Leader**, and **Formation:
+  wedge**;
 - **Current activity: idle (in formation)**;
 - **Rules of engagement: Fire at will**;
 - the members. ★ marks the leader.
@@ -100,20 +101,25 @@ What to look for:
 - **Fire.** Shots appear as yellow tracers; hits as orange flashes, misses as
   grey puffs.
 - **Event log.** *X detected Y*, then detonations, damage (*mobility kill*,
-  *firepower kill*) and kills. A Konkurs is wire guided: if its BMP is destroyed
-  before the missile lands, the log shows *9M113 Konkurs ATGM lost guidance and
-  missed*. Tick **fire** in the log header to see every shot.
+  *firepower kill*) and kills. A Konkurs is wire guided: if its BMP is destroyed,
+  or the tank it is aimed at hides behind its own smoke grenades (*… fired smoke
+  grenades*), the log shows *9M113 Konkurs ATGM lost guidance and missed*. A
+  platoon that loses too much *breaks and is falling back*. Tick **fire** in the
+  log header to see every shot, and **radio** for the units' contact reports.
   The counts on the right (*Blue 4/4 · Red 3/3*) update as vehicles are lost.
 
-![The engagement at Brenham: tracers, a destroyed BMP and the event log](../images/tutorial-01-fight.png)
+![The engagement at Brenham: a tracer, a destroyed BMP and the event log](../images/tutorial-01-fight.png)
 
 The meeting engagement usually starts five to six simulated minutes in, when
 the tanks get within about 500 m of the BMPs and in sight of them. **Your result will
 differ** from anyone else's, because exact positions matter. In one run of this
 setup (Blue at 10.9E 4.0N, Red at 13.8E 6.8N) the lead tank destroyed a BMP at
-5:27 and was killed by a Konkurs four seconds later. *US Tank Platoon 2* took
-command and destroyed the other two BMPs by 6:11, and their last missiles lost
-guidance. Final count: *Blue 3/4 · Red 0/3*.
+5:27. The other two fired Konkurs missiles at it, but it fired its smoke
+grenades and both missiles lost guidance. It destroyed a second BMP at 5:34,
+the Red platoon broke and began to fall back, and the last BMP was destroyed at
+5:40. Final count: *Blue 4/4 · Red 0/3*. Starting a hundred metres away gives
+different times, and sometimes a BMP immobilised before it is destroyed, but
+in our tries the tanks always won without loss.
 
 > Tip: click **3D** (or **Split**) during the fight, select a tank and tick
 > **Follow selected**.

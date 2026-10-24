@@ -79,9 +79,9 @@ connect. You can list the tools and call them by hand.
 | --- | --- |
 | Awareness | `get_situation`, `list_entities`, `get_entity`, `get_unit`, `list_catalog`, `get_events`, `query_terrain`, `check_line_of_sight` |
 | Creation | `create_entity`, `create_unit`, `create_graphic`, `delete_object` |
-| Tasking | `assign_task`, `assign_plan`, `embark`, `stop`, `set_roe`, `set_reactions` |
-| Time | `control_simulation` (run/pause/rewind/speed), `advance_time` (simulate *N* seconds now and summarise) |
-| Review | `after_action_report`, `replay_state`, `add_bookmark` |
+| Tasking | `assign_task`, `assign_plan`, `embark`, `stop`, `set_roe`, `set_reactions`, `set_unit_superior` |
+| Time and conditions | `control_simulation` (run/pause/rewind/speed), `advance_time` (simulate *N* seconds now and summarise), `set_environment` (time of day, weather), `set_simulation_rules` (suppression, morale, fuel, order delay on/off) |
+| Review and analysis | `after_action_report`, `replay_state`, `add_bookmark`, `run_batch` (Monte Carlo replications on the server) |
 | Scenarios | `manage_scenario` (list/load/save/new) |
 
 Parameters are documented in the [MCP tools reference](../reference/mcp-tools.md).
@@ -133,30 +133,28 @@ Blue Armor: Move to (13791, 6777)
 ```json
 {
   "time": "00:15:00",
-  "strength": [ { "force": 1, "name": "Blue", "total": 4, "alive": 1 }, { "force": 2, "name": "Red", "total": 3, "alive": 0 } ],
-  "shotsFired": 11,
+  "strength": [ { "force": 1, "name": "Blue", "total": 4, "alive": 4 }, { "force": 2, "name": "Red", "total": 3, "alive": 0 } ],
+  "shotsFired": 7,
   "events": [
     "00:06:20 [damaged] Red Mech 3 suffered a mobility kill",
-    "00:06:22 [destroyed] Blue Armor Lead destroyed by Red Mech 3",
-    "00:06:22 [info] Blue Armor: Blue Armor Lead lost, Blue Armor 2 takes command",
-    "00:06:55 [destroyed] Red Mech 3 destroyed by Blue Armor 2",
-    "00:06:59 [destroyed] Blue Armor 2 destroyed by Red Mech Lead",
-    "00:06:59 [info] Blue Armor: Blue Armor 2 lost, Blue Armor 3 takes command",
-    "…",
-    "00:07:31 [destroyed] Blue Armor 3 destroyed by Red Mech 2",
-    "00:07:31 [info] Blue Armor: Blue Armor 3 lost, Blue Armor 4 takes command",
-    "00:07:55 [destroyed] Red Mech 2 destroyed by Blue Armor 4"
+    "00:06:20 [info] Blue Armor Lead fired smoke grenades",
+    "00:06:24 [info] Blue Armor Lead fired smoke grenades",
+    "00:06:26 [destroyed] Red Mech 2 destroyed by Blue Armor 3",
+    "00:06:27 [destroyed] Red Mech 3 destroyed by Blue Armor Lead",
+    "00:06:28 [info] Red Mech broke and is falling back",
+    "00:06:34 [damaged] Red Mech Lead suffered a mobility kill",
+    "00:06:34 [destroyed] Red Mech Lead destroyed by Blue Armor Lead"
   ]
 }
 ```
 
-From this the agent can write a report like: *"Blue took Brenham with one tank
-left; all three BMPs were destroyed. Contact came at about 6:20, under 500 m
-from the town, as the tanks drove in. The lead tank hit first, but a BMP's ATGM
-destroyed it. After that the two sides traded one for one, and command passed
-down the platoon three times. The last BMP was killed while its missile was in
-flight, so the missile lost guidance and the last tank survived."* It can
-then offer to replay with a different approach, e.g. stopping in overwatch
+From this the agent can write a report like: *"Blue took Brenham without
+loss; all three BMPs were destroyed in fourteen seconds. Contact came at about
+6:20, under 500 m from the town, as the tanks drove in. The lead tank hit
+first; when two BMPs fired their wire-guided ATGMs at it, it screened itself
+with smoke grenades and both missiles lost guidance. After losing two vehicles the Red platoon broke
+and tried to fall back, but its last BMP was immobilised and destroyed."* It
+can then offer to replay with a different approach, e.g. stopping in overwatch
 before the town instead of driving into it. Rewind returns to the state last
 loaded or saved, which here is the empty scenario from `manage_scenario new`,
 so the agent should save once the forces are placed
