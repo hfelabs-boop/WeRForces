@@ -4,6 +4,7 @@ import type { Command, CommandResult, Condition, Environment, ForceId, Formation
 import { FORCE_NAMES } from '../shared/types.js';
 import type { Engine } from '../sim/engine.js';
 import { MAX_AMBIENT } from '../sim/life.js';
+import { CATALOG_SECTIONS, VALIDATORS } from '../sim/catalogEdit.js';
 import type { SimRunner } from './runner.js';
 
 const FORCES = new Set([0, 1, 2, 3]);
@@ -442,6 +443,18 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
       case 'setReactions':
         engine.setReactions(str(c.targetId, 'targetId'), validateReactions(c.reactions));
         return;
+      case 'setCatalogEntry':
+      case 'removeCatalogEntry': {
+        const section = c.section;
+        if (!CATALOG_SECTIONS.includes(section)) throw new ValidationError(`section: one of ${CATALOG_SECTIONS.join(', ')}`);
+        try {
+          if (c.cmd === 'setCatalogEntry') engine.setCatalogEntry(section, VALIDATORS[section](c.entry));
+          else engine.removeCatalogEntry(section, str(c.id, 'id'));
+        } catch (err) {
+          throw new ValidationError((err as Error).message);
+        }
+        return;
+      }
       case 'drive': {
         const e = engine.entities.get(str(c.id, 'id'));
         if (!e || e.remote) throw new ValidationError('unknown local entity');

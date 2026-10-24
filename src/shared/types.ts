@@ -494,6 +494,8 @@ export interface ScenarioFile {
   codewords?: { force: ForceId; codeword: string; time: number }[];
   /** Background civilians to keep on the map. */
   patternOfLife?: PatternOfLife;
+  /** Catalog entries this scenario adds or changes (made in the catalog editor). */
+  catalog?: Partial<Catalog>;
   /** Global plans: one synchronization matrix per force (with, in checkpoints, which phases started). */
   syncMatrices?: (SyncMatrix & { started?: Record<string, number> })[];
 }
@@ -816,6 +818,8 @@ export interface SimState {
   alerts?: Alert[];
   /** Synchronization matrices (global plans), per force. */
   sync?: SyncMatrixState[];
+  /** Changes when the catalog does (clients fetch it again). */
+  catalogVersion?: number;
   /** Plan steps waiting for a set time, soonest first (for the timeline). */
   schedule?: { targetId: string; time: number; text: string }[];
   dis?: DisStatus;
@@ -875,6 +879,9 @@ export type Command =
   | { cmd: 'setRoe'; targetId: string; roe: Roe }
   /** Acknowledge an alert, or all of them (players: their own force's). */
   | { cmd: 'ackAlert'; id?: string; all?: boolean }
+  /** Add or change a catalog entry (validated), or remove a custom one. */
+  | { cmd: 'setCatalogEntry'; section: 'entityTypes' | 'weapons' | 'sensors' | 'unitTemplates'; entry: unknown }
+  | { cmd: 'removeCatalogEntry'; section: 'entityTypes' | 'weapons' | 'sensors' | 'unitTemplates'; id: string }
   /** Direct control: drive an entity and pick its target. Starts manual control if it is not under it. */
   | { cmd: 'drive'; id: string; throttle?: number; turn?: number; targetId?: string | null }
   /** Switch a jammer on or off. */

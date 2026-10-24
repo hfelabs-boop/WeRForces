@@ -435,6 +435,23 @@ export class ApiV1 {
 
     // ---------------------------------------------------------------- catalog
     r.get(`${P}/catalog`, () => ({ json: this.engine.catalog.catalog }));
+    r.get(`${P}/catalog/custom`, () => ({ json: this.engine.customCatalog }));
+    const sections: Record<string, 'entityTypes' | 'weapons' | 'sensors' | 'unitTemplates'> = { 'entity-types': 'entityTypes', weapons: 'weapons', sensors: 'sensors', 'unit-templates': 'unitTemplates' };
+    const section = (s: string) => {
+      const k = sections[s];
+      if (!k) throw new HttpError(404, `unknown catalog section ${s} (entity-types, weapons, sensors, unit-templates)`);
+      return k;
+    };
+    r.put(`${P}/catalog/{section}/{id}`, (req) => {
+      const sec = section(req.params.section);
+      const entry = { ...obj(req.body), id: req.params.id };
+      this.run({ cmd: 'setCatalogEntry', section: sec, entry });
+      return { json: this.engine.catalog.catalog[sec].find((x) => x.id === req.params.id) };
+    });
+    r.delete(`${P}/catalog/{section}/{id}`, (req) => {
+      this.run({ cmd: 'removeCatalogEntry', section: section(req.params.section), id: req.params.id });
+      return { status: 204 };
+    });
     r.get(`${P}/catalog/entity-types`, () => ({
       json: this.engine.catalog.catalog.entityTypes.map((t) => ({
         id: t.id,

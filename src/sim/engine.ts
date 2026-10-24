@@ -35,7 +35,8 @@ import type {
   WeaponDef,
 } from '../shared/types.js';
 import { FORCE_NAMES } from '../shared/types.js';
-import { CatalogIndex, DEFAULT_CATALOG } from './catalog.js';
+import { CatalogIndex, DEFAULT_CATALOG, mergeCatalog } from './catalog.js';
+import { type CatalogSection, validateCatalogExtension } from './catalogEdit.js';
 import { applyBlast, applyDamage, type Detonation, effectivePk, resolveImpact, type Shot, updateCombat } from './combat.js';
 import { Entity } from './entity.js';
 import { DEFAULT_ENVIRONMENT, environmentAt, groundFactor, normalizeEnvironment, windVector } from './environment.js';
@@ -129,7 +130,13 @@ class EntityTaskable implements Taskable {
 }
 
 export class Engine {
-  readonly catalog: CatalogIndex;
+  catalog: CatalogIndex;
+  /** The catalog the engine was made with (defaults plus any --catalog extension). */
+  readonly baseCatalog: Catalog;
+  /** Entries added or changed in the catalog editor, saved with the scenario. */
+  customCatalog: Partial<Catalog> = {};
+  /** Bumped when the catalog changes, so clients fetch it again. */
+  catalogVersion = 0;
   terrain: Terrain;
   terrainVersion = 1;
   time = 0;
@@ -182,7 +189,8 @@ export class Engine {
 
   constructor(opts: { catalog?: Catalog; terrain?: Terrain; seed?: number; terrainLoader?: (name: string) => TerrainData } = {}) {
     this.terrainLoader = opts.terrainLoader;
-    this.catalog = new CatalogIndex(opts.catalog ?? DEFAULT_CATALOG);
+    this.baseCatalog = opts.catalog ?? DEFAULT_CATALOG;
+    this.catalog = new CatalogIndex(this.baseCatalog);
     this.terrain = opts.terrain ?? Terrain.generate();
     this.rng = new Rng(opts.seed ?? this.terrain.spec.seed);
   }
@@ -526,6 +534,42 @@ export class Engine {
     this.graphics.set(gid, g);
     if (kind === 'minefield' || kind === 'obstacle') this.obstacles.changed();
     return g;
+  }
+
+  /**
+   * Replace the custom catalog (editor entries): checked as a whole, and refused if it
+   * would leave live entities without their weapons or sensors. Entities already on the
+   * map keep the definition they were made with; new ones get the new one.
+   */
+  setCustomCatalog(ext: Partial<Catalog>): void {
+    const index = new CatalogIndex(mergeCatalog(this.baseCatalog, ext));
+    for (const e of this.entities.values()) {
+      if (e.remote) continue;
+      for (const w of e.type.weapons) if (!index.weapons.has(w)) throw new Error(`${e.name} still uses weapon ${w}`);
+      for (const s of e.type.sensors) if (!index.sensors.has(s)) throw new Error(`${e.name} still uses sensor ${s}`);
+      if (!index.types.has(e.type.id)) throw new Error(`${e.name} is a ${e.type.id}: delete it first`);
+    }
+    this.catalog = index;
+    this.customCatalog = ext;
+    this.catalogVersion++;
+  }
+
+  /** Add or change one catalog entry (it goes into the custom catalog). */
+  setCatalogEntry(section: CatalogSection, entry: { id: string }): void {
+    const before = (this.customCatalog[section] ?? []) as { id: string }[];
+    const known = before.some((x) => x.id === entry.id) || this.catalog.catalog[section].some((x) => x.id === entry.id);
+    this.setCustomCatalog({ ...this.customCatalog, [section]: [...before.filter((x) => x.id !== entry.id), entry] });
+    this.log('info', `catalog: ${entry.id} ${known ? 'changed' : 'added'}`, undefined);
+  }
+
+  /** Remove a custom entry (a built-in one it replaced comes back). */
+  removeCatalogEntry(section: CatalogSection, id: string): void {
+    const list = (this.customCatalog[section] ?? []) as { id: string }[];
+    if (!list.some((x) => x.id === id)) throw new Error(`${id} is not a custom ${section} entry`);
+    const next = { ...this.customCatalog, [section]: list.filter((x) => x.id !== id) };
+    if (!next[section]!.length) delete next[section];
+    this.setCustomCatalog(next);
+    this.log('info', `catalog: ${id} removed`, undefined);
   }
 
   /** Direct control: start it (logged once) or update the throttle, turn and target. */
@@ -1282,6 +1326,8 @@ export class Engine {
     }
     this.rng = new Rng(spec.seed);
     this.rules = { ...DEFAULT_RULES };
+    // The scenario's own catalog entries (none: the plain catalog), before anything uses them.
+    if (s.catalog || Object.keys(this.customCatalog).length) this.setCustomCatalog(s.catalog ? validateCatalogExtension(s.catalog) : {});
     this.setRules(s.rules ?? {});
     this.environment = normalizeEnvironment(s.environment);
     this.events = [];
@@ -1544,6 +1590,7 @@ export class Engine {
       })),
       rngState: this.time === 0 ? undefined : this.rng.state,
       rules: JSON.stringify(this.rules) === JSON.stringify(DEFAULT_RULES) ? undefined : { ...this.rules },
+      catalog: Object.keys(this.customCatalog).length ? JSON.parse(JSON.stringify(this.customCatalog)) : undefined,
       patternOfLife: this.life.settings.vehicles || this.life.settings.pedestrians ? { ...this.life.settings } : undefined,
       orders: this.pendingOrders.length ? this.pendingOrders.map((o) => ({ ...o })) : undefined,
       syncMatrices: this.sync.all().length ? this.sync.states().map((m) => ({ force: m.force, phases: m.phases, ...(this.time > 0 && Object.keys(m.started).length ? { started: m.started } : {}) })) : undefined,
@@ -1656,6 +1703,7 @@ export class Engine {
       schedule: this.schedule(),
       alerts: this.alerts.open().slice(0, 50),
       sync: this.sync.all().length ? this.sync.states() : undefined,
+      catalogVersion: this.catalogVersion,
     };
   }
 

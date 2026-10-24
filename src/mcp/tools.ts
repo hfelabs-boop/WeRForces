@@ -507,6 +507,19 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'edit_catalog',
+    'Add or change a catalog entry for this scenario (entity type, weapon, sensor or unit template), e.g. a new vehicle variant: start from list_catalog\'s fields of a similar entry, change what differs, give it a new id. Fields are checked; new entities use it at once. remove: true deletes a custom entry.',
+    { section: z.enum(['entity-types', 'weapons', 'sensors', 'unit-templates']), id: z.string(), entry: z.record(z.string(), z.unknown()).optional(), remove: z.boolean().optional() },
+    async ({ section, id, entry, remove }) => {
+      if (remove) {
+        await api('DELETE', `/api/v1/catalog/${section}/${encodeURIComponent(id)}`);
+        return `${id} removed`;
+      }
+      return api('PUT', `/api/v1/catalog/${section}/${encodeURIComponent(id)}`, entry ?? {});
+    },
+  );
+
+  tool(
     'set_jamming',
     'Switch a jammer (an electronic warfare entity, e.g. R-330Zh Zhitel, Krasukha-2, Stryker MFEW) on or off. While on, enemy radios within its range are jammed: orders to them arrive a minute late, they do not share contacts within their unit, cannot call for fire and do not hear codewords; radar jammers cut enemy radars\' range.',
     { id: z.string(), on: z.boolean() },

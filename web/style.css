@@ -1471,3 +1471,54 @@ body.player [data-controller-only] {
 .drive-keys {
   margin-top: 6px;
 }
+
+/* Catalog editor */
+.catalog-editor .seg {
+  margin: 6px 0;
+}
+.catalog-cols {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 12px;
+  max-height: 62vh;
+}
+.catalog-list {
+  overflow-y: auto;
+  max-height: 56vh;
+  margin-top: 4px;
+}
+.catalog-item {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.catalog-item small {
+  color: var(--muted);
+}
+.catalog-item:hover,
+.catalog-item.selected {
+  background: var(--panel-2);
+}
+.catalog-form {
+  overflow-y: auto;
+  max-height: 62vh;
+}
+.catalog-grid {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 4px 10px;
+  align-items: center;
+  margin: 8px 0;
+}
+.catalog-grid label {
+  color: var(--muted);
+  font-size: 12px;
+}
+.catalog-json {
+  width: 100%;
+  min-height: 380px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+}

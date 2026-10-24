@@ -42,6 +42,7 @@ import { QuickBar } from './quickbar.js';
 import { PlanEditor } from './planeditor.js';
 import { SyncMatrixDialog } from './syncmatrix.js';
 import { DriveMode } from './drive.js';
+import { CatalogEditor } from './catalogeditor.js';
 import { OrderLine } from './orderline.js';
 import { orderContext } from '../src/shared/orders.js';
 import type { CotStatus as CotView } from '../src/integrations/cot.js';
@@ -288,10 +289,7 @@ class App {
       // Players cannot create objects: start on the Objects tab.
       ($('[data-tab="objects"]') as HTMLElement).click();
     }
-    this.catalog = catalog;
-    this.types = new Map(catalog.entityTypes.map((t) => [t.id, t]));
-    this.map.sidcOf = (id) => this.types.get(id)?.sidc;
-    this.map.jammerRange = (id) => this.types.get(id)?.jammer?.range;
+    this.applyCatalog(catalog);
     if (BASE) {
       const pill = $('#session-name');
       pill.textContent = `session ${decodeURIComponent(BASE.slice(3))}`;
@@ -341,6 +339,7 @@ class App {
     this.quick.update();
     this.renderPhase(s);
     this.driveMode.update();
+    this.checkCatalog(s);
     $('#scenario-name').textContent = s.scenarioName;
     const run = $('#btn-run');
     run.textContent = s.running ? '⏸ Pause' : '▶ Run';
@@ -529,6 +528,8 @@ class App {
       if (action === 'save-server') this.saveOnServer();
       if (action === 'review-recording') void this.reviewRecordingDialog();
       if (action === 'settings') void this.settingsDialog();
+      if (action === 'catalog')
+        void new CatalogEditor({ catalog: () => this.catalog, v1: (m, path, body) => this.api.v1(m, path, body), modal: (c) => this.modal(c), toast: (m, info) => this.toast(m, info) }).open();
       if (action === 'undo' || action === 'redo') void this.undoRedo(action);
       if (action === 'batch') void this.batchDialog();
       if (action === 'sessions') void this.sessionsDialog();
@@ -636,6 +637,29 @@ class App {
     } catch (err) {
       this.toast(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  private catalogVersion: number | undefined;
+
+  private applyCatalog(catalog: Catalog): void {
+    this.catalog = catalog;
+    this.types = new Map(catalog.entityTypes.map((t) => [t.id, t]));
+    this.map.sidcOf = (id) => this.types.get(id)?.sidc;
+    this.map.jammerRange = (id) => this.types.get(id)?.jammer?.range;
+  }
+
+  /** The catalog changed on the server (catalog editor, a scenario with its own entries): fetch it again. */
+  private checkCatalog(s: SimState): void {
+    if (s.catalogVersion === undefined || s.catalogVersion === this.catalogVersion) return;
+    const first = this.catalogVersion === undefined;
+    this.catalogVersion = s.catalogVersion;
+    // The first state comes with the catalog sent on connecting.
+    if (first) return;
+    void this.api.v1<Catalog>('GET', '/catalog').then((c) => {
+      this.applyCatalog(c);
+      this.renderPalette();
+      this.inspectorFor = null;
+    });
   }
 
   /** The phase in progress on the toolbar button. */

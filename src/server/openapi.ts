@@ -197,6 +197,11 @@ export function buildOpenApi(baseUrl: string): Schema {
           requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['from'], properties: { from: {}, radius: { type: 'number' }, targetHeight: { type: 'number' }, radar: { type: 'boolean' } } } } } },
         }),
       },
+      '/api/v1/catalog/custom': { get: op('Catalog', 'The entries this scenario adds to or changes in the catalog (saved with it)') },
+      '/api/v1/catalog/{section}/{id}': {
+        put: op('Catalog', 'Add or change a catalog entry (section: entity-types, weapons, sensors or unit-templates; the body as in GET /catalog). Every field is checked; references to weapons, sensors and types must exist. Entities already on the map keep their old definition', { parameters: [idParam('section'), idParam()], ...body({ type: 'object' }) }),
+        delete: op('Catalog', 'Remove a custom entry (the built-in one it replaced comes back). Refused while entities use it', { parameters: [idParam('section'), idParam()] }),
+      },
       '/api/v1/codewords': {
         get: op('Simulation', 'Codewords sent so far, per force (players: their own)'),
         post: op('Simulation', 'Send a codeword to a force: plans waiting for it go on. Body: {codeword, force} (players: their own force)', {
