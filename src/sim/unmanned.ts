@@ -479,6 +479,7 @@ export class Unmanned {
       up: st.up,
       reason: st.up ? undefined : st.reason,
       controllerId: st.up ? st.rootId : st.controllerId,
+      operatorId: st.controllerId,
       hops: st.up ? st.hops : undefined,
       lostFor: st.up ? undefined : Math.round((this.engine.time - st.since) * 10) / 10,
       autonomy: autonomyOf(e),

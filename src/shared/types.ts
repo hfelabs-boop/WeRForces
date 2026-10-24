@@ -941,8 +941,10 @@ export interface LinkStatus {
   mode: 'rf' | 'fiber' | 'autonomous';
   up: boolean;
   reason?: LinkLossReason;
-  /** The operator or control station at the other end. */
+  /** The operator or control station at the other end (while down: the one it is assigned to). */
   controllerId?: string;
+  /** The operator it is assigned to (missing: any of its side). */
+  operatorId?: string;
   /** Radio hops to it (more than 1: relayed through other drones). */
   hops?: number;
   /** Seconds since it went down. */

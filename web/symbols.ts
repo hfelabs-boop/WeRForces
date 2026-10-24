@@ -171,6 +171,25 @@ function icon(ctx: CanvasRenderingContext2D, kind: SymbolKind, s: number): void 
       ctx.lineTo(0, h * 0.4);
       ctx.lineTo(w, -h * 0.4);
       break;
+    case 'ugv':
+      // A vehicle hull on tracks, with the unmanned-systems chevron above it.
+      ctx.rect(-w * 0.75, -h * 0.05, w * 1.5, h * 0.5);
+      ctx.moveTo(-w * 0.5, -h * 0.75);
+      ctx.lineTo(0, -h * 0.3);
+      ctx.lineTo(w * 0.5, -h * 0.75);
+      break;
+    case 'legged':
+      // A body on four legs, with the unmanned-systems chevron above it.
+      ctx.moveTo(-w * 0.6, 0);
+      ctx.lineTo(w * 0.6, 0);
+      for (const lx of [-0.55, -0.25, 0.25, 0.55]) {
+        ctx.moveTo(w * lx, 0);
+        ctx.lineTo(w * (lx + (lx < 0 ? -0.1 : 0.1)), h * 0.6);
+      }
+      ctx.moveTo(-w * 0.5, -h * 0.75);
+      ctx.lineTo(0, -h * 0.3);
+      ctx.lineTo(w * 0.5, -h * 0.75);
+      break;
     case 'ship':
       ctx.moveTo(-w, -h * 0.2);
       ctx.lineTo(w, -h * 0.2);

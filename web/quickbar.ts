@@ -13,7 +13,7 @@ export interface QuickHost {
   orderEach(make: (id: string) => Command | null): void;
   pickPoint(label: string, onPick: (p: Vec2) => void): void;
   pickEntity(label: string, onPick: (id: string) => void): void;
-  can(id: string, what: 'indirect' | 'smoke' | 'air' | 'ground' | 'carrier' | 'breach'): boolean;
+  can(id: string, what: 'indirect' | 'smoke' | 'air' | 'ground' | 'carrier' | 'breach' | 'drone' | 'oneWay'): boolean;
   toast(msg: string, info?: boolean): void;
   nameOf(id: string): string;
 }
@@ -81,6 +81,20 @@ export const QUICK_ACTIONS: QuickAction[] = [
     title: 'Orbit a point at 2 km (aircraft)',
     applies: (h, id) => h.can(id, 'air'),
     run: (h) => h.pickPoint('Orbit: click the centre', (p) => h.orderEach((id) => (h.can(id, 'air') ? task(id, { type: 'orbit', center: round(p), radius: 2000 }) : null))),
+  },
+  {
+    id: 'strike',
+    label: 'Strike',
+    title: 'One-way attack drones: fly into an enemy (click it)',
+    applies: (h, id) => h.can(id, 'oneWay'),
+    run: (h) => h.pickEntity('Strike: click the target', (target) => h.orderEach((id) => (h.can(id, 'oneWay') ? task(id, { type: 'strike', targetId: target }) : null))),
+  },
+  {
+    id: 'loiter',
+    label: 'Loiter',
+    title: 'Drones: loiter round a point (1 km) and attack what they find (click it)',
+    applies: (h, id) => h.can(id, 'drone') && h.can(id, 'air'),
+    run: (h) => h.pickPoint('Loiter: click the centre', (p) => h.orderEach((id) => (h.can(id, 'drone') && h.can(id, 'air') ? task(id, { type: 'loiter', center: round(p), radius: 1000, attack: true }) : null))),
   },
   { id: 'stop', label: 'Stop', title: 'Stop: clear tasks and plans', run: (h) => h.orderEach((id) => ({ cmd: 'stop', targetId: id })) },
   { id: 'holdFire', label: 'Hold fire', title: 'ROE: hold fire', run: (h) => h.orderEach((id) => ({ cmd: 'setRoe', targetId: id, roe: 'holdFire' })) },
