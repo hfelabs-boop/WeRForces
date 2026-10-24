@@ -141,7 +141,7 @@ Give an entity or unit a task (replaces its current plan). moveTo/orbit need `to
 
 ## `assign_plan`
 
-Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: {kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), {kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, {kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"entityDestroyed",entityId}}.
+Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: {kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), {kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, {kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1}}, {kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"entityDestroyed",entityId}}.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -166,6 +166,17 @@ Set rules of engagement for an entity or unit: fireAtWill, returnFire or holdFir
 | --- | --- | --- | --- |
 | `targetId` | string | yes |  |
 | `roe` | `"fireAtWill"` \| `"returnFire"` \| `"holdFire"` | yes |  |
+
+## `set_reactions` _(idempotent)_
+
+Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `targetId` | string | yes |  |
+| `onContact` | `"continue"` \| `"halt"` |  |  |
+| `withdrawBelow` | number (0–1) |  |  |
+| `withdrawTo` | {x, y, lat, lon, town} |  | Location as {x,y}, {lat,lon} or {town} |
 
 ## `control_simulation`
 

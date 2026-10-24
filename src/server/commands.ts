@@ -1,6 +1,6 @@
 // Remote-control command dispatcher shared by the REST and WebSocket APIs.
 
-import type { Command, CommandResult, Condition, ForceId, Formation, Plan, PlanStatement, Roe, TaskSpec, Vec2 } from '../shared/types.js';
+import type { Command, CommandResult, Condition, ForceId, Formation, Plan, PlanStatement, Reactions, Roe, TaskSpec, Vec2 } from '../shared/types.js';
 import type { SimRunner } from './runner.js';
 
 const FORCES = new Set([0, 1, 2, 3]);
@@ -48,7 +48,13 @@ export function validateTask(v: unknown): TaskSpec {
     case 'moveTo':
       return { type: 'moveTo', target: vec(t.target, 'target'), speed };
     case 'followRoute':
-      return { type: 'followRoute', routeId: str(t.routeId, 'routeId'), speed, reverse: t.reverse === true };
+      return {
+        type: 'followRoute',
+        routeId: str(t.routeId, 'routeId'),
+        speed,
+        reverse: t.reverse === true,
+        startIndex: t.startIndex === undefined ? undefined : Math.max(0, Math.floor(num(t.startIndex, 'startIndex'))),
+      };
     case 'patrol':
       return { type: 'patrol', routeId: str(t.routeId, 'routeId'), speed };
     case 'wait':
@@ -83,9 +89,33 @@ function validateCondition(v: unknown): Condition {
       return { type: 'underFire' };
     case 'entityDestroyed':
       return { type: 'entityDestroyed', entityId: str(c.entityId, 'entityId') };
+    case 'enemyInArea':
+      return { type: 'enemyInArea', areaId: str(c.areaId, 'areaId') };
+    case 'strengthBelow': {
+      const fraction = num(c.fraction, 'fraction');
+      if (fraction <= 0 || fraction > 1) throw new ValidationError('fraction must be in (0, 1]');
+      return { type: 'strengthBelow', fraction };
+    }
     default:
       throw new ValidationError(`unknown condition ${String(c.type)}`);
   }
+}
+
+export function validateReactions(v: unknown): Reactions {
+  if (!v || typeof v !== 'object') throw new ValidationError('reactions must be an object');
+  const r = v as Record<string, unknown>;
+  const out: Reactions = {};
+  if (r.onContact !== undefined) {
+    if (r.onContact !== 'continue' && r.onContact !== 'halt') throw new ValidationError("onContact must be 'continue' or 'halt'");
+    out.onContact = r.onContact;
+  }
+  if (r.withdrawBelow !== undefined && r.withdrawBelow !== null) {
+    const f = num(r.withdrawBelow, 'withdrawBelow');
+    if (f < 0 || f > 1) throw new ValidationError('withdrawBelow must be between 0 and 1');
+    if (f > 0) out.withdrawBelow = f;
+  }
+  if (r.withdrawTo !== undefined) out.withdrawTo = vec(r.withdrawTo, 'withdrawTo');
+  return out;
 }
 
 export function validatePlan(v: unknown): Plan {
@@ -107,6 +137,8 @@ export function validatePlan(v: unknown): Plan {
         return { kind: 'setFormation', formation: formation(st.formation) };
       case 'waitUntil':
         return { kind: 'waitUntil', condition: validateCondition(st.condition) };
+      case 'setReactions':
+        return { kind: 'setReactions', reactions: validateReactions(st.reactions) };
       default:
         throw new ValidationError(`unknown plan statement ${String(st.kind)}`);
     }
@@ -205,6 +237,9 @@ export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
         return;
       case 'setRoe':
         engine.setRoe(str(c.targetId, 'targetId'), roe(c.roe));
+        return;
+      case 'setReactions':
+        engine.setReactions(str(c.targetId, 'targetId'), validateReactions(c.reactions));
         return;
       case 'setFormation': {
         const u = engine.units.get(str(c.unitId, 'unitId'));

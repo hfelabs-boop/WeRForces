@@ -25,10 +25,10 @@ export function detectionProbability(engine: Engine, observer: Entity, target: E
 
 export function updateSensors(engine: Engine, observer: Entity): void {
   const now = engine.time;
-  if (observer.alive && !observer.remote && observer.type.sensors.length > 0) {
+  if (observer.alive && !observer.remote && !observer.embarkedIn && observer.type.sensors.length > 0) {
     const eye = observer.eye;
     for (const target of engine.entities.values()) {
-      if (target === observer || target.force === observer.force || target.destroyed) continue;
+      if (target === observer || target.force === observer.force || target.destroyed || target.embarkedIn) continue;
       const range = Math.hypot(target.x - observer.x, target.y - observer.y, target.z - observer.z);
       for (const sid of observer.type.sensors) {
         const s = engine.catalog.sensors.get(sid)!;

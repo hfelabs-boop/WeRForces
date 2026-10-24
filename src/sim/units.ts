@@ -1,7 +1,7 @@
 // Units (aggregates of entities) with a leader, a formation and unit-level tasking.
 
 import { rotateOffset } from '../shared/math.js';
-import type { ForceId, Formation, Plan, PlanStatement, TaskSpec, UnitTemplate, Vec2 } from '../shared/types.js';
+import type { ForceId, Formation, Plan, PlanStatement, Reactions, TaskSpec, UnitTemplate, Vec2 } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import type { PlanExecutor, Taskable } from './plans.js';
@@ -30,9 +30,11 @@ export class Unit implements Taskable {
   taskSpec: TaskSpec | null = null;
   assignedPlan?: Plan;
   assignedTask?: TaskSpec;
+  reactions: Reactions = {};
+  withdrawn = false;
   leader: Entity | undefined;
   /** The task instance currently executing the unit task on the leader. */
-  private leaderTask: Task | null = null;
+  leaderTask: Task | null = null;
 
   constructor(
     readonly id: string,
@@ -104,6 +106,10 @@ export class Unit implements Taskable {
   applySetting(engine: Engine, st: PlanStatement): void {
     if (st.kind === 'setFormation') {
       this.formation = st.formation;
+      return;
+    }
+    if (st.kind === 'setReactions') {
+      engine.setReactions(this.id, st.reactions);
       return;
     }
     for (const m of this.memberList) engine.applyEntitySetting(m, st);

@@ -6,6 +6,9 @@ import type {
   Catalog,
   CommandResult,
   Domain,
+  EntityRecord,
+  Reactions,
+  ShotRecord,
   EntitySnapshot,
   ForceId,
   Formation,
@@ -386,6 +389,67 @@ export class Engine {
     }
   }
 
+  /** Configure automatic reactions on an entity or a unit (and its members). */
+  setReactions(targetId: string, reactions: Reactions): void {
+    const t = this.resolveTarget(targetId);
+    const r: Reactions = {};
+    if (reactions.onContact) r.onContact = reactions.onContact;
+    if (reactions.withdrawBelow !== undefined && reactions.withdrawBelow > 0) {
+      r.withdrawBelow = Math.min(1, reactions.withdrawBelow);
+      // Fall back to where we are now unless told otherwise.
+      const here = t instanceof Unit ? t.centroid() : { x: t.x, y: t.y };
+      r.withdrawTo = reactions.withdrawTo ?? { x: Math.round(here.x), y: Math.round(here.y) };
+    }
+    if (t instanceof Unit) {
+      t.reactions = r;
+      t.withdrawn = false;
+      for (const m of t.memberList) m.reactions = { onContact: r.onContact };
+    } else {
+      t.reactions = r;
+      t.withdrawn = false;
+    }
+  }
+
+  /** True when the entity's on-contact reaction should hold it in place this tick. */
+  private shouldHalt(e: Entity): boolean {
+    if (e.reactions.onContact !== 'halt' || e.firepowerKill) return false;
+    for (const c of e.contacts.values()) {
+      if (this.time - c.lastSeen > 3) continue;
+      const t = this.entities.get(c.id);
+      if (!t || !t.alive || !this.isHostile(e.force, t.force)) continue;
+      const range = Math.hypot(t.x - e.x, t.y - e.y);
+      for (const wid of e.type.weapons) {
+        const w = this.catalog.weapon(wid);
+        if ((e.ammo.get(wid) ?? 0) > 0 && w.targets.includes(t.domain) && range <= w.maxRange) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Withdraw reactions: units below their strength threshold, entities that lost their weapons. */
+  private checkWithdrawals(): void {
+    for (const u of this.units.values()) {
+      const r = u.reactions;
+      if (u.withdrawn || !r.withdrawBelow || !r.withdrawTo || !u.leader) continue;
+      const alive = u.alive().length;
+      if (alive / u.memberList.length >= r.withdrawBelow) continue;
+      u.withdrawn = true;
+      u.plan = null;
+      for (const m of u.memberList) m.roe = 'returnFire';
+      u.startTask(this, { type: 'moveTo', target: r.withdrawTo });
+      this.log('task', `${u.name}: strength ${alive}/${u.memberList.length}, withdrawing`, u.id);
+    }
+    for (const e of this.entities.values()) {
+      const r = e.reactions;
+      if (e.unit || e.withdrawn || e.remote || !e.alive || !r.withdrawBelow || !r.withdrawTo || !e.firepowerKill || e.mobilityKill) continue;
+      e.withdrawn = true;
+      e.plan = null;
+      e.roe = 'returnFire';
+      this.setEntityTask(e, createTask({ type: 'moveTo', target: r.withdrawTo }));
+      this.log('task', `${e.name}: weapons out of action, withdrawing`, e.id);
+    }
+  }
+
   setRoe(targetId: string, roe: Roe): void {
     const t = this.resolveTarget(targetId);
     const members = t instanceof Unit ? t.memberList : [t];
@@ -402,6 +466,9 @@ export class Engine {
         break;
       case 'setAltitude':
         if (e.domain === 'air') e.altitudeOverride = st.altitude;
+        break;
+      case 'setReactions':
+        this.setReactions(e.id, st.reactions);
         break;
       default:
         break;
@@ -461,8 +528,9 @@ export class Engine {
     const shot = det.shot;
     const target = shot.targetId ? this.entities.get(shot.targetId) : undefined;
     const tname = target?.name ?? 'target';
-    const text =
-      det.outcome === 'kill'
+    const text = det.guidanceLost
+      ? `${shot.weapon.name} lost guidance and missed ${tname}`
+      : det.outcome === 'kill'
         ? `${shot.weapon.name} destroyed ${tname}`
         : det.outcome === 'mobility'
           ? `${shot.weapon.name} hit ${tname}: mobility kill`
@@ -549,11 +617,21 @@ export class Engine {
     for (const u of this.units.values()) u.update(this);
     for (const u of this.units.values()) u.plan?.update(this, u);
 
+    this.checkWithdrawals();
+
     for (const e of this.entities.values()) {
-      if (e.remote || e.destroyed) continue;
+      if (e.remote || e.destroyed || e.embarkedIn) continue;
       if (e.plan) e.plan.update(this, new EntityTaskable(e));
       const task = e.task;
-      if (task && task.status === 'running') {
+      const halt = this.shouldHalt(e);
+      if (halt !== e.halted) {
+        e.halted = halt;
+        if (!e.unit || e.unit.leader === e) this.log('task', `${e.name}: ${halt ? 'halted on contact' : 'resuming'}`, e.id);
+      }
+      if (halt) {
+        // Stop and fight; the task keeps its progress and resumes afterwards.
+        e.steer = { x: e.x, y: e.y, speed: 0, arrive: true };
+      } else if (task && task.status === 'running') {
         const status = task.update({ engine: this, entity: e, dt });
         if (status !== 'running') {
           if (status === 'failed') this.log('task', `${e.name}: ${task.describe(this)} failed${task.message ? `: ${task.message}` : ''}`, e.id);
@@ -629,20 +707,116 @@ export class Engine {
     for (const r of s.entities ?? []) {
       const e = this.createEntity({ id: r.id, typeId: r.typeId, force: r.force, x: r.x, y: r.y, heading: r.heading, name: r.name, altitude: r.altitude });
       if (r.roe) e.roe = r.roe;
-    }
-    for (const u of s.units ?? []) this.groupUnit(u.memberIds, u.name, u.formation, u.spacing, u.echelon, u.id);
-    // Tasks and plans last, since they can reference any object.
-    for (const r of s.entities ?? []) {
-      if (r.plan) this.assignPlan(r.id, r.plan);
-      else if (r.task) this.assignTask(r.id, r.task);
+      if (r.reactions) e.reactions = { ...r.reactions };
+      if (r.state) this.restoreEntityState(e, r);
     }
     for (const u of s.units ?? []) {
-      if (u.plan) this.assignPlan(u.id, u.plan);
-      else if (u.task) this.assignTask(u.id, u.task);
+      const unit = this.groupUnit(u.memberIds, u.name, u.formation, u.spacing, u.echelon, u.id);
+      if (u.reactions) unit.reactions = { ...u.reactions };
+      unit.withdrawn = !!u.state?.withdrawn;
+      const leader = u.state?.leaderId ? this.entities.get(u.state.leaderId) : undefined;
+      if (leader && unit.memberList.includes(leader)) {
+        unit.leader = leader;
+        if (leader.alive) unit.formUp(this);
+      }
     }
+    // Tasks and plans last, since they can reference any object. Checkpoints resume them part-way.
+    for (const r of s.entities ?? []) {
+      const e = this.entities.get(r.id)!;
+      if (e.destroyed || e.embarkedIn) continue;
+      if (r.plan) {
+        this.assignPlan(r.id, r.plan);
+        if (r.state?.planIndex !== undefined) e.plan!.resume(r.state.planIndex, r.state.taskState);
+      } else if (r.task) {
+        this.assignTask(r.id, r.state?.taskState ?? r.task);
+        e.assignedTask = r.task;
+      }
+    }
+    for (const u of s.units ?? []) {
+      const unit = this.units.get(u.id)!;
+      if (!unit.leader) continue;
+      if (u.plan) {
+        this.assignPlan(u.id, u.plan);
+        if (u.state?.planIndex !== undefined) unit.plan!.resume(u.state.planIndex, u.state.taskState);
+      } else if (u.task) {
+        this.assignTask(u.id, u.state?.taskState ?? u.task);
+        unit.assignedTask = u.task;
+      }
+    }
+    for (const r of s.shots ?? []) {
+      const weapon = this.catalog.weapons.get(r.weaponId);
+      if (weapon) this.shots.push({ ...r, weapon });
+    }
+    for (const r of s.entities ?? []) if (r.state?.sensorDue !== undefined) this.sensorDue.set(r.id, r.state.sensorDue);
+    if (s.rngState !== undefined) this.rng.state = s.rngState;
     this.initialScenario = JSON.parse(JSON.stringify(s));
     for (const fn of this.listeners.reset) fn();
     this.log('info', `scenario "${s.name}" loaded`);
+  }
+
+  private restoreEntityState(e: Entity, r: EntityRecord): void {
+    const st = r.state!;
+    e.destroyed = !!st.destroyed;
+    e.mobilityKill = !!st.mobilityKill;
+    e.firepowerKill = !!st.firepowerKill;
+    if (st.z !== undefined) e.z = st.z;
+    if (st.speed !== undefined) e.speed = st.speed;
+    for (const [k, v] of Object.entries(st.ammo ?? {})) if (e.ammo.has(k)) e.ammo.set(k, v);
+    for (const [k, v] of Object.entries(st.weaponReadyAt ?? {})) e.weaponReadyAt.set(k, v);
+    for (const c of st.contacts ?? []) e.contacts.set(c.id, { ...c });
+    for (const [k, v] of Object.entries(st.attackers ?? {})) e.attackers.set(k, v);
+    if (st.underFireUntil !== undefined) e.underFireUntil = st.underFireUntil;
+    if (st.lastFiredAt !== undefined) e.lastFiredAt = st.lastFiredAt;
+    e.speedOverride = st.speedOverride;
+    if (st.altitudeOverride !== undefined) e.altitudeOverride = st.altitudeOverride;
+    e.withdrawn = !!st.withdrawn;
+    if (st.embarkedIn) e.embarkedIn = st.embarkedIn;
+  }
+
+  private authoredState(e: Entity): EntityRecord['state'] {
+    const st = { destroyed: e.destroyed || undefined, mobilityKill: e.mobilityKill || undefined, firepowerKill: e.firepowerKill || undefined, embarkedIn: e.embarkedIn };
+    return Object.values(st).some((v) => v !== undefined) ? st : undefined;
+  }
+
+  private entityRecord(e: Entity): EntityRecord {
+    const finite = (v: number) => (Number.isFinite(v) ? v : undefined);
+    const map = (m: Map<string, number>) => (m.size ? Object.fromEntries(m) : undefined);
+    const ownTask = e.task && e.task.status === 'running' && !(e.unit && e.unit.leader !== e && e.task.spec.type === 'formation') && !(e.unit && e.unit.leaderTask === e.task);
+    return {
+      id: e.id,
+      name: e.name,
+      typeId: e.type.id,
+      force: e.force,
+      x: Math.round(e.x * 10) / 10,
+      y: Math.round(e.y * 10) / 10,
+      heading: Math.round(e.heading * 1000) / 1000,
+      altitude: e.domain === 'air' ? Math.round(e.z - this.terrain.surfaceHeight(e.x, e.y)) : undefined,
+      roe: e.roe,
+      plan: e.assignedPlan,
+      task: e.assignedTask,
+      reactions: Object.keys(e.reactions).length ? e.reactions : undefined,
+      // At time 0 (scenario authoring) only damage and embarkation are worth keeping.
+      state: this.time === 0 ? this.authoredState(e) : {
+        destroyed: e.destroyed || undefined,
+        mobilityKill: e.mobilityKill || undefined,
+        firepowerKill: e.firepowerKill || undefined,
+        speed: e.speed ? Math.round(e.speed * 100) / 100 : undefined,
+        z: e.domain === 'air' ? Math.round(e.z * 10) / 10 : undefined,
+        ammo: map(e.ammo),
+        weaponReadyAt: map(e.weaponReadyAt),
+        contacts: e.contacts.size ? [...e.contacts.values()].map((c) => ({ ...c })) : undefined,
+        attackers: map(e.attackers),
+        underFireUntil: finite(e.underFireUntil),
+        lastFiredAt: finite(e.lastFiredAt),
+        sensorDue: this.sensorDue.get(e.id),
+        speedOverride: e.speedOverride,
+        altitudeOverride: e.altitudeOverride,
+        planIndex: e.plan ? e.plan.index : undefined,
+        taskState: ownTask ? e.task!.resumeSpec() : undefined,
+        withdrawn: e.withdrawn || undefined,
+        embarkedIn: e.embarkedIn,
+      },
+    };
   }
 
   /**
@@ -664,42 +838,53 @@ export class Engine {
     if (this.initialScenario) this.loadScenario(this.initialScenario);
   }
 
-  /** Serialize the current state (positions, tasking and graphics) as a scenario. */
+  /**
+   * Serialize the current state as a scenario. It is a full checkpoint: damage, ammunition,
+   * contacts, plan/task progress, munitions in flight and the random number state are kept,
+   * so loading it continues the run. Route planning restarts from current positions.
+   */
   toScenario(): ScenarioFile {
-    const local = [...this.entities.values()].filter((e) => !e.remote && !e.destroyed);
+    const local = [...this.entities.values()].filter((e) => !e.remote);
     return {
       format: 'werforces-scenario',
       version: 1,
       name: this.scenarioName,
       description: this.description,
       terrain: this.terrain.spec,
-      startTime: Math.round(this.time * 10) / 10,
+      startTime: Math.round(this.time * 1e6) / 1e6,
       hostilities: [...this.hostilities].map((k) => k.split('-').map(Number) as [ForceId, ForceId]),
-      entities: local.map((e) => ({
-        id: e.id,
-        name: e.name,
-        typeId: e.type.id,
-        force: e.force,
-        x: Math.round(e.x * 10) / 10,
-        y: Math.round(e.y * 10) / 10,
-        heading: Math.round(e.heading * 1000) / 1000,
-        altitude: e.domain === 'air' ? Math.round(e.z - this.terrain.surfaceHeight(e.x, e.y)) : undefined,
-        roe: e.roe,
-        plan: e.assignedPlan,
-        task: e.assignedTask,
-      })),
+      entities: local.map((e) => this.entityRecord(e)),
       units: [...this.units.values()].map((u) => ({
         id: u.id,
         name: u.name,
         force: u.force,
-        memberIds: u.memberList.filter((m) => !m.destroyed).map((m) => m.id),
+        memberIds: u.memberList.map((m) => m.id),
         formation: u.formation,
         spacing: u.spacing,
         echelon: u.echelon,
         plan: u.assignedPlan,
         task: u.assignedTask,
-      })).filter((u) => u.memberIds.length > 0),
+        reactions: Object.keys(u.reactions).length ? u.reactions : undefined,
+        state: this.time === 0 ? undefined : {
+          planIndex: u.plan ? u.plan.index : undefined,
+          taskState: u.taskSpec && u.leaderTask?.status === 'running' ? u.leaderTask.resumeSpec() : undefined,
+          leaderId: u.leader?.id,
+          withdrawn: u.withdrawn || undefined,
+        },
+      })),
       graphics: [...this.graphics.values()],
+      shots: this.shots.length === 0 ? undefined : this.shots.map((sh) => ({
+        eventNumber: sh.eventNumber,
+        shooterId: sh.shooterId,
+        targetId: sh.targetId,
+        weaponId: sh.weapon.id,
+        from: sh.from,
+        to: sh.to,
+        fireTime: sh.fireTime,
+        impactTime: sh.impactTime,
+        range: sh.range,
+      })),
+      rngState: this.time === 0 ? undefined : this.rng.state,
     };
   }
 
@@ -731,6 +916,10 @@ export class Engine {
       ammo: e.type.weapons.map((w) => ({ weapon: w, rounds: e.ammo.get(w) ?? 0 })),
       contacts: [...e.contacts.keys()],
       engagingId: e.engagingId,
+      reactions: Object.keys(e.reactions).length ? e.reactions : undefined,
+      halted: e.halted || undefined,
+      withdrawn: e.withdrawn || undefined,
+      embarkedIn: e.embarkedIn,
     };
   }
 
@@ -750,6 +939,8 @@ export class Engine {
         y: c.y,
         task: u.taskSpec && leaderTask && leaderTask.status === 'running' ? leaderTask.describe(this) : undefined,
         plan: u.plan?.describe(this),
+        reactions: Object.keys(u.reactions).length ? u.reactions : undefined,
+        withdrawn: u.withdrawn || undefined,
       };
     });
     return {

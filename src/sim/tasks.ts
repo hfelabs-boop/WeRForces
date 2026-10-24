@@ -51,6 +51,11 @@ export abstract class Task {
   get remainingPath(): Vec2[] {
     return [];
   }
+
+  /** A spec that resumes this task from where it is now (used by checkpoints). */
+  resumeSpec(): TaskSpec {
+    return this.spec;
+  }
 }
 
 function arriveRadius(e: Entity): number {
@@ -141,8 +146,13 @@ export class FollowRouteTask extends Task {
     readonly speed: number | undefined,
     readonly reverse: boolean,
     readonly loop: boolean,
+    readonly startIndex?: number,
   ) {
-    super(loop ? { type: 'patrol', routeId, speed } : { type: 'followRoute', routeId, speed, reverse });
+    super(loop ? { type: 'patrol', routeId, speed } : { type: 'followRoute', routeId, speed, reverse, startIndex });
+  }
+
+  override resumeSpec(): TaskSpec {
+    return this.loop ? this.spec : { type: 'followRoute', routeId: this.routeId, speed: this.speed, reverse: this.reverse, startIndex: this.index };
   }
 
   protected override start({ engine, entity }: TaskContext): void {
@@ -153,7 +163,8 @@ export class FollowRouteTask extends Task {
     }
     this.points = this.reverse ? [...g.points].reverse() : [...g.points];
     // Join the route at the nearest point when patrolling, at the start otherwise.
-    if (this.loop) {
+    if (this.startIndex !== undefined) this.index = Math.max(0, Math.min(this.points.length - 1, this.startIndex));
+    else if (this.loop) {
       let best = 0;
       for (let i = 1; i < this.points.length; i++) if (dist2d(entity, this.points[i]) < dist2d(entity, this.points[best])) best = i;
       this.index = best;
@@ -212,6 +223,10 @@ export class WaitTask extends Task {
 
   describe(): string {
     return `Wait ${Math.max(0, Math.ceil(this.duration - this.elapsed))}s`;
+  }
+
+  override resumeSpec(): TaskSpec {
+    return { type: 'wait', duration: Math.max(0, this.duration - this.elapsed) };
   }
 }
 
@@ -349,6 +364,10 @@ export class OrbitTask extends Task {
   describe(): string {
     return `Orbit (${Math.round(this.center.x)}, ${Math.round(this.center.y)}) r=${Math.round(this.radius)}m`;
   }
+
+  override resumeSpec(): TaskSpec {
+    return { type: 'orbit', center: this.center, radius: this.radius, duration: this.duration === undefined ? undefined : Math.max(0, this.duration - this.elapsed) };
+  }
 }
 
 /** Unit subordinate behaviour: hold the assigned slot relative to the unit leader. */
@@ -382,7 +401,7 @@ export function createTask(spec: TaskSpec): Task {
     case 'moveTo':
       return new MoveToTask(spec.target, spec.speed);
     case 'followRoute':
-      return new FollowRouteTask(spec.routeId, spec.speed, spec.reverse ?? false, false);
+      return new FollowRouteTask(spec.routeId, spec.speed, spec.reverse ?? false, false, spec.startIndex);
     case 'patrol':
       return new FollowRouteTask(spec.routeId, spec.speed, false, true);
     case 'wait':

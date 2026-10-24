@@ -26,6 +26,8 @@ export interface Detonation {
   location: Vec3;
   hit: boolean;
   outcome: DetonationOutcome;
+  /** A command-guided missile lost guidance (launcher killed or lost sight). */
+  guidanceLost?: boolean;
 }
 
 /** Effective kill probability for a shot, after range and condition modifiers. */
@@ -49,7 +51,7 @@ function canEngage(engine: Engine, shooter: Entity, target: Entity, w: WeaponDef
 
 /** Choose and fire at most one weapon this tick, honouring ROE and explicit attack targets. */
 export function updateCombat(engine: Engine, shooter: Entity): void {
-  if (shooter.remote || shooter.destroyed || shooter.firepowerKill) return;
+  if (shooter.remote || shooter.destroyed || shooter.firepowerKill || shooter.embarkedIn) return;
   const now = engine.time;
   const candidates: Entity[] = [];
   const explicit = shooter.attackTargetId ? engine.entities.get(shooter.attackTargetId) : undefined;
@@ -57,7 +59,7 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
   if (shooter.roe !== 'holdFire') {
     for (const c of shooter.contacts.values()) {
       const t = engine.entities.get(c.id);
-      if (!t || t.destroyed || t === explicit || !engine.isHostile(shooter.force, t.force)) continue;
+      if (!t || t.destroyed || t.embarkedIn || t === explicit || !engine.isHostile(shooter.force, t.force)) continue;
       if (shooter.roe === 'returnFire') {
         const last = shooter.attackers.get(t.id);
         if (last === undefined || now - last > 60) continue;
@@ -166,6 +168,11 @@ export function resolveImpact(engine: Engine, shot: Shot): Detonation {
   const shooter = engine.entities.get(shot.shooterId);
   if (!target || target.destroyed) {
     return { shot, location: shot.to, hit: false, outcome: 'noEffect' };
+  }
+  // Wire/command-guided missiles need the launcher to keep guiding them to impact.
+  if (shot.weapon.commandGuided) {
+    const guiding = shooter && shooter.alive && !shooter.firepowerKill && engine.terrain.lineOfSight(shooter.eye, { x: target.x, y: target.y, z: target.z + 1.5 });
+    if (!guiding) return { shot, location: scatter(engine, target.position), hit: false, outcome: 'miss', guidanceLost: true };
   }
   // Guided munitions track the target; ballistic rounds land at the launch aim point.
   const moved = dist2d(target, shot.to);

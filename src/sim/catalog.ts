@@ -79,6 +79,7 @@ const weapons: WeaponDef[] = [
     pk: { armored: 0.8, light: 0.9, soft: 0.9, ship: 0.3 },
     targets: ['ground', 'surface'],
     guided: true,
+    commandGuided: true,
   },
   {
     id: 'atgm-konkurs',
@@ -92,6 +93,7 @@ const weapons: WeaponDef[] = [
     pk: { armored: 0.7, light: 0.9, soft: 0.9, ship: 0.3 },
     targets: ['ground', 'surface'],
     guided: true,
+    commandGuided: true,
   },
   {
     id: 'mg-762',
@@ -202,6 +204,7 @@ const weapons: WeaponDef[] = [
     pk: { armored: 0.75, light: 0.9, soft: 0.9, ship: 0.35 },
     targets: ['ground', 'surface'],
     guided: true,
+    commandGuided: true,
   },
   {
     id: 'aim120',

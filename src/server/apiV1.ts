@@ -223,6 +223,7 @@ export class ApiV1 {
       const b = obj(req.body);
       if (b.name !== undefined) this.run({ cmd: 'rename', id, name: b.name as string });
       if (b.roe !== undefined) this.run({ cmd: 'setRoe', targetId: id, roe: b.roe as never });
+      if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
       if (b.position !== undefined || b.x !== undefined || b.lat !== undefined) {
         const p = this.point(b.position ?? b);
         this.run({ cmd: 'moveEntity', id, x: p.x, y: p.y, heading: b.heading as number | undefined });
@@ -292,6 +293,7 @@ export class ApiV1 {
       if (b.name !== undefined) this.run({ cmd: 'rename', id, name: b.name as string });
       if (b.formation !== undefined) this.run({ cmd: 'setFormation', unitId: id, formation: b.formation as never });
       if (b.roe !== undefined) this.run({ cmd: 'setRoe', targetId: id, roe: b.roe as never });
+      if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
       return { json: this.unitView(this.unit(id)) };
     });
     r.delete(`${P}/units/{id}`, (req) => {
@@ -473,10 +475,17 @@ export class ApiV1 {
       p.statements = p.statements.map((s) => {
         const st = { ...obj(s) };
         if (st.kind === 'task') st.task = this.resolveTask(st.task);
+        if (st.kind === 'setReactions') st.reactions = this.resolveReactions(st.reactions);
         return st;
       });
     }
     return p;
+  }
+
+  resolveReactions(body: unknown): unknown {
+    const r = { ...obj(body) };
+    if (r.withdrawTo && typeof r.withdrawTo === 'object') r.withdrawTo = this.point(r.withdrawTo, 'withdrawTo');
+    return r;
   }
 
   private listScenarios() {

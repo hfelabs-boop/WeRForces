@@ -56,7 +56,10 @@ type PlanStepKind =
   | 'waitArea'
   | 'waitEnemy'
   | 'waitFire'
-  | 'waitDestroyed';
+  | 'waitDestroyed'
+  | 'waitEnemyInArea'
+  | 'waitStrength'
+  | 'setReaction';
 
 class App {
   readonly api: Api;
@@ -951,6 +954,7 @@ class App {
     el.append(
       h('div', { class: 'section' }, h('h4', { text: 'Current activity' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
       this.roeSection(e.id),
+      this.reactionsSection(e.id, false),
       this.taskSection(e.id, e.domain),
       this.planSection(e.id, false),
       h('div', { class: 'section' }, h('h4', { text: 'Weapons' }), h('div', { 'data-bind': 'weapons' })),
@@ -969,6 +973,7 @@ class App {
       h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Strength', this.bind('strength'), 'Leader', this.bind('leader'), 'Formation', formation),
       h('div', { class: 'section' }, h('h4', { text: 'Current activity' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
       this.roeSection(u.id),
+      this.reactionsSection(u.id, true),
       this.taskSection(u.id, lead?.domain ?? 'ground'),
       this.planSection(u.id, true),
       h('div', { class: 'section' }, h('h4', { text: 'Members' }), h('div', { 'data-bind': 'members' })),
@@ -1001,6 +1006,26 @@ class App {
       ),
       h('p', { class: 'hint', text: g.kind === 'route' || g.kind === 'phaseLine' ? 'Select an entity or unit, then right-click this route to follow or patrol it.' : g.kind === 'area' ? 'Areas can be used in plans: "wait until in area".' : '' }),
       h('div', { class: 'section row' }, h('button', { text: 'Center', onclick: () => this.centerOn(g.id) }), h('button', { class: 'danger', text: 'Delete', onclick: () => this.deleteSelected() })),
+    );
+  }
+
+  private reactionsSection(id: string, isUnit: boolean): HTMLElement {
+    const onContact = h('select', { 'data-bind-value': 'onContact' }, h('option', { value: 'continue', text: 'Continue the task' }), h('option', { value: 'halt', text: 'Halt and fight' })) as HTMLSelectElement;
+    const withdraw = h(
+      'select',
+      { 'data-bind-value': 'withdraw' },
+      h('option', { value: '0', text: 'Never' }),
+      ...(isUnit ? [75, 50, 25].map((p) => h('option', { value: String(p / 100), text: `Below ${p}% strength` })) : [h('option', { value: '1', text: 'When weapons are knocked out' })]),
+    ) as HTMLSelectElement;
+    const apply = () => this.cmd({ cmd: 'setReactions', targetId: id, reactions: { onContact: onContact.value as 'halt', withdrawBelow: Number(withdraw.value) } });
+    onContact.addEventListener('change', apply);
+    withdraw.addEventListener('change', apply);
+    return h(
+      'div',
+      { class: 'section' },
+      h('h4', { text: 'Reactions' }),
+      h('div', { class: 'kv' }, 'On contact', onContact, 'Withdraw', withdraw),
+      h('div', { class: 'hint', text: 'Withdrawing units fall back to where this was set, with return-fire ROE.' }),
     );
   }
 
@@ -1095,8 +1120,12 @@ class App {
         if (c.type === 'inArea') return `Wait until in ${name(c.areaId)}`;
         if (c.type === 'enemyDetected') return 'Wait until enemy detected';
         if (c.type === 'underFire') return 'Wait until under fire';
+        if (c.type === 'enemyInArea') return `Wait until enemy in ${name(c.areaId)}`;
+        if (c.type === 'strengthBelow') return `Wait until strength below ${Math.round(c.fraction * 100)}%`;
         return `Wait until ${name(c.entityId)} destroyed`;
       }
+      case 'setReactions':
+        return `Set reaction: ${st.reactions.onContact === 'halt' ? 'halt on contact' : 'continue on contact'}`;
     }
   }
 
@@ -1117,6 +1146,9 @@ class App {
       ['waitEnemy', 'Wait until enemy detected'],
       ['waitFire', 'Wait until under fire'],
       ['waitDestroyed', 'Wait until destroyed (pick)'],
+      ['waitEnemyInArea', 'Wait until enemy in area'],
+      ['waitStrength', 'Wait until strength below (%)'],
+      ['setReaction', 'Set reaction on contact'],
     ];
     const kindSel = h('select', {}, kinds.map(([k, l]) => h('option', { value: k, text: l }))) as HTMLSelectElement;
     const param = h('span', {});
@@ -1129,7 +1161,7 @@ class App {
         const s = this.routeSelect();
         param.append(s);
         getParam = () => s.value;
-      } else if (k === 'waitArea') {
+      } else if (k === 'waitArea' || k === 'waitEnemyInArea') {
         const areas = this.areas();
         const s = h('select', {}, areas.length ? areas.map((a) => h('option', { value: a.id, text: a.name })) : h('option', { value: '', text: '(no areas)' })) as HTMLSelectElement;
         param.append(s);
@@ -1142,8 +1174,12 @@ class App {
         const s = h('select', {}, FORMATIONS.map((f) => h('option', { value: f, text: f }))) as HTMLSelectElement;
         param.append(s);
         getParam = () => s.value;
-      } else if (['wait', 'setSpeed', 'setAltitude', 'waitTime', 'orbit'].includes(k)) {
-        const defaults: Record<string, string> = { wait: '60', setSpeed: '30', setAltitude: '150', waitTime: String(Math.round((this.state?.time ?? 0) + 120)), orbit: '2000' };
+      } else if (k === 'setReaction') {
+        const s = h('select', {}, h('option', { value: 'halt', text: 'Halt and fight' }), h('option', { value: 'continue', text: 'Continue' })) as HTMLSelectElement;
+        param.append(s);
+        getParam = () => s.value;
+      } else if (['wait', 'setSpeed', 'setAltitude', 'waitTime', 'orbit', 'waitStrength'].includes(k)) {
+        const defaults: Record<string, string> = { wait: '60', setSpeed: '30', setAltitude: '150', waitTime: String(Math.round((this.state?.time ?? 0) + 120)), orbit: '2000', waitStrength: '50' };
         const n = h('input', { type: 'number', value: defaults[k], style: 'width:80px', title: k === 'orbit' ? 'radius (m)' : '' }) as HTMLInputElement;
         param.append(n);
         getParam = () => Number(n.value);
@@ -1190,6 +1226,13 @@ class App {
             return push({ kind: 'waitUntil', condition: { type: 'enemyDetected' } });
           case 'waitFire':
             return push({ kind: 'waitUntil', condition: { type: 'underFire' } });
+          case 'waitEnemyInArea':
+            if (!v) return this.toast('Draw an area first');
+            return push({ kind: 'waitUntil', condition: { type: 'enemyInArea', areaId: String(v) } });
+          case 'waitStrength':
+            return push({ kind: 'waitUntil', condition: { type: 'strengthBelow', fraction: Math.min(100, Math.max(1, Number(v) || 50)) / 100 } });
+          case 'setReaction':
+            return push({ kind: 'setReactions', reactions: { onContact: v === 'halt' ? 'halt' : 'continue' } });
           case 'waitDestroyed':
             this.map.setMode({
               kind: 'pickEntity',
@@ -1293,6 +1336,12 @@ class App {
       if (cls !== undefined) n.className = cls;
     };
     const roeSel = el.querySelector<HTMLSelectElement>('[data-bind-value="roe"]');
+    const syncReactions = (r: { onContact?: string; withdrawBelow?: number } | undefined) => {
+      const oc = el.querySelector<HTMLSelectElement>('[data-bind-value="onContact"]');
+      const wd = el.querySelector<HTMLSelectElement>('[data-bind-value="withdraw"]');
+      if (oc && document.activeElement !== oc) oc.value = r?.onContact ?? 'continue';
+      if (wd && document.activeElement !== wd) wd.value = String(r?.withdrawBelow ?? 0);
+    };
     const e = this.entity(id);
     const u = this.unit(id);
     if (e) {
@@ -1305,7 +1354,8 @@ class App {
       set('heading', fmtDeg(e.heading));
       set('speed', `${(e.speed * 3.6).toFixed(0)} km/h`);
       set('damage', e.damage === 'none' ? 'operational' : e.damage === 'destroyed' ? 'destroyed' : `${e.damage} kill`, `damage-${e.damage}`);
-      set('activity', [e.plan, e.task].filter(Boolean).join(' — ') || (e.damage === 'destroyed' ? 'destroyed' : 'idle'));
+      set('activity', [e.withdrawn ? 'WITHDRAWING' : '', e.halted ? 'HALTED (contact)' : '', e.plan, e.task].filter(Boolean).join(' — ') || (e.damage === 'destroyed' ? 'destroyed' : 'idle'));
+      syncReactions(e.reactions);
       if (roeSel && document.activeElement !== roeSel) roeSel.value = e.roe;
       const t = this.types.get(e.typeId);
       set(
@@ -1342,7 +1392,8 @@ class App {
       const alive = members.filter((m) => m.damage !== 'destroyed');
       set('strength', `${alive.length}/${members.length}`);
       set('leader', lead?.name ?? '—');
-      set('activity', [u.plan, u.task].filter(Boolean).join(' — ') || 'idle (in formation)');
+      set('activity', [u.withdrawn ? 'WITHDRAWING' : '', lead?.halted ? 'HALTED (contact)' : '', u.plan, u.task].filter(Boolean).join(' — ') || 'idle (in formation)');
+      syncReactions(u.reactions);
       if (roeSel && document.activeElement !== roeSel && lead) roeSel.value = lead.roe;
       set(
         'members',

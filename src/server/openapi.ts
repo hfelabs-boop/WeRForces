@@ -88,7 +88,7 @@ export function buildOpenApi(baseUrl: string): Schema {
         patch: op(
           'Entities',
           'Rename, reposition or set ROE',
-          { parameters: [idParam()], ...body({ type: 'object', properties: { name: { type: 'string' }, roe: ref('Roe'), position: ref('Position'), heading: { type: 'number' } } }) },
+          { parameters: [idParam()], ...body({ type: 'object', properties: { name: { type: 'string' }, roe: ref('Roe'), position: ref('Position'), heading: { type: 'number' }, reactions: ref('Reactions') } }) },
           ok(ref('Entity')),
         ),
         delete: { tags: ['Entities'], summary: 'Delete an entity', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } },
@@ -104,7 +104,7 @@ export function buildOpenApi(baseUrl: string): Schema {
       },
       '/api/v1/units/{id}': {
         get: op('Units', 'Get a unit with its members', { parameters: [idParam()] }),
-        patch: op('Units', 'Rename, set formation or ROE', { parameters: [idParam()], ...body({ type: 'object', properties: { name: { type: 'string' }, formation: ref('Formation'), roe: ref('Roe') } }) }),
+        patch: op('Units', 'Rename, set formation, ROE or reactions', { parameters: [idParam()], ...body({ type: 'object', properties: { name: { type: 'string' }, formation: ref('Formation'), roe: ref('Roe'), reactions: ref('Reactions') } }) }),
         delete: { tags: ['Units'], summary: 'Delete a unit and its members', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } },
       },
       ...taskable('units', 'Units'),
@@ -193,7 +193,7 @@ export function buildOpenApi(baseUrl: string): Schema {
         Task: {
           oneOf: [
             { type: 'object', required: ['type', 'target'], properties: { type: { const: 'moveTo' }, target: ref('Position'), speed: { type: 'number', description: 'm/s' } } },
-            { type: 'object', required: ['type', 'routeId'], properties: { type: { const: 'followRoute' }, routeId: { type: 'string' }, speed: { type: 'number' }, reverse: { type: 'boolean' } } },
+            { type: 'object', required: ['type', 'routeId'], properties: { type: { const: 'followRoute' }, routeId: { type: 'string' }, speed: { type: 'number' }, reverse: { type: 'boolean' }, startIndex: { type: 'integer' } } },
             { type: 'object', required: ['type', 'routeId'], properties: { type: { const: 'patrol' }, routeId: { type: 'string' }, speed: { type: 'number' } } },
             { type: 'object', required: ['type', 'duration'], properties: { type: { const: 'wait' }, duration: { type: 'number' } } },
             { type: 'object', required: ['type', 'targetId'], properties: { type: { const: 'follow' }, targetId: { type: 'string' }, distance: { type: 'number' } } },
@@ -208,6 +208,7 @@ export function buildOpenApi(baseUrl: string): Schema {
             { type: 'object', required: ['kind', 'speed'], properties: { kind: { const: 'setSpeed' }, speed: { type: 'number' } } },
             { type: 'object', required: ['kind', 'altitude'], properties: { kind: { const: 'setAltitude' }, altitude: { type: 'number' } } },
             { type: 'object', required: ['kind', 'formation'], properties: { kind: { const: 'setFormation' }, formation: ref('Formation') } },
+            { type: 'object', required: ['kind', 'reactions'], properties: { kind: { const: 'setReactions' }, reactions: ref('Reactions') } },
             {
               type: 'object',
               required: ['kind', 'condition'],
@@ -215,11 +216,25 @@ export function buildOpenApi(baseUrl: string): Schema {
                 kind: { const: 'waitUntil' },
                 condition: {
                   type: 'object',
-                  properties: { type: { enum: ['simTime', 'inArea', 'enemyDetected', 'underFire', 'entityDestroyed'] }, time: { type: 'number' }, areaId: { type: 'string' }, entityId: { type: 'string' } },
+                  properties: {
+                    type: { enum: ['simTime', 'inArea', 'enemyInArea', 'enemyDetected', 'underFire', 'strengthBelow', 'entityDestroyed'] },
+                    time: { type: 'number' },
+                    areaId: { type: 'string' },
+                    entityId: { type: 'string' },
+                    fraction: { type: 'number', minimum: 0, maximum: 1 },
+                  },
                 },
               },
             },
           ],
+        },
+        Reactions: {
+          type: 'object',
+          properties: {
+            onContact: { enum: ['continue', 'halt'], description: 'halt: stop and fight while a hostile is within weapon range, then resume' },
+            withdrawBelow: { type: 'number', minimum: 0, maximum: 1, description: 'units: fall back when strength drops below this fraction; entities: when weapons are knocked out' },
+            withdrawTo: ref('Position'),
+          },
         },
         Plan: { type: 'object', required: ['statements'], properties: { name: { type: 'string' }, loop: { type: 'boolean' }, statements: { type: 'array', items: ref('PlanStatement') } } },
         CreateEntity: {

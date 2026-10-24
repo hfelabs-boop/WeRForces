@@ -52,7 +52,15 @@ export function describeStatement(st: PlanStatement, engine?: Engine): string {
       return `Set formation ${st.formation}`;
     case 'waitUntil':
       return `Wait until ${describeCondition(st.condition, engine)}`;
+    case 'setReactions':
+      return `Set reactions: ${describeReactions(st.reactions)}`;
   }
+}
+
+export function describeReactions(r: { onContact?: string; withdrawBelow?: number }): string {
+  const parts = [`on contact ${r.onContact ?? 'continue'}`];
+  if (r.withdrawBelow !== undefined && r.withdrawBelow > 0) parts.push(`withdraw below ${Math.round(r.withdrawBelow * 100)}%`);
+  return parts.join(', ');
 }
 
 export function describeCondition(c: Condition, engine?: Engine): string {
@@ -67,6 +75,10 @@ export function describeCondition(c: Condition, engine?: Engine): string {
       return 'under fire';
     case 'entityDestroyed':
       return `${engine?.entities.get(c.entityId)?.name ?? c.entityId} destroyed`;
+    case 'enemyInArea':
+      return `enemy in ${engine?.graphics.get(c.areaId)?.name ?? c.areaId}`;
+    case 'strengthBelow':
+      return `strength below ${Math.round(c.fraction * 100)}%`;
   }
 }
 
@@ -90,6 +102,20 @@ export function evaluateCondition(c: Condition, engine: Engine, owner: Taskable)
       const e = engine.entities.get(c.entityId);
       return !e || e.destroyed;
     }
+    case 'enemyInArea': {
+      const area = engine.graphics.get(c.areaId);
+      const force = owner.members()[0]?.force;
+      if (!area || area.points.length < 3 || force === undefined) return false;
+      for (const e of engine.entities.values()) {
+        if (e.alive && !e.embarkedIn && engine.isHostile(force, e.force) && pointInPolygon(e, area.points)) return true;
+      }
+      return false;
+    }
+    case 'strengthBelow': {
+      const members = owner.members();
+      if (members.length === 0) return false;
+      return members.filter((m) => m.alive).length / members.length < c.fraction;
+    }
   }
 }
 
@@ -97,8 +123,23 @@ export class PlanExecutor {
   index = 0;
   finished = false;
   private taskActive = false;
+  /** Task spec to use instead of the statement's when resuming from a checkpoint. */
+  private resumeTask?: TaskSpec;
 
   constructor(readonly plan: Plan) {}
+
+  /** Continue at a statement, optionally resuming its task part-way (checkpoints). */
+  resume(index: number, taskState?: TaskSpec): void {
+    this.index = Math.max(0, Math.min(index, this.plan.statements.length));
+    this.resumeTask = taskState;
+    // A plan that had already completed stays completed.
+    if (this.index >= this.plan.statements.length && !this.plan.loop) this.finished = true;
+  }
+
+  /** The statement in progress, if it is a task statement that has started. */
+  get activeTask(): boolean {
+    return this.taskActive;
+  }
 
   /** Advance through the plan. Executes any number of instant statements per tick. */
   update(engine: Engine, owner: Taskable): void {
@@ -115,7 +156,8 @@ export class PlanExecutor {
       const st = this.plan.statements[this.index];
       if (st.kind === 'task') {
         if (!this.taskActive) {
-          owner.startTask(engine, st.task);
+          owner.startTask(engine, this.resumeTask ?? st.task);
+          this.resumeTask = undefined;
           this.taskActive = true;
           return;
         }

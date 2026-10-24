@@ -332,7 +332,8 @@ export function createMcpServer(call: ApiCaller): McpServer {
     'Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: ' +
       '{kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), ' +
       '{kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, ' +
-      '{kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"entityDestroyed",entityId}}.',
+      '{kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1}}, ' +
+      '{kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"entityDestroyed",entityId}}.',
     {
       targetId: z.string(),
       name: z.string().optional(),
@@ -365,6 +366,23 @@ export function createMcpServer(call: ApiCaller): McpServer {
       const kind = targetId.startsWith('U') ? 'units' : 'entities';
       await api('PATCH', `/api/v1/${kind}/${encodeURIComponent(targetId)}`, { roe: value });
       return `${targetId} ROE = ${value}`;
+    },
+    { idempotentHint: true },
+  );
+
+  tool(
+    'set_reactions',
+    'Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out.',
+    {
+      targetId: z.string(),
+      onContact: z.enum(['continue', 'halt']).optional(),
+      withdrawBelow: z.number().min(0).max(1).optional(),
+      withdrawTo: position.optional(),
+    },
+    async ({ targetId, ...reactions }) => {
+      const kind = targetId.startsWith('U') ? 'units' : 'entities';
+      const r = await api<{ name: string; reactions?: unknown }>('PATCH', `/api/v1/${kind}/${encodeURIComponent(targetId)}`, { reactions });
+      return { name: r.name, reactions: r.reactions ?? {} };
     },
     { idempotentHint: true },
   );
