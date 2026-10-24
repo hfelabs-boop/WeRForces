@@ -5,6 +5,14 @@ import { explainEntity } from '../src/sim/explain.js';
 import { sizeFactor } from '../src/sim/sensors.js';
 import { Terrain } from '../src/sim/terrain.js';
 import { SwarmAttackTask } from '../src/sim/unmannedTasks.js';
+import { ApiV1 } from '../src/server/apiV1.js';
+import { executeCommand } from '../src/server/commands.js';
+import { checkCommand, filterState } from '../src/server/fog.js';
+import { SimRunner } from '../src/server/runner.js';
+import { createMcpServer } from '../src/mcp/tools.js';
+import { generateBattle } from '../src/sim/wizard.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 const base = Terrain.generate({ size: 6000, seed: 9, towns: 2 });
 const cols = 241;
@@ -402,5 +410,88 @@ describe('unmanned systems: spotting, orders and saving', () => {
     resumed.forEach((x, i) => expect(Math.hypot(x.x - straight[i].x, x.y - straight[i].y, x.z - straight[i].z)).toBeLessThan(3));
     expect(straight.some((x) => x.expended)).toBe(true);
     expect(straight.some((x) => x.link?.reason === 'jammed' && x.agl < 2)).toBe(true);
+  });
+});
+
+describe('unmanned systems: interfaces', () => {
+  it('REST, typed orders and MCP give drone tasks and control settings; players see no enemy link', async () => {
+    const eng = engine();
+    const runner = new SimRunner(eng, 0.1, 20, 0);
+    const api = new ApiV1({ runner, integrations: {} as never, scenarioDir: '/tmp' });
+    const call = async (method: string, path: string, body?: unknown) => {
+      const [p, q] = path.split('?');
+      const r = await api.dispatch({ method, path: p, query: new URLSearchParams(q ?? ''), body, baseUrl: '' });
+      return { status: r.status ?? 200, json: r.json as any };
+    };
+    const swarm = eng.createUnitFromTemplate('us-drone-swarm', 1, 3000, 2000);
+    swarm.name = 'Hornets';
+    const sb = eng.createUnitFromTemplate('us-switchblade-section', 1, 5000, 2000);
+    sb.name = 'Blades';
+    const area = eng.addGraphic('area', [{ x: 2000, y: 6000 }, { x: 6000, y: 6000 }, { x: 6000, y: 8000 }, { x: 2000, y: 8000 }], 'NAI DRONE', 1);
+    const t72 = eng.createEntity({ typeId: 'ru-t72b3', force: 2, x: 4000, y: 7000 });
+    eng.runFor(1);
+    // REST tasks.
+    let r = await call('POST', `/api/v1/units/${swarm.id}/task`, { type: 'swarmSearch', areaId: area.id, attack: true, prefer: ['armored', 'any'] });
+    expect(r.status).toBe(200);
+    expect(swarm.alive().every((m) => m.task?.spec.type === 'swarmSearch')).toBe(true);
+    expect((await call('POST', `/api/v1/units/${swarm.id}/task`, { type: 'swarmAttack', targetIds: 'E1' })).status).toBe(400);
+    expect((await call('POST', `/api/v1/units/${swarm.id}/task`, { type: 'loiter', center: { x: 4000, y: 7000 }, radius: 10 })).status).toBe(400);
+    r = await call('POST', `/api/v1/entities/${sb.leader!.id}/task`, { type: 'strike', targetId: t72.id });
+    expect(r.json.task).toMatch(/^Strike T-72B3/);
+    // Control settings.
+    r = await call('PATCH', `/api/v1/entities/${sb.leader!.id}`, { lostLink: 'land', autonomy: 'autonomous' });
+    expect(r.json.link).toMatchObject({ up: true, lostLink: 'land', autonomy: 'autonomous' });
+    expect((await call('PATCH', `/api/v1/entities/${sb.leader!.id}`, { lostLink: 'fly away' })).status).toBe(400);
+    expect((await call('PATCH', `/api/v1/entities/${t72.id}`, { autonomy: 'remote' })).status).toBe(400);
+    r = await call('PATCH', `/api/v1/units/${sb.id}`, { controllerId: null });
+    expect(sb.memberList.every((m) => m.uxs!.controllerId === undefined)).toBe(true);
+    // Typed orders.
+    r = await call('POST', '/api/v1/orders', { text: 'Blades loiter over NAI DRONE and attack', dryRun: true });
+    expect(r.json.commands[0].task).toEqual({ type: 'loiter', areaId: area.id, attack: true });
+    r = await call('POST', '/api/v1/orders', { text: 'Hornets swarm attack NAI DRONE', dryRun: true });
+    expect(r.json.commands[0].task).toEqual({ type: 'swarmAttack', areaId: area.id });
+    r = await call('POST', '/api/v1/orders', { text: 'Hornets swarm search NAI DRONE and attack', dryRun: true });
+    expect(r.json.commands[0].task).toEqual({ type: 'swarmSearch', areaId: area.id, attack: true });
+    r = await call('POST', '/api/v1/orders', { text: `Blades strike ${t72.id}` });
+    expect(r.status).toBe(200);
+    expect(sb.alive().every((m) => m.task?.spec.type === 'strike')).toBe(true);
+    // MCP.
+    const server = createMcpServer(async (method, path, body) => call(method, path, body));
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(a);
+    const client = new Client({ name: 'test', version: '1' });
+    await client.connect(b);
+    let res = (await client.callTool({ name: 'assign_task', arguments: { targetId: swarm.id, type: 'swarmAttack', targetIds: [t72.id] } })) as { content: { text: string }[]; isError?: boolean };
+    expect(res.isError).toBeFalsy();
+    expect(swarm.alive().every((m) => m.task?.spec.type === 'swarmAttack')).toBe(true);
+    res = (await client.callTool({ name: 'set_drone_control', arguments: { id: swarm.id, lostLink: 'return' } })) as { content: { text: string }[]; isError?: boolean };
+    expect(res.content[0].text).toMatch(/lost link: return/);
+    await client.close();
+    // Fog of war: Red sees a contact, not its link; Red cannot set Blue's drones.
+    const red = filterState(eng, eng.snapshot(), 2);
+    for (const e of red.entities.filter((x) => x.force === 1)) expect(e.link).toBeUndefined();
+    expect(() => checkCommand(eng, { kind: 'player', force: 2 }, { cmd: 'setUnmanned', id: swarm.id, autonomy: 'remote' })).toThrow(/not under your command/);
+    // Undoable like any edit.
+    expect(executeCommand(runner, { cmd: 'setUnmanned', id: sb.id, autonomy: 'remote' }).ok).toBe(true);
+    expect(eng.units.get(sb.id)!.memberList[1].uxs!.autonomy).toBe('remote');
+    expect(executeCommand(runner, { cmd: 'undo' }).ok).toBe(true);
+    expect(eng.units.get(sb.id)!.memberList[1].uxs!.autonomy).toBeUndefined();
+    // Save and load keep the settings.
+    const copy = engine();
+    copy.loadScenario(JSON.parse(JSON.stringify(eng.toScenario())));
+    expect(copy.entities.get(swarm.leader!.id)!.uxs!.lostLink).toBe('return');
+  });
+
+  it('a quick battle with drones gives each side recon UAVs and loitering munitions with their operators', () => {
+    const eng = new Engine({ terrain: Terrain.generate({ size: 10000, seed: 5, towns: 3 }) });
+    const res = generateBattle(eng, { seed: 4, mission: 'attack', blue: { support: ['drones', 'artillery'] }, red: { support: ['drones'] } });
+    expect(res.description).toMatch(/with drones/);
+    const types = [...eng.entities.values()].map((e) => e.type.id);
+    for (const t of ['us-raven', 'us-switchblade600', 'us-uas-operator', 'ru-orlan10', 'ru-lancet3', 'ru-uas-operator']) expect(types).toContain(t);
+    expect(eng.sync.get(1)!.phases[0].orders.some((o) => o.task?.type === 'loiter')).toBe(true);
+    eng.runFor(2);
+    const drones = [...eng.entities.values()].filter((e) => e.uxs);
+    expect(drones.filter((e) => e.uxs!.up).length).toBeGreaterThan(drones.length / 2);
+    expect(drones.filter((e) => e.type.id === 'ru-lancet3').every((e) => e.task?.spec.type === 'loiter')).toBe(true);
   });
 });

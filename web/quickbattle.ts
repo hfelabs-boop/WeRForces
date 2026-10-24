@@ -33,6 +33,7 @@ const NAMES: Record<string, string> = {
   supply: 'Supply',
   air: 'Attack helicopters',
   airDefense: 'Air defence',
+  drones: 'Drones',
   clear: 'Clear',
   haze: 'Haze',
   fog: 'Fog',

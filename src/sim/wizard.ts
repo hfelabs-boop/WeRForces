@@ -14,14 +14,14 @@ export class WizardError extends Error {}
 export type Mission = 'meeting' | 'attack' | 'defend' | 'delay' | 'recon';
 export type Composition = 'armor' | 'mech' | 'infantry' | 'combined';
 export type ForceSize = 'platoon' | 'company';
-export type Support = 'artillery' | 'recon' | 'engineers' | 'supply' | 'air' | 'airDefense';
+export type Support = 'artillery' | 'recon' | 'engineers' | 'supply' | 'air' | 'airDefense' | 'drones';
 export type Nation = 'us' | 'ru';
 export type Weather = 'clear' | 'haze' | 'fog' | 'rain';
 
 export const MISSIONS: Mission[] = ['meeting', 'attack', 'defend', 'delay', 'recon'];
 export const COMPOSITIONS: Composition[] = ['armor', 'mech', 'infantry', 'combined'];
 export const SIZES: ForceSize[] = ['platoon', 'company'];
-export const SUPPORTS: Support[] = ['artillery', 'recon', 'engineers', 'supply', 'air', 'airDefense'];
+export const SUPPORTS: Support[] = ['artillery', 'recon', 'engineers', 'supply', 'air', 'airDefense', 'drones'];
 export const WEATHERS: Weather[] = ['clear', 'haze', 'fog', 'rain'];
 
 export const MISSION_TEXT: Record<Mission, string> = {
@@ -80,6 +80,8 @@ interface SideKit {
   supply: string;
   air: { template?: string; type?: string };
   airDefense: string;
+  /** Drones: a recon UAV team (spots for the guns) and loitering munitions (hunt armour), each with its operators. */
+  drones: { recon: string; strike: string };
 }
 
 const KITS: Record<Nation, SideKit> = {
@@ -95,6 +97,7 @@ const KITS: Record<Nation, SideKit> = {
     supply: 'us-supply-section',
     air: { template: 'us-attack-team' },
     airDefense: 'us-stinger-team',
+    drones: { recon: 'us-raven-team', strike: 'us-switchblade-section' },
   },
   ru: {
     armor: 'ru-tank-platoon',
@@ -108,6 +111,7 @@ const KITS: Record<Nation, SideKit> = {
     supply: 'ru-supply-section',
     air: { type: 'ru-mi24' },
     airDefense: 'ru-sa8',
+    drones: { recon: 'ru-orlan-team', strike: 'ru-lancet-section' },
   },
 };
 
@@ -399,6 +403,32 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
       const p = at(700, 250);
       engine.createEntity({ typeId: k.airDefense, force, x: p.x, y: p.y, heading });
     }
+    if (s.support.includes('drones')) {
+      // The recon UAV circles the objective (and calls for fire on what it sees); the
+      // loitering munitions hunt over it, or in front of it when defending.
+      const recon = build({ template: k.drones.recon }, force, at(900, -300), heading);
+      const strike = build({ template: k.drones.strike }, force, at(900, 300), heading);
+      // Operators take the high ground nearby, to see their drones over the hills.
+      for (const u of [recon, strike]) {
+        const op = engine.entities.get(u.memberList[0].uxs?.controllerId ?? '');
+        if (!op) continue;
+        let best = { x: op.x, y: op.y, z: engine.terrain.elevation(op.x, op.y) };
+        for (let dx = -800; dx <= 800; dx += 100) {
+          for (let dy = -800; dy <= 800; dy += 100) {
+            const p = { x: clamp(op.x + dx, margin, S - margin), y: clamp(op.y + dy, margin, S - margin) };
+            const z = engine.terrain.elevation(p.x, p.y);
+            if (z > best.z && Math.hypot(dx, dy) <= 800 && engine.canStand(op.domain, p)) best = { ...p, z };
+          }
+        }
+        op.x = best.x;
+        op.y = best.y;
+        op.z = best.z;
+      }
+      const ahead = force === 1 ? 1 : -1;
+      const ea = engine.addGraphic('area', ring(attacking ? objective : along(objective, ahead * Math.min(1500, D * 0.4)), 900, 8), 'EA DRONES', force);
+      extra.push(order(recon, { type: 'orbit', center: objective, radius: 900 }));
+      extra.push(order(strike, { type: 'loiter', areaId: ea.id, attack: true, prefer: ['armored', 'artillery', 'air-defense', 'any'] }));
+    }
     // Support gets its orders in a phase of its own first: scouts watching or helicopters
     // holding never finish, and must not hold up a phase that waits for the one before.
     if (extra.length) phases[force].unshift({ id: 'P0', name: 'Deploy', trigger: { type: 'time', time: 0 }, orders: extra });
@@ -433,7 +463,7 @@ function echelonName(engine: Engine, template: string): string {
 }
 
 function supportName(s: Support): string {
-  return { artillery: 'artillery', recon: 'scouts', engineers: 'engineers', supply: 'supply', air: 'attack helicopters', airDefense: 'air defence' }[s];
+  return { artillery: 'artillery', recon: 'scouts', engineers: 'engineers', supply: 'supply', air: 'attack helicopters', airDefense: 'air defence', drones: 'drones' }[s];
 }
 
 function missionTitle(m: Mission): string {

@@ -182,6 +182,7 @@ const PLAYER_COMMANDS = new Set<Command['cmd']>([
   'setSyncMatrix',
   'startPhase',
   'setJamming',
+  'setUnmanned',
   'drive',
   'batch',
   'aggregate',
@@ -217,7 +218,9 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
   };
   const task = (t: TaskSpec | undefined) => {
     if (!t || typeof t !== 'object') return;
-    if (t.type === 'attack' || t.type === 'follow') visible(t.targetId);
+    if (t.type === 'attack' || t.type === 'follow' || t.type === 'strike') visible(t.targetId);
+    if (t.type === 'swarmAttack') for (const id of Array.isArray(t.targetIds) ? t.targetIds : []) visible(id);
+    if ((t.type === 'loiter' || t.type === 'swarmSearch' || t.type === 'swarmAttack') && t.areaId) graphicOk(t.areaId);
     if (t.type === 'mount') ownObject(t.carrierId, 'carrier');
     if (t.type === 'followRoute' || t.type === 'patrol') graphicOk(t.routeId);
     if (t.type === 'formation') ownObject(t.leaderId, 'leader');
@@ -261,6 +264,10 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
     case 'drive':
       ownObject(c.id, 'object');
       if (c.targetId) visible(c.targetId);
+      return;
+    case 'setUnmanned':
+      ownObject(c.id, 'object');
+      if (c.controllerId) ownObject(c.controllerId, 'operator');
       return;
     case 'setJamming':
     case 'rename':

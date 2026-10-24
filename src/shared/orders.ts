@@ -88,6 +88,8 @@ const VERBS: [string, string][] = [
   ['hold fire', 'holdFire'],
   ['weapons hold', 'holdFire'],
   ['follow route', 'followRoute'],
+  ['swarm search', 'swarmSearch'],
+  ['swarm attack', 'swarmAttack'],
   ['fire mission', 'fire'],
   ['move to', 'move'],
   ['go to', 'move'],
@@ -107,6 +109,8 @@ const VERBS: [string, string][] = [
   ['fire', 'fire'],
   ['smoke', 'smoke'],
   ['orbit', 'orbit'],
+  ['strike', 'strike'],
+  ['loiter', 'loiter'],
   ['mount', 'mount'],
   ['board', 'mount'],
   ['dismount', 'dismount'],
@@ -423,6 +427,50 @@ export function parseOrder(text: string, ctx: OrderContext): ParsedOrder {
       what = `attack ${t.name}`;
       break;
     }
+    case 'strike': {
+      const t = r.needObject('Strike', ctx.visible.filter((o) => !ids.includes(o.id)));
+      const aim = t.kind === 'unit' ? t.leaderId : t.id;
+      if (!aim) throw new OrderError(`Strike: ${t.name} has nobody left to strike`);
+      commands = each({ type: 'strike', targetId: aim });
+      what = `strike ${t.name}`;
+      break;
+    }
+    case 'loiter':
+    case 'swarmSearch': {
+      const label = v.verb === 'loiter' ? 'Loiter' : 'Swarm search';
+      r.accept('over') || r.accept('above');
+      const p = r.needPlace(label);
+      let radius: number | undefined;
+      if (r.accept('radius')) radius = r.distance() ?? undefined;
+      const attack = r.accept('and', 'attack') || r.accept('and', 'strike');
+      const area = p.graphic?.kind === 'area' ? p.graphic : undefined;
+      if (v.verb === 'swarmSearch' && !area) throw new OrderError('Swarm search: give the name of an area');
+      const task: TaskSpec =
+        v.verb === 'swarmSearch'
+          ? { type: 'swarmSearch', areaId: area!.id, ...(attack ? { attack: true } : {}) }
+          : { type: 'loiter', ...(area ? { areaId: area.id } : { center: p.at, radius: radius ?? 1000 }), ...(attack ? { attack: true } : {}) };
+      commands = each(task);
+      what = `${v.verb === 'loiter' ? 'loiter over' : 'swarm search'} ${p.label}${attack ? ' and attack' : ''}`;
+      break;
+    }
+    case 'swarmAttack': {
+      r.accept('in') || r.accept('on');
+      const save = r.i;
+      const zone = matchName(r.rest(), ctx.graphics.filter((g) => g.kind === 'area'));
+      if (zone && 'item' in zone) {
+        r.i += zone.used;
+        commands = each({ type: 'swarmAttack', areaId: zone.item.id });
+        what = `swarm attack in ${zone.item.name}`;
+        break;
+      }
+      r.i = save;
+      const t = r.needObject('Swarm attack', ctx.visible.filter((o) => !ids.includes(o.id)));
+      const aim = t.kind === 'unit' ? t.leaderId : t.id;
+      if (!aim) throw new OrderError(`Swarm attack: ${t.name} has nobody left to attack`);
+      commands = each({ type: 'swarmAttack', targetIds: [aim] });
+      what = `swarm attack ${t.name}`;
+      break;
+    }
     case 'follow': {
       const t = r.needObject('Follow', ctx.visible.filter((o) => !ids.includes(o.id)));
       commands = each({ type: 'follow', targetId: t.id });
@@ -595,8 +643,16 @@ export function completeOrder(text: string, ctx: OrderContext, max = 8): Complet
       else offer(['covered', 'fast', 'slowly', 'at', ...places]);
       break;
     case 'attack':
+    case 'strike':
     case 'follow':
       offer(ctx.visible.filter((o) => !who.targets.includes(o)).map((o) => o.name));
+      break;
+    case 'loiter':
+    case 'swarmSearch':
+      offer(after === 0 ? ['over', ...ctx.graphics.filter((g) => g.kind === 'area').map((g) => g.name)] : ['and attack', ...ctx.graphics.filter((g) => g.kind === 'area').map((g) => g.name)]);
+      break;
+    case 'swarmAttack':
+      offer([...ctx.graphics.filter((g) => g.kind === 'area').map((g) => g.name), ...ctx.visible.filter((o) => !who.targets.includes(o)).map((o) => o.name)]);
       break;
     case 'mount':
     case 'resupply':

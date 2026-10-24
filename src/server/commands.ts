@@ -1,6 +1,6 @@
 // Remote-control command dispatcher shared by the REST and WebSocket APIs.
 
-import type { AggregationPolicy, Command, CommandResult, Condition, Environment, ForceId, Formation, Phase, PhaseOrder, PhaseTrigger, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
+import type { AggregationPolicy, Autonomy, Command, CommandResult, Condition, Environment, ForceId, Formation, LostLinkBehaviour, Phase, PhaseOrder, PhaseTrigger, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
 import { FORCE_NAMES } from '../shared/types.js';
 import type { Engine } from '../sim/engine.js';
 import { MAX_AMBIENT } from '../sim/life.js';
@@ -11,6 +11,8 @@ import type { SimRunner } from './runner.js';
 const FORCES = new Set([0, 1, 2, 3]);
 const ROES = new Set<Roe>(['holdFire', 'returnFire', 'fireAtWill']);
 const FORMATIONS = new Set<Formation>(['column', 'line', 'wedge', 'vee', 'echelonRight']);
+const LOST_LINK = new Set<LostLinkBehaviour>(['hover', 'return', 'continue', 'land']);
+const AUTONOMY = new Set<Autonomy>(['remote', 'supervised', 'autonomous']);
 
 class ValidationError extends Error {}
 
@@ -121,9 +123,48 @@ export function validateTask(v: unknown): TaskSpec {
       if (spacing !== undefined && (spacing < 20 || spacing > 10000)) throw new ValidationError('spacing must be between 20 and 10000 m');
       return { type: 'search', areaId: str(t.areaId, 'areaId'), spacing, speed, startIndex: t.startIndex === undefined ? undefined : Math.max(0, Math.floor(num(t.startIndex, 'startIndex'))) };
     }
+    case 'strike':
+      return { type: 'strike', targetId: str(t.targetId, 'targetId') };
+    case 'loiter':
+    case 'swarmSearch':
+    case 'swarmAttack':
+      return validateDroneTask(t);
     default:
       throw new ValidationError(`unknown task type ${String(t.type)}`);
   }
+}
+
+const int = (v: unknown, what: string) => (v === undefined ? undefined : Math.max(0, Math.floor(num(v, what))));
+
+/** Target preferences: up to 10 names of armour classes, symbols, domains or type ids, or 'any'. */
+function prefer(v: unknown): string[] | undefined {
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v) || v.length > 10) throw new ValidationError('prefer must be a list of at most 10 kinds');
+  return v.map((x, i) => {
+    const s = str(x, `prefer[${i}]`);
+    if (!/^[a-z0-9-]{2,48}$/.test(s)) throw new ValidationError(`prefer[${i}]: an armour class, symbol, domain or type id (e.g. armored, artillery, any)`);
+    return s;
+  });
+}
+
+/** Loiter and swarm tasks. */
+function validateDroneTask(t: Record<string, unknown>): TaskSpec {
+  const opt = (k: string, min: number, max: number) => {
+    if (t[k] === undefined) return undefined;
+    const x = num(t[k], k);
+    if (x < min || x > max) throw new ValidationError(`${k} must be between ${min} and ${max}`);
+    return x;
+  };
+  const attack = t.attack === true || undefined;
+  const slots = { slot: int(t.slot, 'slot'), slots: t.slots === undefined ? undefined : Math.max(1, int(t.slots, 'slots')!), startIndex: int(t.startIndex, 'startIndex') };
+  if (t.type === 'loiter') {
+    const areaId = t.areaId === undefined ? undefined : str(t.areaId, 'areaId');
+    return { type: 'loiter', areaId, center: t.center === undefined ? undefined : vec(t.center, 'center'), radius: opt('radius', 50, 50000), duration: opt('duration', 0, 1e7), attack, prefer: prefer(t.prefer), ...slots };
+  }
+  if (t.type === 'swarmSearch') return { type: 'swarmSearch', areaId: str(t.areaId, 'areaId'), spacing: opt('spacing', 20, 10000), attack, prefer: prefer(t.prefer), ...slots };
+  if (t.targetIds !== undefined && (!Array.isArray(t.targetIds) || t.targetIds.length > 100)) throw new ValidationError('targetIds must be a list of at most 100 entity ids');
+  const targetIds = (t.targetIds as unknown[] | undefined)?.map((x, i) => str(x, `targetIds[${i}]`));
+  return { type: 'swarmAttack', targetIds, areaId: t.areaId === undefined ? undefined : str(t.areaId, 'areaId'), prefer: prefer(t.prefer), assignedId: t.assignedId === undefined ? undefined : str(t.assignedId, 'assignedId') };
 }
 
 function validateCondition(v: unknown): Condition {
@@ -538,6 +579,29 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         e.jamming = c.on;
         engine.log('info', `${e.name}: jamming ${c.on ? 'on' : 'off'}`, e.id);
         engine.ew.update();
+        return;
+      }
+      case 'setUnmanned': {
+        const id = str(c.id, 'id');
+        const unit = engine.units.get(id);
+        const e = engine.entities.get(id);
+        if (!unit && (!e || e.remote)) throw new ValidationError(`unknown entity or unit ${id}`);
+        const drones = unit ? unit.memberList.filter((m) => m.uxs) : e!.uxs ? [e!] : [];
+        if (!drones.length) throw new ValidationError(`${unit?.name ?? e!.name} is not an unmanned system`);
+        const change: { controllerId?: string | null; lostLink?: LostLinkBehaviour | null; autonomy?: Autonomy | null } = {};
+        if (c.controllerId !== undefined) change.controllerId = c.controllerId === null ? null : str(c.controllerId, 'controllerId');
+        if (c.lostLink !== undefined) {
+          if (c.lostLink !== null && !LOST_LINK.has(c.lostLink as LostLinkBehaviour)) throw new ValidationError('lostLink must be hover, return, continue, land or null');
+          change.lostLink = c.lostLink as LostLinkBehaviour | null;
+        }
+        if (c.autonomy !== undefined) {
+          if (c.autonomy !== null && !AUTONOMY.has(c.autonomy as Autonomy)) throw new ValidationError('autonomy must be remote, supervised, autonomous or null');
+          change.autonomy = c.autonomy as Autonomy | null;
+        }
+        if (!Object.keys(change).length) throw new ValidationError('give controllerId, lostLink or autonomy');
+        for (const d of drones) engine.unmanned.setControl(d, change);
+        // Show the new link at once.
+        engine.unmanned.update();
         return;
       }
       case 'setPatternOfLife': {

@@ -521,6 +521,7 @@ export class ApiV1 {
       if (b.roe !== undefined) this.run({ cmd: 'setRoe', targetId: id, roe: b.roe as never });
       if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
       if (b.jamming !== undefined) this.run({ cmd: 'setJamming', id, on: b.jamming as boolean });
+      if (b.controllerId !== undefined || b.lostLink !== undefined || b.autonomy !== undefined) this.run({ cmd: 'setUnmanned', id, controllerId: b.controllerId as string | null | undefined, lostLink: b.lostLink as never, autonomy: b.autonomy as never });
       if (b.position !== undefined || b.x !== undefined || b.lat !== undefined) {
         const p = this.point(b.position ?? b);
         this.run({ cmd: 'moveEntity', id, x: p.x, y: p.y, heading: b.heading as number | undefined });
@@ -626,6 +627,7 @@ export class ApiV1 {
       if (b.roe !== undefined) this.run({ cmd: 'setRoe', targetId: id, roe: b.roe as never });
       if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
       if (b.superiorId !== undefined) this.run({ cmd: 'setSuperior', unitId: id, superiorId: b.superiorId as string | null });
+      if (b.controllerId !== undefined || b.lostLink !== undefined || b.autonomy !== undefined) this.run({ cmd: 'setUnmanned', id, controllerId: b.controllerId as string | null | undefined, lostLink: b.lostLink as never, autonomy: b.autonomy as never });
       return { json: this.unitView(this.unit(id)) };
     });
     r.delete(`${P}/units/{id}`, (req) => {

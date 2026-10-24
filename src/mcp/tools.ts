@@ -36,7 +36,7 @@ const side = z.object({
   nation: z.enum(['us', 'ru']).optional().describe('default us for blue, ru for red'),
   composition: z.enum(['armor', 'mech', 'infantry', 'combined']).optional().describe('default mech; combined: tanks and mechanised infantry'),
   size: z.enum(['platoon', 'company']).optional().describe('default platoon; a company is three platoons and an HQ'),
-  support: z.array(z.enum(['artillery', 'recon', 'engineers', 'supply', 'air', 'airDefense'])).optional(),
+  support: z.array(z.enum(['artillery', 'recon', 'engineers', 'supply', 'air', 'airDefense', 'drones'])).optional().describe('drones: a recon UAV team that spots for the guns and loitering munitions that hunt armour, with their operators'),
 });
 
 function text(value: unknown) {
@@ -389,10 +389,10 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'assign_task',
-    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm (helicopters land beside it). Tactical tasks: overwatch/defend/screen need `to` (the position) and take `facing` (degrees) and `width` (units deploy in a line); ambush also needs `graphicId` (the kill zone area) and opens fire only when an enemy enters it; screen falls back before an enemy gets within reach of its direct fire (at least 1.5 km) or as soon as it comes under fire; search needs `graphicId` (an area) and sweeps it. Holding still, infantry dig in and vehicles go hull-down. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
+    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm (helicopters land beside it). Tactical tasks: overwatch/defend/screen need `to` (the position) and take `facing` (degrees) and `width` (units deploy in a line); ambush also needs `graphicId` (the kill zone area) and opens fire only when an enemy enters it; screen falls back before an enemy gets within reach of its direct fire (at least 1.5 km) or as soon as it comes under fire; search needs `graphicId` (an area) and sweeps it. Holding still, infantry dig in and vehicles go hull-down. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf). Unmanned systems: strike (one-way attack drones: FPV, loitering munitions) needs `targetEntityId` and flies into it; loiter takes `graphicId` (an area it sweeps again and again) or `to` and `radius` (a point it circles), with `attack` to strike the first suitable enemy found and `prefer` (what to go for, best first: armored, light, soft, lifeform, artillery, air-defense…, "any"); swarmSearch (a unit of drones) needs `graphicId` and shares the area out, with `attack` each strikes a different target; swarmAttack (a unit of drones) takes `targetIds` or `graphicId` (an area) and spreads its members over distinct targets.',
     {
       targetId: z.string().describe('entity (E..) or unit (U..) id'),
-      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission', 'mount', 'dismount', 'breach', 'resupply', 'overwatch', 'defend', 'screen', 'ambush', 'search']),
+      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission', 'mount', 'dismount', 'breach', 'resupply', 'overwatch', 'defend', 'screen', 'ambush', 'search', 'strike', 'loiter', 'swarmSearch', 'swarmAttack']),
       to: position.optional(),
       routeId: z.string().optional(),
       targetEntityId: z.string().optional(),
@@ -400,7 +400,10 @@ export function createMcpServer(call: ApiCaller): McpServer {
       radius: z.number().optional().describe('orbit radius in m (default 2000), or fire mission sheaf radius (default 0)'),
       rounds: z.number().int().min(1).max(100).optional().describe('fire mission rounds per tube (default 3)'),
       smoke: z.boolean().optional().describe('fire mission: smoke rounds instead of high explosive'),
-      graphicId: z.string().optional().describe('breach: the minefield or obstacle; ambush: the kill zone area; search: the area'),
+      graphicId: z.string().optional().describe('breach: the minefield or obstacle; ambush: the kill zone area; search, loiter, swarmSearch, swarmAttack: the area'),
+      attack: z.boolean().optional().describe('loiter, swarmSearch: attack suitable enemies found'),
+      prefer: z.array(z.string()).max(10).optional().describe('loiter, swarmSearch, swarmAttack: what to go for, best first (armour classes, symbols, type ids, "any")'),
+      targetIds: z.array(z.string()).max(100).optional().describe('swarmAttack: the targets to spread over'),
       facing: z.number().min(0).max(360).optional().describe('overwatch/defend/screen/ambush: direction to face, degrees from north'),
       width: z.number().optional().describe('defend/screen/ambush: frontage in m for a unit'),
       speedKmh: z.number().optional(),
@@ -431,6 +434,16 @@ export function createMcpServer(call: ApiCaller): McpServer {
             ? { type: 'ambush', position: need(a.to, 'to'), killZoneId: need(a.graphicId, 'graphicId'), facing: a.facing, width: a.width }
             : a.type === 'search'
             ? { type: 'search', areaId: need(a.graphicId, 'graphicId'), speed }
+            : a.type === 'strike'
+            ? { type: 'strike', targetId: need(a.targetEntityId, 'targetEntityId') }
+            : a.type === 'loiter'
+            ? a.graphicId
+              ? { type: 'loiter', areaId: a.graphicId, duration: a.duration, attack: a.attack, prefer: a.prefer }
+              : { type: 'loiter', center: a.to, radius: a.radius, duration: a.duration, attack: a.attack, prefer: a.prefer }
+            : a.type === 'swarmSearch'
+            ? { type: 'swarmSearch', areaId: need(a.graphicId, 'graphicId'), attack: a.attack, prefer: a.prefer }
+            : a.type === 'swarmAttack'
+            ? { type: 'swarmAttack', targetIds: a.targetIds, areaId: a.graphicId, prefer: a.prefer }
             : a.type === 'orbit'
             ? { type: 'orbit', center: need(a.to, 'to'), radius: a.radius ?? 2000, duration: a.duration }
             : a.type === 'followRoute' || a.type === 'patrol'
@@ -564,6 +577,28 @@ export function createMcpServer(call: ApiCaller): McpServer {
     async ({ id, on }) => {
       const e = await api<{ name: string; jamming?: boolean }>('PATCH', `/api/v1/entities/${encodeURIComponent(id)}`, { jamming: on });
       return `${e.name}: jamming ${e.jamming ? 'on' : 'off'}`;
+    },
+  );
+
+  tool(
+    'set_drone_control',
+    "Unmanned systems (an entity, or every drone of a unit): assign the operator it is flown from (`controllerId`, a drone operator team or control station of its force; null: any of its force's), what it does when its datalink is lost (`lostLink`: hover, return to its operator, continue its task, land; null: its type's) and how much it does without a link (`autonomy`: remote, supervised, autonomous; null: its type's). An entity's `link` shows whether its datalink is up and why not (jammed, out of range, no line of sight, no operator, fibre run out).",
+    {
+      id: z.string().describe('entity (E..) or unit (U..) id'),
+      controllerId: z.string().nullable().optional(),
+      lostLink: z.enum(['hover', 'return', 'continue', 'land']).nullable().optional(),
+      autonomy: z.enum(['remote', 'supervised', 'autonomous']).nullable().optional(),
+    },
+    async ({ id, controllerId, lostLink, autonomy }) => {
+      type Link = { up: boolean; reason?: string; autonomy: string; lostLink: string };
+      if (id.startsWith('U')) {
+        await api('PATCH', `/api/v1/units/${encodeURIComponent(id)}`, { controllerId, lostLink, autonomy });
+        const u = await api<{ name: string; members: { link?: Link }[] }>('GET', `/api/v1/units/${encodeURIComponent(id)}`);
+        const links = u.members.map((m) => m.link).filter((l): l is Link => !!l);
+        return `${u.name}: ${links.length} drones, datalink up for ${links.filter((l) => l.up).length}; ${links[0]?.autonomy ?? ''}, lost link: ${links[0]?.lostLink ?? ''}`;
+      }
+      const r = await api<{ name: string; link?: Link }>('PATCH', `/api/v1/entities/${encodeURIComponent(id)}`, { controllerId, lostLink, autonomy });
+      return r.link ? `${r.name}: datalink ${r.link.up ? 'up' : `lost (${r.link.reason})`}, ${r.link.autonomy}, lost link: ${r.link.lostLink}` : `${r.name}: updated`;
     },
   );
 

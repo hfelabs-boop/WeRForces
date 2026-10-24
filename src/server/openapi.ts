@@ -12,6 +12,13 @@ const errors = {
 };
 const idParam = (name = 'id') => ({ name, in: 'path', required: true, schema: { type: 'string' } });
 
+/** Unmanned systems' control settings, for PATCH on an entity (or every unmanned member of a unit). */
+const DRONE_CONTROL: Schema = {
+  controllerId: { type: ['string', 'null'], description: 'unmanned systems: the operator (control station entity) it is flown from; null: any of its force' },
+  lostLink: { enum: ['hover', 'return', 'continue', 'land', null], description: "unmanned systems: what it does without its datalink (null: its type's)" },
+  autonomy: { enum: ['remote', 'supervised', 'autonomous', null], description: "unmanned systems: what it does on its own without a link (null: its type's)" },
+};
+
 function op(tag: string, summary: string, extra: Schema = {}, response: Schema = ok({ type: 'object' })): Schema {
   return { tags: [tag], summary, responses: { '200': response, ...errors }, ...extra };
 }
@@ -201,8 +208,8 @@ export function buildOpenApi(baseUrl: string): Schema {
         get: op('Entities', 'Get an entity', { parameters: [idParam()] }, ok(ref('Entity'))),
         patch: op(
           'Entities',
-          'Rename, reposition or set ROE',
-          { parameters: [idParam()], ...body({ type: 'object', properties: { name: { type: 'string' }, roe: ref('Roe'), position: ref('Position'), heading: { type: 'number' }, reactions: ref('Reactions') } }) },
+          'Rename, reposition or set ROE; unmanned systems: operator, lost-link behaviour and autonomy',
+          { parameters: [idParam()], ...body({ type: 'object', properties: { name: { type: 'string' }, roe: ref('Roe'), position: ref('Position'), heading: { type: 'number' }, reactions: ref('Reactions'), ...DRONE_CONTROL } }) },
           ok(ref('Entity')),
         ),
         delete: { tags: ['Entities'], summary: 'Delete an entity', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } },
@@ -265,6 +272,7 @@ export function buildOpenApi(baseUrl: string): Schema {
               roe: ref('Roe'),
               reactions: ref('Reactions'),
               superiorId: { type: ['string', 'null'], description: 'superior unit in the chain of command (null: independent). Orders to the superior pass down to it.' },
+              ...DRONE_CONTROL,
             },
           }),
         }),
@@ -367,7 +375,7 @@ export function buildOpenApi(baseUrl: string): Schema {
             nation: { type: 'string', enum: ['us', 'ru'], description: 'default us for blue, ru for red' },
             composition: { type: 'string', enum: ['armor', 'mech', 'infantry', 'combined'], description: 'default mech; combined is tanks with mechanised infantry' },
             size: { type: 'string', enum: ['platoon', 'company'], description: 'a company is three platoons and an HQ (default platoon)' },
-            support: { type: 'array', items: { type: 'string', enum: ['artillery', 'recon', 'engineers', 'supply', 'air', 'airDefense'] }, description: 'artillery: mortars with a platoon, howitzers with a company; engineers: a minefield in front of a defence, or sappers with an attack' },
+            support: { type: 'array', items: { type: 'string', enum: ['artillery', 'recon', 'engineers', 'supply', 'air', 'airDefense', 'drones'] }, description: 'artillery: mortars with a platoon, howitzers with a company; engineers: a minefield in front of a defence, or sappers with an attack; drones: a recon UAV that spots for the guns and loitering munitions that hunt armour' },
           },
         },
         Error: { type: 'object', properties: { error: { type: 'object', properties: { status: { type: 'integer' }, message: { type: 'string' } } } } },
@@ -444,6 +452,31 @@ export function buildOpenApi(baseUrl: string): Schema {
               required: ['type', 'areaId'],
               description: "Sweep an area in parallel tracks spaced to the searcher's sensor range (or `spacing` m), then report what was found.",
               properties: { type: { const: 'search' }, areaId: { type: 'string' }, spacing: { type: 'number' }, speed: { type: 'number' } },
+            },
+            {
+              type: 'object',
+              required: ['type', 'targetId'],
+              description: 'One-way attack drones (FPV, loitering munitions): fly into the target and detonate the warhead (armour by aspect applies; loitering munitions attack the top). `attack` does the same for them.',
+              properties: { type: { const: 'strike' }, targetId: { type: 'string' } },
+            },
+            {
+              type: 'object',
+              required: ['type'],
+              description:
+                'Unmanned: loiter over the `areaId` area (sweeping it again and again) or round `center` at `radius` m (default 1000; default centre: where it is), for `duration` s or until out of endurance. With `attack`, strike (or engage) the first suitable enemy found; `prefer` lists what to go for, best first: armour classes (armored, light, soft, lifeform), symbols (artillery, air-defense…), domains or type ids, and "any" for anything else (lesser kinds only after a full sweep). On a unit the members spread out over it.',
+              properties: { type: { const: 'loiter' }, areaId: { type: 'string' }, center: ref('Position'), radius: { type: 'number' }, duration: { type: 'number' }, attack: { type: 'boolean' }, prefer: { type: 'array', items: { type: 'string' } } },
+            },
+            {
+              type: 'object',
+              required: ['type', 'areaId'],
+              description: 'Swarm (a unit of drones): the members share the area out and each sweeps its share; with `attack`, each strikes a different target it finds (`prefer` as for loiter).',
+              properties: { type: { const: 'swarmSearch' }, areaId: { type: 'string' }, spacing: { type: 'number' }, attack: { type: 'boolean' }, prefer: { type: 'array', items: { type: 'string' } } },
+            },
+            {
+              type: 'object',
+              required: ['type'],
+              description: 'Swarm (a unit of drones): spread the members over the targets (`targetIds`, or the enemies the unit knows of in `areaId`, preferred kinds first) so each gets one before any gets two; members whose target goes down take another. With an area and nothing found yet, they wait over it.',
+              properties: { type: { const: 'swarmAttack' }, targetIds: { type: 'array', items: { type: 'string' } }, areaId: { type: 'string' }, prefer: { type: 'array', items: { type: 'string' } } },
             },
           ],
         },
@@ -538,6 +571,22 @@ export function buildOpenApi(baseUrl: string): Schema {
             unitId: { type: 'string' },
             contacts: { type: 'array', items: { type: 'string' } },
             remote: { type: 'boolean' },
+            jammed: { type: 'array', items: { enum: ['radio', 'radar', 'datalink', 'gnss'] }, description: 'what enemy jamming denies it now' },
+            link: {
+              type: 'object',
+              description: 'unmanned systems: the control datalink',
+              properties: {
+                mode: { enum: ['rf', 'fiber', 'autonomous'] },
+                up: { type: 'boolean' },
+                reason: { enum: ['jammed', 'range', 'terrain', 'noController', 'controllerLost', 'tether'] },
+                controllerId: { type: 'string', description: 'the operator at the other end (assigned operator while down)' },
+                hops: { type: 'integer', description: 'radio hops; more than 1: relayed through other drones' },
+                lostFor: { type: 'number', description: 's' },
+                autonomy: { enum: ['remote', 'supervised', 'autonomous'] },
+                lostLink: { enum: ['hover', 'return', 'continue', 'land'] },
+              },
+            },
+            expended: { type: 'boolean', description: 'a one-way attack drone that has delivered its warhead' },
           },
         },
         Event: {
