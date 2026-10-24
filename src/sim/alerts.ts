@@ -209,7 +209,8 @@ export class Alerts {
         const lead = o.unit.leader;
         if (m.leaderId && lead && lead.id !== m.leaderId) {
           const old = engine.entities.get(m.leaderId);
-          if (!old || !old.alive || old.mobilityKill) this.raise('leaderLost', o.id, o.force, `${o.name} lost its leader${old ? ` (${old.name})` : ''}; ${lead.name} takes command`);
+          // (A one-way drone that has delivered its warhead is not a loss.)
+          if ((!old || !old.alive || old.mobilityKill) && !old?.uxs?.expended) this.raise('leaderLost', o.id, o.force, `${o.name} lost its leader${old ? ` (${old.name})` : ''}; ${lead.name} takes command`);
         }
         m.leaderId = lead?.id;
       }

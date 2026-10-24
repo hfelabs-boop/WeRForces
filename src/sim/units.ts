@@ -267,7 +267,7 @@ export class Unit implements Taskable {
     const next = mobile[0] ?? this.alive()[0];
     if (!next || next === old) return;
     this.leader = next;
-    engine.log('info', `${this.name}: ${old?.name ?? 'leader'} ${old?.alive ? 'immobilised' : 'lost'}, ${next.name} takes command`, this.id);
+    engine.log('info', `${this.name}: ${old?.name ?? 'leader'} ${old?.alive ? 'immobilised' : old?.uxs?.expended ? 'spent' : 'lost'}, ${next.name} takes command`, this.id);
     // Attacks, fire missions and mounting are done by every member: they simply carry on.
     if (this.taskSpec && perMemberTask(this.taskSpec) && this.taskStatus() === 'running') return;
     const running = !!this.taskSpec && !perMemberTask(this.taskSpec) && this.leaderTask?.status === 'running' ? this.leaderTask : null;
