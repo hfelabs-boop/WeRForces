@@ -56,7 +56,10 @@ serves it at **`/docs`** (toolbar → **Help**).
   [9 Extending the catalog](docs/tutorials/09-extending-the-catalog.md) ·
   [10 Fire support and mech infantry](docs/tutorials/10-fire-support-and-mech-infantry.md) ·
   [11 Exercise control and AAR](docs/tutorials/11-exercise-control-and-aar.md) ·
-  [12 Real terrain](docs/tutorials/12-real-terrain.md)
+  [12 Real terrain](docs/tutorials/12-real-terrain.md) ·
+  [13 Obstacles, smoke and breaching](docs/tutorials/13-obstacles-smoke-and-breaching.md) ·
+  [14 Night, weather and supply](docs/tutorials/14-night-weather-and-supply.md) ·
+  [15 Command, tactics and analysis](docs/tutorials/15-command-tactics-and-analysis.md)
 - [User guide](docs/user-guide.md) · [Concepts](docs/concepts.md) · [Terrain import](docs/terrain-import.md) · [Deployment](docs/deployment.md) · [Architecture](docs/architecture.md) · [FAQ](docs/faq.md)
 - **Reference:**
   [CLI](docs/reference/cli.md) · [REST API](docs/reference/rest-api.md) ·

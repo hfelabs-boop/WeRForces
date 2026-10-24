@@ -167,3 +167,5 @@ Target, GeoJSON, KML) lines up with real maps: open
   ground forces cross only at bridges.
 - Put the dataset on another server: `PUT /api/v1/terrains/fulda-exercise` with
   the JSON file as the body.
+
+**Next:** [Tutorial 13: Obstacles, smoke and breaching](13-obstacles-smoke-and-breaching.md).
