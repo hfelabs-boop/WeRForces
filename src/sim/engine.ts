@@ -413,6 +413,12 @@ export class Engine {
     return delay;
   }
 
+  /** A radio message from an entity (DIS gateways send it as a Signal PDU). */
+  radio(from: Entity, text: string, aboutId?: string): void {
+    if (from.remote || !from.alive) return;
+    this.log('radio', text, from.id, aboutId);
+  }
+
   private describeOrder(o: { task?: TaskSpec; plan?: Plan }): string {
     return o.plan ? `plan ${o.plan.name ?? ''}`.trim() : describeStatement({ kind: 'task', task: o.task! }, this);
   }
@@ -427,6 +433,9 @@ export class Engine {
       try {
         if (o.plan) this.assignPlan(o.targetId, o.plan);
         else if (o.task) this.assignTask(o.targetId, o.task);
+        const t = this.resolveTarget(o.targetId);
+        const speaker = t instanceof Unit ? t.leader : t;
+        if (speaker) this.radio(speaker, `${t.name}: wilco, ${this.describeOrder(o)}`);
       } catch (err) {
         this.log('task', `Order to ${this.nameOf(o.targetId)} could not be carried out: ${(err as Error).message}`, o.targetId);
       }

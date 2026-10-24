@@ -29,6 +29,8 @@ Options:
       --time-scale <x>        Time multiplier (default 1)
       --dis                   Enable DIS networking over UDP
       --dis-port <n>          DIS UDP port (default 3000)
+      --dis-announce          send Start/Resume and Stop/Freeze PDUs on run/pause (act as simulation manager)
+      --dis-ignore-siman      do not run/pause on other simulation managers' Start/Resume and Stop/Freeze PDUs
       --dis-address <addr>    DIS destination: broadcast/multicast/unicast (default 255.255.255.255)
       --exercise <n>          DIS exercise id (default 1)
       --site <n>              DIS site id (default 1)
@@ -97,6 +99,8 @@ async function main(): Promise<void> {
       dis: { type: 'boolean', default: false },
       'dis-port': { type: 'string', default: '3000' },
       'dis-address': { type: 'string', default: '255.255.255.255' },
+      'dis-announce': { type: 'boolean', default: false },
+      'dis-ignore-siman': { type: 'boolean', default: false },
       exercise: { type: 'string', default: '1' },
       site: { type: 'string', default: '1' },
       application: { type: 'string', default: '3001' },
@@ -160,7 +164,10 @@ async function main(): Promise<void> {
       exerciseId: Number(values.exercise),
       site: Number(values.site),
       application: Number(values.application),
+      announceRunState: values['dis-announce'],
+      obeySimulationManager: !values['dis-ignore-siman'],
     });
+    runner.gateway.control = { setRunning: (run) => runner.setRunning(run) };
     console.log(`DIS enabled: exercise ${values.exercise}, site ${values.site}, app ${values.application}, udp ${values['dis-address']}:${port}`);
   }
   runner.setRunning(values.run || values.headless);

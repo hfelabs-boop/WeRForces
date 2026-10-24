@@ -590,7 +590,9 @@ export type SimEventKind =
   | 'task'
   | 'created'
   | 'deleted'
-  | 'info';
+  | 'info'
+  /** A radio message: orders acknowledged, contact reports, calls for fire (sent on DIS as Signal PDUs). */
+  | 'radio';
 
 export interface SimEvent {
   seq: number;
@@ -635,6 +637,10 @@ export interface DisStatus {
   pdusSent: number;
   pdusReceived: number;
   remoteEntities: number;
+  /** Local radios on the network (unit leaders and entities not in units). */
+  radios?: number;
+  /** Other simulations' radios heard. */
+  remoteRadios?: number;
 }
 
 // ---------------------------------------------------------------- remote control API

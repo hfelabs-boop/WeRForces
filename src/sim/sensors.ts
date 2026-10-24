@@ -89,5 +89,8 @@ function recordContact(engine: Engine, observer: Entity, target: Entity, now: nu
   }
   if (isNew && engine.isHostile(observer.force, target.force)) {
     engine.log('detected', `${observer.name} detected ${target.name}`, observer.id, target.id);
+    // The unit's leader reports it on the radio net.
+    const speaker = observer.unit?.leader ?? observer;
+    engine.radio(speaker, `${observer.unit?.name ?? observer.name}: contact, ${target.type.name} at ${Math.round(target.x)} ${Math.round(target.y)}`, target.id);
   }
 }

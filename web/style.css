@@ -690,6 +690,11 @@ aside {
   color: #d0a080;
 }
 
+.log-line.k-radio {
+  color: #b9e3a8;
+  font-style: italic;
+}
+
 /* ------------------------------------------------ overlays */
 
 .context-menu {

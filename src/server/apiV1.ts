@@ -268,7 +268,10 @@ export class ApiV1 {
     r.post(`${P}/recording/bookmarks`, (req) => {
       const b = obj(req.body);
       if (typeof b.text !== 'string' || !b.text.trim()) throw new HttpError(400, 'text is required');
-      return { status: 201, json: rec().addBookmark(b.text.trim(), b.time === undefined ? undefined : num(b.time, 'time')) };
+      const mark = rec().addBookmark(b.text.trim(), b.time === undefined ? undefined : num(b.time, 'time'));
+      // Other simulations on the DIS network see it as a Comment PDU.
+      this.ctx.runner.gateway?.sendComment(`Bookmark: ${mark.text}`);
+      return { status: 201, json: mark };
     });
     r.delete(`${P}/recording/bookmarks/{id}`, (req) => {
       if (!rec().removeBookmark(req.params.id)) throw new HttpError(404, `unknown bookmark ${req.params.id}`);

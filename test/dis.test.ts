@@ -21,6 +21,20 @@ import {
   type EntityStatePdu,
   FIRE_SIZE,
   PDU_ENTITY_STATE,
+  ALL_ENTITIES,
+  decodeAcknowledge,
+  decodeComment,
+  decodeSignal,
+  decodeStartResume,
+  decodeTransmitter,
+  encodeComment,
+  encodeSignal,
+  encodeStartResume,
+  encodeStopFreeze,
+  encodeTransmitter,
+  PDU_START_RESUME,
+  PDU_TRANSMITTER,
+  TRANSMITTER_SIZE,
 } from '../src/dis/pdu.js';
 import { Engine } from '../src/sim/engine.js';
 import { Terrain } from '../src/sim/terrain.js';
@@ -225,14 +239,15 @@ describe('DIS gateway', () => {
     // Own PDUs are ignored by the sender.
     expect(a.entities.size).toBe(1);
 
-    // No change: nothing is resent until the heartbeat.
-    const before = net.sent.length;
+    // No change: nothing is resent until the heartbeat (radios have their own heartbeat).
+    const states = () => net.sent.filter((b) => decodeHeader(b)!.pduType === PDU_ENTITY_STATE).length;
+    const before = states();
     clock += 1;
     ga.update(true, 1);
-    expect(net.sent.length).toBe(before);
+    expect(states()).toBe(before);
     clock += 5;
     ga.update(true, 1);
-    expect(net.sent.length).toBe(before + 1);
+    expect(states()).toBe(before + 1);
 
     // Deleting the entity deactivates it remotely.
     a.deleteObject(tank.id);
@@ -249,13 +264,14 @@ describe('DIS gateway', () => {
     const g = new DisGateway(a, net.make(), {}, () => clock);
     const e = a.createEntity({ typeId: 'us-m1a2', force: 1, x: terrain.towns[0].x, y: terrain.towns[0].y });
     g.update(true, 1);
-    const n = net.sent.length;
+    const states = () => net.sent.filter((b) => decodeHeader(b)!.pduType === PDU_ENTITY_STATE).length;
+    const n = states();
     e.x += 0.5; // within 1 m threshold
     g.update(true, 1);
-    expect(net.sent.length).toBe(n);
+    expect(states()).toBe(n);
     e.x += 2; // beyond threshold
     g.update(true, 1);
-    expect(net.sent.length).toBe(n + 1);
+    expect(states()).toBe(n + 1);
   });
 
   it('times out remote entities that stop sending', () => {
@@ -298,5 +314,108 @@ describe('DIS gateway', () => {
       b.step(0.1);
     }
     expect(victim.destroyed).toBe(true);
+  });
+});
+
+describe('DIS radio and simulation management', () => {
+  const terrain = Terrain.generate({ size: 6000, seed: 7, towns: 2 });
+
+  it('round-trips the radio and simulation management PDUs', () => {
+    const header = { protocolVersion: 7, exerciseId: 1, pduType: 0, protocolFamily: 0, timestamp: 0, length: 0 };
+    const tx = decodeTransmitter(
+      encodeTransmitter({
+        header,
+        radioReferenceId: { site: 1, application: 2, entity: 3 },
+        radioNumber: 1,
+        radioType: { kind: 7, domain: 1, country: 225, category: 0, nomenclatureVersion: 0, nomenclature: 0 },
+        transmitState: 2,
+        inputSource: 1,
+        antennaLocation: { x: 4e6, y: 7e5, z: 4.9e6 },
+        relativeAntennaLocation: { x: 0, y: 0, z: 3 },
+        frequency: 30_025_000,
+        bandwidth: 25000,
+        power: 40,
+        modulation: { spreadSpectrum: 0, majorModulation: 1, detail: 2, radioSystem: 1 },
+        cryptoSystem: 0,
+        cryptoKeyId: 0,
+      }),
+    );
+    expect(tx.header.length).toBe(TRANSMITTER_SIZE);
+    expect(tx.frequency).toBe(30_025_000);
+    expect(tx.antennaLocation.z).toBe(4.9e6);
+    expect(tx.transmitState).toBe(2);
+    const sig = decodeSignal(encodeSignal({ header, radioReferenceId: { site: 1, application: 2, entity: 3 }, radioNumber: 1, encodingScheme: (1 << 14) | 1, tdlType: 0, sampleRate: 0, samples: 1, data: new TextEncoder().encode('hello net') }));
+    expect(sig.header.length % 4).toBe(0);
+    expect(new TextDecoder().decode(sig.data)).toBe('hello net');
+    const sr = decodeStartResume(encodeStartResume({ header, originatingId: { site: 9, application: 9, entity: 0 }, receivingId: ALL_ENTITIES, realWorldTime: { hour: 5, timePastHour: 6 }, simulationTime: { hour: 0, timePastHour: 8 }, requestId: 42 }));
+    expect(sr.header.length).toBe(44);
+    expect(sr.requestId).toBe(42);
+    expect(sr.receivingId).toEqual(ALL_ENTITIES);
+    const c = decodeComment(encodeComment({ header, originatingId: { site: 9, application: 9, entity: 0 }, receivingId: ALL_ENTITIES, texts: [{ datumId: 0, text: 'Phase 2 begins' }] }));
+    expect(c.texts[0].text).toBe('Phase 2 begins');
+    expect(c.header.length % 8).toBe(0);
+  });
+
+  it('leaders have radios; radio messages go out as Signal PDUs and come in as radio events', () => {
+    let clock = 0;
+    const net = memoryNetwork();
+    const a = new Engine({ terrain });
+    const b = new Engine({ terrain });
+    a.newScenario('A', terrain.spec);
+    b.newScenario('B', terrain.spec);
+    const ga = new DisGateway(a, net.make(), { site: 1, application: 1 }, () => clock);
+    const gb = new DisGateway(b, net.make(), { site: 2, application: 1 }, () => clock);
+    const town = terrain.towns[0];
+    const platoon = a.createUnitFromTemplate('us-tank-platoon', 1, town.x, town.y);
+    ga.update(true, 1);
+    gb.update(true, 1);
+    // One radio: the platoon leader's.
+    const txs = net.sent.filter((p) => decodeHeader(p)!.pduType === PDU_TRANSMITTER).map(decodeTransmitter);
+    expect(txs).toHaveLength(1);
+    expect(txs[0].radioReferenceId.entity).toBe(platoon.leader!.disNumber);
+    expect(txs[0].frequency).toBe(30_000_000);
+    expect(ga.status().radios).toBe(1);
+    expect(gb.status().remoteRadios).toBe(1);
+    const heard: string[] = [];
+    b.on('event', (ev) => ev.kind === 'radio' && heard.push(ev.text));
+    a.radio(platoon.leader!, 'US Tank Platoon: contact, T-72B3 at 2000 3000');
+    expect(heard).toEqual(['US Tank Pla (DIS radio): US Tank Platoon: contact, T-72B3 at 2000 3000']);
+    // Keyed up while sending, then back to idle.
+    const states = net.sent.filter((p) => decodeHeader(p)!.pduType === PDU_TRANSMITTER).map((p) => decodeTransmitter(p).transmitState);
+    expect(states.slice(-2)).toEqual([2, 1]);
+  });
+
+  it('a simulation manager can start and freeze the simulation, and is acknowledged', () => {
+    const net = memoryNetwork();
+    const a = new Engine({ terrain });
+    a.newScenario('A', terrain.spec);
+    const g = new DisGateway(a, net.make(), { site: 1, application: 1 });
+    let running = false;
+    g.control = { setRunning: (r) => (running = r) };
+    const manager = net.make();
+    const header = { protocolVersion: 7, exerciseId: 1, pduType: 0, protocolFamily: 0, timestamp: 0, length: 0 };
+    const now = { hour: 0, timePastHour: 0 };
+    manager.send(encodeStartResume({ header, originatingId: { site: 50, application: 1, entity: 0 }, receivingId: ALL_ENTITIES, realWorldTime: now, simulationTime: now, requestId: 7 }));
+    expect(running).toBe(true);
+    const ack = decodeAcknowledge(net.sent.at(-1)!);
+    expect(ack.acknowledgeFlag).toBe(3);
+    expect(ack.responseFlag).toBe(1);
+    expect(ack.requestId).toBe(7);
+    expect(ack.receivingId).toEqual({ site: 50, application: 1, entity: 0 });
+    // Addressed to another application: ignored.
+    manager.send(encodeStopFreeze({ header, originatingId: { site: 50, application: 1, entity: 0 }, receivingId: { site: 1, application: 99, entity: 0 }, realWorldTime: now, reason: 1, frozenBehavior: 0, requestId: 8 }));
+    expect(running).toBe(true);
+    manager.send(encodeStopFreeze({ header, originatingId: { site: 50, application: 1, entity: 0 }, receivingId: { site: 1, application: 1, entity: 0 }, realWorldTime: now, reason: 1, frozenBehavior: 0, requestId: 9 }));
+    expect(running).toBe(false);
+    // Acting as manager: run/pause is announced.
+    const lead = new DisGateway(a, net.make(), { site: 1, application: 2, announceRunState: true });
+    lead.update(false, 1);
+    lead.update(true, 1);
+    expect(net.sent.some((p) => decodeHeader(p)!.pduType === PDU_START_RESUME)).toBe(true);
+    // Comments are logged.
+    const log: string[] = [];
+    a.on('event', (ev) => log.push(ev.text));
+    manager.send(encodeComment({ header, originatingId: { site: 50, application: 1, entity: 0 }, receivingId: ALL_ENTITIES, texts: [{ datumId: 0, text: 'ENDEX in 5 minutes' }] }));
+    expect(log).toContain('DIS comment from 50:1: ENDEX in 5 minutes');
   });
 });

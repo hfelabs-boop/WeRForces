@@ -84,6 +84,7 @@ export function checkCallsForFire(engine: Engine): void {
       const fu = availableFireUnits(engine, obs.force, p)[0];
       if (!fu) continue;
       const spec: TaskSpec = { type: 'fireMission', target: { x: Math.round(p.x), y: Math.round(p.y) }, rounds: DEFAULT_MISSION_ROUNDS, radius: fu.tubes > 1 ? BATTERY_SHEAF : 0 };
+      engine.radio(obs, `${obs.name}: fire mission, ${t.type.name} at ${spec.target.x} ${spec.target.y}, ${DEFAULT_MISSION_ROUNDS} rounds, over`, t.id);
       engine.log('task', `${obs.name} called for fire on ${t.name}: ${fu.name} firing ${DEFAULT_MISSION_ROUNDS} round${DEFAULT_MISSION_ROUNDS > 1 ? 's' : ''}${fu.tubes > 1 ? ` x ${fu.tubes} tubes` : ''}`, obs.id, t.id);
       engine.assignTask(fu.id, spec);
       obs.callForFireAt = engine.time + CALL_FOR_FIRE_INTERVAL;
