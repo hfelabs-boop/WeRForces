@@ -85,7 +85,8 @@ export function validateEntityType(v: unknown): EntityTypeDef {
   const endurance = t.endurance === undefined ? undefined : obj(t.endurance, 'endurance');
   const supply = t.supply === undefined ? undefined : obj(t.supply, 'supply');
   const jammer = t.jammer === undefined ? undefined : obj(t.jammer, 'jammer');
-  if (jammer && !jammer.radio && !jammer.radar) throw new CatalogError('jammer: jams radio, radar or both');
+  if (jammer && !jammer.radio && !jammer.radar && !jammer.datalink && !jammer.gnss) throw new CatalogError('jammer: jams at least one of radio, radar, datalink, gnss');
+  const unmanned = t.unmanned === undefined ? undefined : obj(t.unmanned, 'unmanned');
   const protection = t.protection === undefined ? undefined : obj(t.protection, 'protection');
   if (t.sidc !== undefined && (typeof t.sidc !== 'string' || !/^[A-Z*-]{10,15}$/.test(t.sidc))) throw new CatalogError('sidc: a MIL-STD-2525C letter code such as S-G-UCFM--');
   return tidy({
@@ -116,7 +117,17 @@ export function validateEntityType(v: unknown): EntityTypeDef {
     breachTime: num(t.breachTime, 'breachTime', 1, 36000, true),
     endurance: endurance ? tidy({ km: num(endurance.km, 'endurance.km', 1, 100000, true), hours: num(endurance.hours, 'endurance.hours', 0.1, 1000, true) }) : undefined,
     supply: supply ? { capacity: num(supply.capacity, 'supply.capacity', 0.1, 1000)! } : undefined,
-    jammer: jammer ? tidy({ range: num(jammer.range, 'jammer.range', 100, 500000)!, radio: bool(jammer.radio, 'jammer.radio'), radar: bool(jammer.radar, 'jammer.radar') }) : undefined,
+    jammer: jammer
+      ? tidy({
+          range: num(jammer.range, 'jammer.range', 100, 500000)!,
+          radio: bool(jammer.radio, 'jammer.radio'),
+          radar: bool(jammer.radar, 'jammer.radar'),
+          datalink: bool(jammer.datalink, 'jammer.datalink'),
+          gnss: bool(jammer.gnss, 'jammer.gnss'),
+        })
+      : undefined,
+    unmanned: unmanned ? tidy({ link: oneOf(unmanned.link, 'unmanned.link', ['rf', 'fiber', 'autonomous'] as const), antiJam: num(unmanned.antiJam, 'unmanned.antiJam', 0, 0.95, true) }) : undefined,
+    gnss: bool(t.gnss, 'gnss'),
   } as EntityTypeDef);
 }
 

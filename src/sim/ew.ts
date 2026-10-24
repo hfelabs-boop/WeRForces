@@ -1,8 +1,11 @@
-// Electronic warfare: jammers switched on deny enemy forces their radios or radars within
-// range. A jammed radio cannot take orders on time (they arrive late), share contacts with
-// the unit, call for fire or hear codewords; a jammed radar sees only part of its range,
-// burning through as it closes on the jammer.
+// Electronic warfare: jammers switched on deny enemy forces, within range, their radios,
+// radars, unmanned systems' control datalinks and satellite navigation. A jammed radio
+// cannot take orders on time (they arrive late), share contacts with the unit, call for
+// fire or hear codewords; a jammed radar sees only part of its range, burning through as it
+// closes on the jammer. What a lost datalink or GNSS means for a platform is up to the
+// unmanned-systems and navigation models; this only says who is denied what.
 
+import type { JamBand } from '../shared/types.js';
 import type { Entity } from './entity.js';
 import type { Engine } from './engine.js';
 
@@ -13,7 +16,7 @@ const RADAR_FLOOR = 0.3;
 
 export class Ew {
   /** Entity id -> what is jammed for it, refreshed once a second. */
-  private jammed = new Map<string, { radio?: string; radar?: number }>();
+  private jammed = new Map<string, { radio?: string; radar?: number; datalink?: string; gnss?: string }>();
 
   constructor(private readonly engine: Engine) {}
 
@@ -41,6 +44,9 @@ export class Ew {
       if (!e.alive || e.remote || e.ambient) continue;
       let radio: string | undefined;
       let radar: number | undefined;
+      let datalink: string | undefined;
+      let gnss: string | undefined;
+      const link = e.type.unmanned?.link === 'rf';
       for (const j of jammers) {
         if (!this.engine.isHostile(j.force, e.force)) continue;
         const d = Math.hypot(j.x - e.x, j.y - e.y);
@@ -49,8 +55,12 @@ export class Ew {
         if (jr.radio && !radio) radio = j.id;
         // Radars burn through closer in: the nearer the jammer, the more range they lose.
         if (jr.radar) radar = Math.min(radar ?? 1, Math.max(RADAR_FLOOR, d / jr.range));
+        // Anti-jam datalinks (frequency hopping, directional antennas) hold out farther in.
+        if (jr.datalink && link && !datalink && d <= jr.range * (1 - (e.type.unmanned?.antiJam ?? 0))) datalink = j.id;
+        // Only what navigates by satellite cares.
+        if (jr.gnss && !gnss && (e.type.gnss || e.type.unmanned)) gnss = j.id;
       }
-      if (radio || radar !== undefined) this.jammed.set(e.id, { radio, radar });
+      if (radio || radar !== undefined || datalink || gnss) this.jammed.set(e.id, { radio, radar, datalink, gnss });
     }
     // Say when a unit (or a loose entity) loses or regains its radio.
     for (const e of this.engine.entities.values()) {
@@ -79,6 +89,24 @@ export class Ew {
     return !!this.jammed.get(who.id)?.radio || !!this.jammed.get(e.id)?.radio;
   }
 
+  /** The jammer cutting this unmanned system's control datalink, if any (only `rf` links can be jammed). */
+  datalinkJammedBy(e: Entity): string | undefined {
+    return this.jammed.get(e.id)?.datalink;
+  }
+
+  datalinkJammed(e: Entity): boolean {
+    return !!this.jammed.get(e.id)?.datalink;
+  }
+
+  /** The jammer denying this entity satellite navigation (GNSS), if any. */
+  gnssJammedBy(e: Entity): string | undefined {
+    return this.jammed.get(e.id)?.gnss;
+  }
+
+  gnssJammed(e: Entity): boolean {
+    return !!this.jammed.get(e.id)?.gnss;
+  }
+
   /** Multiplier on a radar's range (1 when not jammed). */
   radarFactor(e: Entity): number {
     return this.jammed.get(e.id)?.radar ?? 1;
@@ -89,12 +117,14 @@ export class Ew {
   }
 
   /** For snapshots: what is jammed. */
-  status(e: Entity): ('radio' | 'radar')[] | undefined {
+  status(e: Entity): JamBand[] | undefined {
     const j = this.jammed.get(e.id);
     if (!j) return undefined;
-    const out: ('radio' | 'radar')[] = [];
+    const out: JamBand[] = [];
     if (j.radio) out.push('radio');
     if (j.radar !== undefined) out.push('radar');
+    if (j.datalink) out.push('datalink');
+    if (j.gnss) out.push('gnss');
     return out;
   }
 }

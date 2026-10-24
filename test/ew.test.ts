@@ -61,3 +61,32 @@ describe('electronic warfare', () => {
     expect(eng.ew.radarFactor(near)).toBe(1);
   });
 });
+
+describe('datalink and satellite-navigation jamming', () => {
+  it('cuts radio datalinks (anti-jam ones only closer in), never fibre, and denies GNSS to those that use it', () => {
+    const eng = engine();
+    const base = eng.catalog.type('us-mq9');
+    eng.setCustomCatalog({
+      entityTypes: [
+        { ...base, id: 'test-rf', name: 'RF drone', unmanned: { link: 'rf' }, gnss: true },
+        { ...base, id: 'test-hop', name: 'Hopping drone', unmanned: { link: 'rf', antiJam: 0.5 } },
+        { ...base, id: 'test-fiber', name: 'Fibre drone', unmanned: { link: 'fiber' } },
+        { ...eng.catalog.type('ru-r330zh'), id: 'test-cuas', name: 'Counter-drone jammer', jammer: { range: 4000, datalink: true, gnss: true } },
+      ],
+    });
+    const rf = eng.createEntity({ typeId: 'test-rf', force: 1, x: 3000, y: 3000 });
+    const hop = eng.createEntity({ typeId: 'test-hop', force: 1, x: 3000, y: 3000 });
+    const hopNear = eng.createEntity({ typeId: 'test-hop', force: 1, x: 4500, y: 3000 });
+    const fiber = eng.createEntity({ typeId: 'test-fiber', force: 1, x: 3000, y: 3000 });
+    const tank = eng.createEntity({ typeId: 'us-m1a2', force: 1, x: 3000, y: 3100 });
+    eng.createEntity({ typeId: 'test-cuas', force: 2, x: 6000, y: 3000 });
+    eng.runFor(1);
+    expect(eng.ew.datalinkJammed(rf)).toBe(true);
+    expect(eng.ew.datalinkJammed(hop)).toBe(false); // 3 km away: beyond half the 4 km reach
+    expect(eng.ew.datalinkJammed(hopNear)).toBe(true); // 1.5 km away
+    expect(eng.ew.datalinkJammed(fiber)).toBe(false);
+    expect(eng.ew.gnssJammed(rf)).toBe(true);
+    expect(eng.ew.gnssJammed(tank)).toBe(false);
+    expect(eng.snapshot().entities.find((e) => e.id === rf.id)!.jammed).toEqual(['datalink', 'gnss']);
+  });
+});

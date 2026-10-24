@@ -130,6 +130,9 @@ export interface SensorDef {
   refRcs?: number;
 }
 
+/** What a jammer can deny: radios, radars, unmanned systems' datalinks, satellite navigation. */
+export type JamBand = 'radio' | 'radar' | 'datalink' | 'gnss';
+
 export interface EntityTypeDef {
   id: string;
   name: string;
@@ -175,8 +178,20 @@ export interface EntityTypeDef {
   endurance?: { km?: number; hours?: number };
   /** Supply vehicles: how many full loads (fuel and ammunition) of other vehicles they carry. */
   supply?: { capacity: number };
-  /** Electronic warfare: while switched on, jams enemy radios and/or radars within `range` m. */
-  jammer?: { range: number; radio?: boolean; radar?: boolean };
+  /**
+   * Electronic warfare: while switched on, jams within `range` m enemy radios, radars,
+   * unmanned systems' control datalinks and/or satellite navigation (GNSS).
+   */
+  jammer?: { range: number; radio?: boolean; radar?: boolean; datalink?: boolean; gnss?: boolean };
+  /**
+   * Unmanned systems: how it is controlled. `rf`: a radio datalink to its operator (can be
+   * jammed); `fiber`: a fibre-optic tether (cannot); `autonomous`: needs no link.
+   * `antiJam` (0-1): how much of a datalink jammer's reach it shrugs off (frequency hopping,
+   * directional antennas): the jammer must be within (1 - antiJam) of its range.
+   */
+  unmanned?: { link: 'rf' | 'fiber' | 'autonomous'; antiJam?: number };
+  /** Navigates by satellite (GNSS); denied, it falls back on inertial navigation. */
+  gnss?: boolean;
   /** Reactions that new entities of this type start with (e.g. observers call for fire). */
   reactions?: Reactions;
 }
@@ -818,7 +833,7 @@ export interface EntitySnapshot {
   /** Jammers: switched on. */
   jamming?: boolean;
   /** What enemy jamming denies it now. */
-  jammed?: ('radio' | 'radar')[];
+  jammed?: JamBand[];
 }
 
 /** Estimate for a move: distance left on the planned path, and simulation time of arrival. */
