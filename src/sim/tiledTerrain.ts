@@ -281,6 +281,19 @@ export class TiledTerrain extends Terrain {
     return !!e.tile.landCover && e.tile.landCover[this.pi] === LAND_COVER.builtUp;
   }
 
+  /** As Terrain.mobilityFactor, reading the post's tile once. */
+  override mobilityFactor(x: number, y: number, domain: Domain, offroadFactor: number): number {
+    if (!this.inBounds(x, y)) return 0;
+    if (domain === 'air') return 1;
+    const t = this.postEntry(x, y).tile;
+    const p = this.pi;
+    const water = (!!t.water && t.water[p] === 1) || this.elevation(x, y) < 0;
+    if (domain === 'surface') return water ? 1 : 0;
+    if (water) return 0;
+    const road = !!t.roads && t.roads[p] === 1;
+    return landMobility(domain, offroadFactor, this.slope(x, y), road, t.forest[p] === 1, road || !t.landCover ? LAND_COVER.none : t.landCover[p], road || !t.urbanCover ? 0 : t.urbanCover[p] / 100);
+  }
+
   // ------------------------------------------------------------ line of sight
 
   /** Finest tile index of the cell a sample at fraction t of a-b falls in. */
