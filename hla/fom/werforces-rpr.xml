@@ -1,0 +1,656 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WeRForces RPR subset: a single IEEE 1516-2010 FOM module containing the part of the
+  SISO RPR FOM 2.0 that the WeRForces DIS/HLA bridge exchanges. Class, attribute,
+  parameter and datatype names follow RPR FOM 2.0 (SISO-STD-001); see
+  docs/guides/hla.md for the mapping table and the deliberate deviations (the main one:
+  BaseEntity carries the RPR 1.0-style WorldLocation/Orientation/VelocityVector
+  attributes instead of the RPR 2.0 Spatial variant record).
+-->
+<objectModel xmlns="http://standards.ieee.org/IEEE1516-2010"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xsi:schemaLocation="http://standards.ieee.org/IEEE1516-2010 http://standards.ieee.org/downloads/1516/1516.2-2010/IEEE1516-DIF-2010.xsd">
+  <modelIdentification>
+    <name>WeRForces RPR subset</name>
+    <type>FOM</type>
+    <version>1.0</version>
+    <modificationDate>2026-10-24</modificationDate>
+    <securityClassification>Unclassified</securityClassification>
+    <purpose>Entity state, weapon fire and munition detonation exchange between WeRForces (via its DIS/HLA bridge) and other HLA 1516e federates.</purpose>
+    <applicationDomain>Training</applicationDomain>
+    <description>Subset of the SISO RPR FOM 2.0 (BaseEntity.PhysicalEntity and its platform/lifeform/munition subclasses, WeaponFire, MunitionDetonation) with RPR names and HLA basic encodings.</description>
+    <useLimitation>Not the official RPR FOM. Federates that load the full RPR FOM 2.0 modules use the Spatial attribute instead of WorldLocation/Orientation/VelocityVector.</useLimitation>
+    <poc>
+      <pocType>Primary author</pocType>
+      <pocName>WeRForces project</pocName>
+      <pocOrg>WeRForces</pocOrg>
+    </poc>
+    <reference>
+      <type>Text</type>
+      <identification>SISO-STD-001-2015 (RPR FOM 2.0)</identification>
+    </reference>
+    <other>Bridged from DIS 7 (IEEE 1278.1-2012) by hla/src/org/werforces/hla/Bridge.java.</other>
+  </modelIdentification>
+
+  <objects>
+    <objectClass>
+      <name>HLAobjectRoot</name>
+      <objectClass>
+        <name>BaseEntity</name>
+        <sharing>PublishSubscribe</sharing>
+        <semantics>A single DIS entity: anything that has a location and identity.</semantics>
+        <attribute>
+          <name>EntityType</name>
+          <dataType>EntityTypeStruct</dataType>
+          <updateType>Static</updateType>
+          <updateCondition>On change</updateCondition>
+          <ownership>NoTransfer</ownership>
+          <sharing>PublishSubscribe</sharing>
+          <transportation>HLAreliable</transportation>
+          <order>Receive</order>
+          <semantics>DIS entity type (kind, domain, country, category, subcategory, specific, extra).</semantics>
+        </attribute>
+        <attribute>
+          <name>EntityIdentifier</name>
+          <dataType>EntityIdentifierStruct</dataType>
+          <updateType>Static</updateType>
+          <updateCondition>On change</updateCondition>
+          <ownership>NoTransfer</ownership>
+          <sharing>PublishSubscribe</sharing>
+          <transportation>HLAreliable</transportation>
+          <order>Receive</order>
+          <semantics>DIS entity identifier (site, application, entity number) of the simulated entity.</semantics>
+        </attribute>
+        <attribute>
+          <name>WorldLocation</name>
+          <dataType>WorldLocationStruct</dataType>
+          <updateType>Conditional</updateType>
+          <updateCondition>Dead-reckoning threshold exceeded, or periodic refresh</updateCondition>
+          <ownership>NoTransfer</ownership>
+          <sharing>PublishSubscribe</sharing>
+          <transportation>HLAbestEffort</transportation>
+          <order>Receive</order>
+          <semantics>Location in the WGS-84 geocentric (ECEF) frame, metres. RPR FOM 1.0 attribute; RPR 2.0 carries it in Spatial.</semantics>
+        </attribute>
+        <attribute>
+          <name>Orientation</name>
+          <dataType>OrientationStruct</dataType>
+          <updateType>Conditional</updateType>
+          <updateCondition>Dead-reckoning threshold exceeded, or periodic refresh</updateCondition>
+          <ownership>NoTransfer</ownership>
+          <sharing>PublishSubscribe</sharing>
+          <transportation>HLAbestEffort</transportation>
+          <order>Receive</order>
+          <semantics>DIS Euler angles Psi, Theta, Phi relative to the ECEF frame, radians.</semantics>
+        </attribute>
+        <attribute>
+          <name>VelocityVector</name>
+          <dataType>VelocityVectorStruct</dataType>
+          <updateType>Conditional</updateType>
+          <updateCondition>On change</updateCondition>
+          <ownership>NoTransfer</ownership>
+          <sharing>PublishSubscribe</sharing>
+          <transportation>HLAbestEffort</transportation>
+          <order>Receive</order>
+          <semantics>Linear velocity in the ECEF frame, metres per second.</semantics>
+        </attribute>
+        <attribute>
+          <name>DeadReckoningAlgorithm</name>
+          <dataType>DeadReckoningAlgorithmEnum8</dataType>
+          <updateType>Conditional</updateType>
+          <updateCondition>On change</updateCondition>
+          <ownership>NoTransfer</ownership>
+          <sharing>PublishSubscribe</sharing>
+          <transportation>HLAbestEffort</transportation>
+          <order>Receive</order>
+          <semantics>Dead-reckoning algorithm receivers should use to extrapolate WorldLocation.</semantics>
+        </attribute>
+        <objectClass>
+          <name>PhysicalEntity</name>
+          <sharing>PublishSubscribe</sharing>
+          <semantics>A discrete physical entity: platform, lifeform or munition.</semantics>
+          <attribute>
+            <name>DamageState</name>
+            <dataType>DamageStatusEnum32</dataType>
+            <updateType>Conditional</updateType>
+            <updateCondition>On change</updateCondition>
+            <ownership>NoTransfer</ownership>
+            <sharing>PublishSubscribe</sharing>
+            <transportation>HLAreliable</transportation>
+            <order>Receive</order>
+            <semantics>Damage state (DIS appearance bits 3-4).</semantics>
+          </attribute>
+          <attribute>
+            <name>ForceIdentifier</name>
+            <dataType>ForceIdentifierEnum8</dataType>
+            <updateType>Static</updateType>
+            <updateCondition>On change</updateCondition>
+            <ownership>NoTransfer</ownership>
+            <sharing>PublishSubscribe</sharing>
+            <transportation>HLAreliable</transportation>
+            <order>Receive</order>
+            <semantics>Force the entity belongs to (DIS force ID).</semantics>
+          </attribute>
+          <attribute>
+            <name>Marking</name>
+            <dataType>MarkingStruct</dataType>
+            <updateType>Conditional</updateType>
+            <updateCondition>On change</updateCondition>
+            <ownership>NoTransfer</ownership>
+            <sharing>PublishSubscribe</sharing>
+            <transportation>HLAreliable</transportation>
+            <order>Receive</order>
+            <semantics>Unique marking (callsign), up to 11 ASCII characters.</semantics>
+          </attribute>
+          <attribute>
+            <name>Immobilized</name>
+            <dataType>RPRboolean</dataType>
+            <updateType>Conditional</updateType>
+            <updateCondition>On change</updateCondition>
+            <ownership>NoTransfer</ownership>
+            <sharing>PublishSubscribe</sharing>
+            <transportation>HLAreliable</transportation>
+            <order>Receive</order>
+            <semantics>Mobility kill (DIS appearance bit 1).</semantics>
+          </attribute>
+          <attribute>
+            <name>FirePowerDisabled</name>
+            <dataType>RPRboolean</dataType>
+            <updateType>Conditional</updateType>
+            <updateCondition>On change</updateCondition>
+            <ownership>NoTransfer</ownership>
+            <sharing>PublishSubscribe</sharing>
+            <transportation>HLAreliable</transportation>
+            <order>Receive</order>
+            <semantics>Firepower kill (DIS appearance bit 2).</semantics>
+          </attribute>
+          <attribute>
+            <name>FlamesPresent</name>
+            <dataType>RPRboolean</dataType>
+            <updateType>Conditional</updateType>
+            <updateCondition>On change</updateCondition>
+            <ownership>NoTransfer</ownership>
+            <sharing>PublishSubscribe</sharing>
+            <transportation>HLAreliable</transportation>
+            <order>Receive</order>
+            <semantics>Flames rising from the entity (DIS appearance bit 15).</semantics>
+          </attribute>
+          <attribute>
+            <name>EngineSmokeOn</name>
+            <dataType>RPRboolean</dataType>
+            <updateType>Conditional</updateType>
+            <updateCondition>On change</updateCondition>
+            <ownership>NoTransfer</ownership>
+            <sharing>PublishSubscribe</sharing>
+            <transportation>HLAreliable</transportation>
+            <order>Receive</order>
+            <semantics>Engine smoke (DIS appearance smoke bits 5-6 = 2).</semantics>
+          </attribute>
+          <objectClass>
+            <name>Platform</name>
+            <sharing>PublishSubscribe</sharing>
+            <semantics>A vehicle (DIS kind 1).</semantics>
+            <objectClass>
+              <name>Aircraft</name>
+              <sharing>PublishSubscribe</sharing>
+              <semantics>DIS kind 1, domain 2 (air).</semantics>
+            </objectClass>
+            <objectClass>
+              <name>GroundVehicle</name>
+              <sharing>PublishSubscribe</sharing>
+              <semantics>DIS kind 1, domain 1 (land).</semantics>
+            </objectClass>
+            <objectClass>
+              <name>SurfaceVessel</name>
+              <sharing>PublishSubscribe</sharing>
+              <semantics>DIS kind 1, domain 3 (surface).</semantics>
+            </objectClass>
+            <objectClass>
+              <name>SubmersibleVessel</name>
+              <sharing>PublishSubscribe</sharing>
+              <semantics>DIS kind 1, domain 4 (subsurface).</semantics>
+            </objectClass>
+            <objectClass>
+              <name>Spacecraft</name>
+              <sharing>PublishSubscribe</sharing>
+              <semantics>DIS kind 1, domain 5 (space).</semantics>
+            </objectClass>
+          </objectClass>
+          <objectClass>
+            <name>Lifeform</name>
+            <sharing>PublishSubscribe</sharing>
+            <semantics>A living being (DIS kind 3).</semantics>
+            <objectClass>
+              <name>Human</name>
+              <sharing>PublishSubscribe</sharing>
+              <semantics>DIS kind 3, category below 200 (human).</semantics>
+            </objectClass>
+            <objectClass>
+              <name>NonHuman</name>
+              <sharing>PublishSubscribe</sharing>
+              <semantics>DIS kind 3, category 200 and above (animals).</semantics>
+            </objectClass>
+          </objectClass>
+          <objectClass>
+            <name>Munition</name>
+            <sharing>PublishSubscribe</sharing>
+            <semantics>A munition tracked as an entity (DIS kind 2).</semantics>
+          </objectClass>
+        </objectClass>
+      </objectClass>
+    </objectClass>
+  </objects>
+
+  <interactions>
+    <interactionClass>
+      <name>HLAinteractionRoot</name>
+      <sharing>Neither</sharing>
+      <transportation>HLAreliable</transportation>
+      <order>Receive</order>
+      <interactionClass>
+        <name>WeaponFire</name>
+        <sharing>PublishSubscribe</sharing>
+        <transportation>HLAreliable</transportation>
+        <order>Receive</order>
+        <semantics>A weapon was fired (DIS Fire PDU).</semantics>
+        <parameter>
+          <name>EventIdentifier</name>
+          <dataType>EventIdentifierStruct</dataType>
+          <semantics>Associates the fire with its later detonation.</semantics>
+        </parameter>
+        <parameter>
+          <name>FireControlSolutionRange</name>
+          <dataType>LengthMeterFloat32</dataType>
+          <semantics>Range used by the fire control solution, metres.</semantics>
+        </parameter>
+        <parameter>
+          <name>FireMissionIndex</name>
+          <dataType>UnsignedInteger32</dataType>
+          <semantics>Fire mission index.</semantics>
+        </parameter>
+        <parameter>
+          <name>FiringLocation</name>
+          <dataType>WorldLocationStruct</dataType>
+          <semantics>Location of the shooter (ECEF), metres.</semantics>
+        </parameter>
+        <parameter>
+          <name>FiringObjectIdentifier</name>
+          <dataType>RTIobjectId</dataType>
+          <semantics>HLA object instance name of the firing entity; empty if unknown.</semantics>
+        </parameter>
+        <parameter>
+          <name>FuseType</name>
+          <dataType>FuseTypeEnum16</dataType>
+          <semantics>Fuse of the munition.</semantics>
+        </parameter>
+        <parameter>
+          <name>InitialVelocityVector</name>
+          <dataType>VelocityVectorStruct</dataType>
+          <semantics>Muzzle velocity (ECEF), metres per second.</semantics>
+        </parameter>
+        <parameter>
+          <name>MunitionObjectIdentifier</name>
+          <dataType>RTIobjectId</dataType>
+          <semantics>HLA object instance name of the munition if it is tracked; empty otherwise.</semantics>
+        </parameter>
+        <parameter>
+          <name>MunitionType</name>
+          <dataType>EntityTypeStruct</dataType>
+          <semantics>DIS entity type of the munition.</semantics>
+        </parameter>
+        <parameter>
+          <name>QuantityFired</name>
+          <dataType>UnsignedInteger16</dataType>
+          <semantics>Rounds in the burst.</semantics>
+        </parameter>
+        <parameter>
+          <name>RateOfFire</name>
+          <dataType>UnsignedInteger16</dataType>
+          <semantics>Rounds per minute.</semantics>
+        </parameter>
+        <parameter>
+          <name>TargetObjectIdentifier</name>
+          <dataType>RTIobjectId</dataType>
+          <semantics>HLA object instance name of the intended target; empty if none.</semantics>
+        </parameter>
+        <parameter>
+          <name>WarheadType</name>
+          <dataType>WarheadTypeEnum16</dataType>
+          <semantics>Warhead of the munition.</semantics>
+        </parameter>
+      </interactionClass>
+      <interactionClass>
+        <name>MunitionDetonation</name>
+        <sharing>PublishSubscribe</sharing>
+        <transportation>HLAreliable</transportation>
+        <order>Receive</order>
+        <semantics>A munition detonated or impacted (DIS Detonation PDU).</semantics>
+        <parameter>
+          <name>DetonationLocation</name>
+          <dataType>WorldLocationStruct</dataType>
+          <semantics>Location of the detonation (ECEF), metres.</semantics>
+        </parameter>
+        <parameter>
+          <name>DetonationResultCode</name>
+          <dataType>DetonationResultCodeEnum8</dataType>
+          <semantics>Result of the detonation (entity impact, ground impact, ...).</semantics>
+        </parameter>
+        <parameter>
+          <name>EventIdentifier</name>
+          <dataType>EventIdentifierStruct</dataType>
+          <semantics>Matches the EventIdentifier of the WeaponFire.</semantics>
+        </parameter>
+        <parameter>
+          <name>FiringObjectIdentifier</name>
+          <dataType>RTIobjectId</dataType>
+          <semantics>HLA object instance name of the firing entity; empty if unknown.</semantics>
+        </parameter>
+        <parameter>
+          <name>FinalVelocityVector</name>
+          <dataType>VelocityVectorStruct</dataType>
+          <semantics>Munition velocity at detonation (ECEF), metres per second.</semantics>
+        </parameter>
+        <parameter>
+          <name>FuseType</name>
+          <dataType>FuseTypeEnum16</dataType>
+          <semantics>Fuse of the munition.</semantics>
+        </parameter>
+        <parameter>
+          <name>MunitionObjectIdentifier</name>
+          <dataType>RTIobjectId</dataType>
+          <semantics>HLA object instance name of the munition if it is tracked; empty otherwise.</semantics>
+        </parameter>
+        <parameter>
+          <name>MunitionType</name>
+          <dataType>EntityTypeStruct</dataType>
+          <semantics>DIS entity type of the munition.</semantics>
+        </parameter>
+        <parameter>
+          <name>QuantityFired</name>
+          <dataType>UnsignedInteger16</dataType>
+          <semantics>Rounds in the burst.</semantics>
+        </parameter>
+        <parameter>
+          <name>RateOfFire</name>
+          <dataType>UnsignedInteger16</dataType>
+          <semantics>Rounds per minute.</semantics>
+        </parameter>
+        <parameter>
+          <name>RelativeDetonationLocation</name>
+          <dataType>RelativePositionStruct</dataType>
+          <semantics>Detonation location in the target's body coordinates, metres.</semantics>
+        </parameter>
+        <parameter>
+          <name>TargetObjectIdentifier</name>
+          <dataType>RTIobjectId</dataType>
+          <semantics>HLA object instance name of the entity hit; empty for a ground or air burst.</semantics>
+        </parameter>
+        <parameter>
+          <name>WarheadType</name>
+          <dataType>WarheadTypeEnum16</dataType>
+          <semantics>Warhead of the munition.</semantics>
+        </parameter>
+      </interactionClass>
+    </interactionClass>
+  </interactions>
+
+
+  <dataTypes>
+    <basicDataRepresentations>
+      <basicData>
+        <name>RPRunsignedInteger16BE</name>
+        <size>16</size>
+        <interpretation>Integer in the range [0, 2^16 - 1]</interpretation>
+        <endian>Big</endian>
+        <encoding>16-bit unsigned integer, big-endian.</encoding>
+      </basicData>
+      <basicData>
+        <name>RPRunsignedInteger32BE</name>
+        <size>32</size>
+        <interpretation>Integer in the range [0, 2^32 - 1]</interpretation>
+        <endian>Big</endian>
+        <encoding>32-bit unsigned integer, big-endian.</encoding>
+      </basicData>
+    </basicDataRepresentations>
+
+    <simpleDataTypes>
+      <simpleData>
+        <name>Octet</name>
+        <representation>HLAoctet</representation>
+        <units>NA</units>
+        <resolution>1</resolution>
+        <accuracy>NA</accuracy>
+        <semantics>Unsigned 8-bit value.</semantics>
+      </simpleData>
+      <simpleData>
+        <name>UnsignedInteger16</name>
+        <representation>RPRunsignedInteger16BE</representation>
+        <units>NA</units>
+        <resolution>1</resolution>
+        <accuracy>Perfect</accuracy>
+        <semantics>Unsigned 16-bit integer.</semantics>
+      </simpleData>
+      <simpleData>
+        <name>UnsignedInteger32</name>
+        <representation>RPRunsignedInteger32BE</representation>
+        <units>NA</units>
+        <resolution>1</resolution>
+        <accuracy>Perfect</accuracy>
+        <semantics>Unsigned 32-bit integer.</semantics>
+      </simpleData>
+      <simpleData>
+        <name>MeterFloat32</name>
+        <representation>HLAfloat32BE</representation>
+        <units>m</units>
+        <resolution>NA</resolution>
+        <accuracy>NA</accuracy>
+        <semantics>Length, metres.</semantics>
+      </simpleData>
+      <simpleData>
+        <name>LengthMeterFloat32</name>
+        <representation>HLAfloat32BE</representation>
+        <units>m</units>
+        <resolution>NA</resolution>
+        <accuracy>NA</accuracy>
+        <semantics>Length, metres.</semantics>
+      </simpleData>
+      <simpleData>
+        <name>MeterFloat64</name>
+        <representation>HLAfloat64BE</representation>
+        <units>m</units>
+        <resolution>NA</resolution>
+        <accuracy>NA</accuracy>
+        <semantics>Length, metres.</semantics>
+      </simpleData>
+      <simpleData>
+        <name>AngleRadianFloat32</name>
+        <representation>HLAfloat32BE</representation>
+        <units>rad</units>
+        <resolution>NA</resolution>
+        <accuracy>NA</accuracy>
+        <semantics>Angle, radians.</semantics>
+      </simpleData>
+      <simpleData>
+        <name>VelocityMeterPerSecondFloat32</name>
+        <representation>HLAfloat32BE</representation>
+        <units>m/s</units>
+        <resolution>NA</resolution>
+        <accuracy>NA</accuracy>
+        <semantics>Speed, metres per second.</semantics>
+      </simpleData>
+    </simpleDataTypes>
+
+    <enumeratedDataTypes>
+      <enumeratedData>
+        <name>RPRboolean</name>
+        <representation>HLAoctet</representation>
+        <semantics>RPR boolean.</semantics>
+        <enumerator><name>False</name><value>0</value></enumerator>
+        <enumerator><name>True</name><value>1</value></enumerator>
+      </enumeratedData>
+      <enumeratedData>
+        <name>DamageStatusEnum32</name>
+        <representation>RPRunsignedInteger32BE</representation>
+        <semantics>Damage state, as DIS appearance bits 3-4.</semantics>
+        <enumerator><name>NoDamage</name><value>0</value></enumerator>
+        <enumerator><name>SlightDamage</name><value>1</value></enumerator>
+        <enumerator><name>ModerateDamage</name><value>2</value></enumerator>
+        <enumerator><name>Destroyed</name><value>3</value></enumerator>
+      </enumeratedData>
+      <enumeratedData>
+        <name>ForceIdentifierEnum8</name>
+        <representation>HLAoctet</representation>
+        <semantics>DIS force ID (SISO-REF-010).</semantics>
+        <enumerator><name>Other</name><value>0</value></enumerator>
+        <enumerator><name>Friendly</name><value>1</value></enumerator>
+        <enumerator><name>Opposing</name><value>2</value></enumerator>
+        <enumerator><name>Neutral</name><value>3</value></enumerator>
+      </enumeratedData>
+      <enumeratedData>
+        <name>DeadReckoningAlgorithmEnum8</name>
+        <representation>HLAoctet</representation>
+        <semantics>DIS dead-reckoning algorithm.</semantics>
+        <enumerator><name>Other</name><value>0</value></enumerator>
+        <enumerator><name>Static</name><value>1</value></enumerator>
+        <enumerator><name>DRM_FPW</name><value>2</value></enumerator>
+        <enumerator><name>DRM_RPW</name><value>3</value></enumerator>
+        <enumerator><name>DRM_RVW</name><value>4</value></enumerator>
+        <enumerator><name>DRM_FVW</name><value>5</value></enumerator>
+        <enumerator><name>DRM_FPB</name><value>6</value></enumerator>
+        <enumerator><name>DRM_RPB</name><value>7</value></enumerator>
+        <enumerator><name>DRM_RVB</name><value>8</value></enumerator>
+        <enumerator><name>DRM_FVB</name><value>9</value></enumerator>
+      </enumeratedData>
+      <enumeratedData>
+        <name>MarkingEncodingEnum8</name>
+        <representation>HLAoctet</representation>
+        <semantics>Character set of the marking.</semantics>
+        <enumerator><name>Other</name><value>0</value></enumerator>
+        <enumerator><name>ASCII</name><value>1</value></enumerator>
+        <enumerator><name>ArmyMarkingCCTT</name><value>2</value></enumerator>
+        <enumerator><name>DigitChevron</name><value>3</value></enumerator>
+      </enumeratedData>
+      <enumeratedData>
+        <name>DetonationResultCodeEnum8</name>
+        <representation>HLAoctet</representation>
+        <semantics>DIS detonation result (subset of SISO-REF-010; other values pass through unchanged).</semantics>
+        <enumerator><name>Other</name><value>0</value></enumerator>
+        <enumerator><name>EntityImpact</name><value>1</value></enumerator>
+        <enumerator><name>EntityProximateDetonation</name><value>2</value></enumerator>
+        <enumerator><name>GroundImpact</name><value>3</value></enumerator>
+        <enumerator><name>GroundProximateDetonation</name><value>4</value></enumerator>
+        <enumerator><name>Detonation</name><value>5</value></enumerator>
+        <enumerator><name>None</name><value>6</value></enumerator>
+      </enumeratedData>
+      <enumeratedData>
+        <name>FuseTypeEnum16</name>
+        <representation>RPRunsignedInteger16BE</representation>
+        <semantics>DIS fuse (subset of SISO-REF-010; other values pass through unchanged).</semantics>
+        <enumerator><name>Other</name><value>0</value></enumerator>
+        <enumerator><name>Contact</name><value>1000</value></enumerator>
+        <enumerator><name>Timed</name><value>2000</value></enumerator>
+        <enumerator><name>Proximity</name><value>3000</value></enumerator>
+      </enumeratedData>
+      <enumeratedData>
+        <name>WarheadTypeEnum16</name>
+        <representation>RPRunsignedInteger16BE</representation>
+        <semantics>DIS warhead (subset of SISO-REF-010; other values pass through unchanged).</semantics>
+        <enumerator><name>Other</name><value>0</value></enumerator>
+        <enumerator><name>HighExplosive</name><value>1000</value></enumerator>
+        <enumerator><name>Kinetic</name><value>5000</value></enumerator>
+      </enumeratedData>
+    </enumeratedDataTypes>
+
+    <arrayDataTypes>
+      <arrayData>
+        <name>MarkingArray11</name>
+        <dataType>Octet</dataType>
+        <cardinality>11</cardinality>
+        <encoding>HLAfixedArray</encoding>
+        <semantics>Marking characters, NUL-padded.</semantics>
+      </arrayData>
+      <arrayData>
+        <name>RTIobjectId</name>
+        <dataType>HLAASCIIchar</dataType>
+        <cardinality>Dynamic</cardinality>
+        <encoding>RPRnullTerminatedArray</encoding>
+        <semantics>Name of an HLA object instance: the ASCII characters followed by a NUL octet (RPR FOM 2.0 RPRnullTerminatedArray).</semantics>
+      </arrayData>
+    </arrayDataTypes>
+
+    <fixedRecordDataTypes>
+      <fixedRecordData>
+        <name>EntityTypeStruct</name>
+        <encoding>HLAfixedRecord</encoding>
+        <semantics>DIS entity type record (8 octets).</semantics>
+        <field><name>EntityKind</name><dataType>Octet</dataType><semantics>Kind.</semantics></field>
+        <field><name>Domain</name><dataType>Octet</dataType><semantics>Domain.</semantics></field>
+        <field><name>CountryCode</name><dataType>UnsignedInteger16</dataType><semantics>Country.</semantics></field>
+        <field><name>Category</name><dataType>Octet</dataType><semantics>Category.</semantics></field>
+        <field><name>Subcategory</name><dataType>Octet</dataType><semantics>Subcategory.</semantics></field>
+        <field><name>Specific</name><dataType>Octet</dataType><semantics>Specific.</semantics></field>
+        <field><name>Extra</name><dataType>Octet</dataType><semantics>Extra.</semantics></field>
+      </fixedRecordData>
+      <fixedRecordData>
+        <name>FederateIdentifierStruct</name>
+        <encoding>HLAfixedRecord</encoding>
+        <semantics>DIS simulation address.</semantics>
+        <field><name>SiteID</name><dataType>UnsignedInteger16</dataType><semantics>Site.</semantics></field>
+        <field><name>ApplicationID</name><dataType>UnsignedInteger16</dataType><semantics>Application.</semantics></field>
+      </fixedRecordData>
+      <fixedRecordData>
+        <name>EntityIdentifierStruct</name>
+        <encoding>HLAfixedRecord</encoding>
+        <semantics>DIS entity identifier (6 octets).</semantics>
+        <field><name>FederateIdentifier</name><dataType>FederateIdentifierStruct</dataType><semantics>Site and application.</semantics></field>
+        <field><name>EntityNumber</name><dataType>UnsignedInteger16</dataType><semantics>Entity number.</semantics></field>
+      </fixedRecordData>
+      <fixedRecordData>
+        <name>WorldLocationStruct</name>
+        <encoding>HLAfixedRecord</encoding>
+        <semantics>ECEF location (24 octets).</semantics>
+        <field><name>X</name><dataType>MeterFloat64</dataType><semantics>X.</semantics></field>
+        <field><name>Y</name><dataType>MeterFloat64</dataType><semantics>Y.</semantics></field>
+        <field><name>Z</name><dataType>MeterFloat64</dataType><semantics>Z.</semantics></field>
+      </fixedRecordData>
+      <fixedRecordData>
+        <name>OrientationStruct</name>
+        <encoding>HLAfixedRecord</encoding>
+        <semantics>DIS Euler angles (12 octets).</semantics>
+        <field><name>Psi</name><dataType>AngleRadianFloat32</dataType><semantics>Rotation about Z.</semantics></field>
+        <field><name>Theta</name><dataType>AngleRadianFloat32</dataType><semantics>Rotation about Y.</semantics></field>
+        <field><name>Phi</name><dataType>AngleRadianFloat32</dataType><semantics>Rotation about X.</semantics></field>
+      </fixedRecordData>
+      <fixedRecordData>
+        <name>VelocityVectorStruct</name>
+        <encoding>HLAfixedRecord</encoding>
+        <semantics>ECEF velocity (12 octets).</semantics>
+        <field><name>XVelocity</name><dataType>VelocityMeterPerSecondFloat32</dataType><semantics>X.</semantics></field>
+        <field><name>YVelocity</name><dataType>VelocityMeterPerSecondFloat32</dataType><semantics>Y.</semantics></field>
+        <field><name>ZVelocity</name><dataType>VelocityMeterPerSecondFloat32</dataType><semantics>Z.</semantics></field>
+      </fixedRecordData>
+      <fixedRecordData>
+        <name>RelativePositionStruct</name>
+        <encoding>HLAfixedRecord</encoding>
+        <semantics>Position in entity body coordinates (12 octets).</semantics>
+        <field><name>BodyXDistance</name><dataType>MeterFloat32</dataType><semantics>X.</semantics></field>
+        <field><name>BodyYDistance</name><dataType>MeterFloat32</dataType><semantics>Y.</semantics></field>
+        <field><name>BodyZDistance</name><dataType>MeterFloat32</dataType><semantics>Z.</semantics></field>
+      </fixedRecordData>
+      <fixedRecordData>
+        <name>MarkingStruct</name>
+        <encoding>HLAfixedRecord</encoding>
+        <semantics>Marking (12 octets), as in the DIS Entity State PDU.</semantics>
+        <field><name>MarkingEncodingType</name><dataType>MarkingEncodingEnum8</dataType><semantics>Character set.</semantics></field>
+        <field><name>MarkingData</name><dataType>MarkingArray11</dataType><semantics>Characters.</semantics></field>
+      </fixedRecordData>
+      <fixedRecordData>
+        <name>EventIdentifierStruct</name>
+        <encoding>HLAfixedRecord</encoding>
+        <semantics>Event identifier: UnsignedInteger16 count followed by the issuing object's name.</semantics>
+        <field><name>EventCount</name><dataType>UnsignedInteger16</dataType><semantics>Event number.</semantics></field>
+        <field><name>IssuingObjectIdentifier</name><dataType>RTIobjectId</dataType><semantics>Name of the object that issued the event.</semantics></field>
+      </fixedRecordData>
+    </fixedRecordDataTypes>
+  </dataTypes>
+</objectModel>
