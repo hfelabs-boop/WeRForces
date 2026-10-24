@@ -542,10 +542,11 @@ gun (1650 m/s, laser rangefinder) over 0.9 at 2 km.
 
 ### Models
 
-The hit/kill (armour by aspect), ballistic and radar models are named functions
-in `src/sim/models.ts`, each behind one small interface (`HitKillModel`,
-`BallisticModel`, `RadarModel`). An engine uses `engine.models`, which starts
-with the defaults (`aspect-armour`, `drop-and-spread`, `radar-equation`); a
+The hit/kill (armour by aspect), ballistic, radar and navigation models are
+named functions in `src/sim/models.ts`, each behind one small interface
+(`HitKillModel`, `BallisticModel`, `RadarModel`, `NavigationModel`). An engine
+uses `engine.models`, which starts with the defaults (`aspect-armour`,
+`drop-and-spread`, `radar-equation`, `inertial-drift`); a
 study can put its own in, e.g.
 `engine.models = { ...engine.models, ballistic: myModel }`.
 
@@ -651,6 +652,12 @@ until *fuel below* or *ammunition below* a level.
 | R-330Zh Zhitel (`ru-r330zh`) | radios | 15 km |
 | 1L269 Krasukha-2 (`ru-krasukha`) | radars | 25 km |
 | M1133 Stryker EW, MFEW (`us-mfew`) | radios | 10 km |
+| Pole-21 (`ru-pole21`) | satellite navigation (GNSS) | 25 km |
+| Shipovnik-Aero (`ru-shipovnik`) | drone datalinks; GNSS, spoofing | 10 km |
+| Silok (`ru-silok`) | drone datalinks, GNSS | 4 km |
+| L-MADIS (`us-lmadis`) | drone datalinks, GNSS | 3 km |
+| Stupor anti-drone rifle team (`ru-stupor-team`) | drone datalinks, GNSS | 1.5 km |
+| DroneBuster team (`us-dronebuster-team`) | drone datalinks, GNSS | 1 km |
 
 A jammer starts switched on. It jams while it is alive, switched on, not
 firepower-killed and not mounted, and only entities of forces hostile to it,
@@ -678,6 +685,152 @@ the inspector shows *RADIO JAMMED*.
 the jammer as a share of the jammer's reach, and never less than 30 %, of the
 range it would have against that target (see [Radar range](#radar-range)).
 Closing on the jammer burns through. The inspector shows *RADAR JAMMED*.
+
+**Datalink jamming** cuts a radio-linked unmanned system's control link
+(`unmanned.link: "rf"`; fibre-optic and autonomous ones cannot be jammed, and
+`antiJam` makes the jammer come closer). What a drone does without its link is
+up to the unmanned-systems model. The inspector shows *DATALINK JAMMED*.
+
+### Satellite navigation (GNSS)
+
+Entity types with `gnss: true`, and unmanned systems, navigate by satellite. A
+GNSS jammer hostile to them denies it within its reach, and they fall back on
+**inertial navigation**: where they think they are drifts away from where they
+are. The default navigation model (`inertial-drift`) puts the error after *t*
+seconds without satellites at
+
+> error = drift × *t* × (1 + *t* / 300 s), at most 5 km
+
+with `drift` the type's `insDrift` (default 1 m/s, a small drone's MEMS unit):
+70 m after a minute, 170 m after two, 1 km after eight. The error points in a
+direction drawn when the fix is lost. Tasks steer by the believed position, so
+a move ends that far off its destination and a route, orbit or search is flown
+that far off track. Tasks that keep station by sight (formation, follow,
+attack, mount, resupply) are not thrown off. When the jamming stops (the
+jammer is switched off, destroyed or left behind) the fix comes back at once.
+The event log notes *Scout drone: GNSS jammed, navigating by inertial* and
+*GNSS back*, the [alerts](#explanations-and-alerts) list *GNSS denied*, the
+inspector shows *GNSS DENIED (~120 m)*, and Why? says *GNSS denied: navigating
+by inertial for 90 s, error ~120 m*.
+
+A jammer with `spoof: true` **spoofs** instead: the receiver keeps a fix, but a
+false one that walks away from the spoofer at 5 m/s, up to 3 km. The navigator
+does not know: it raises no alert, and its own side is not told (exercise
+control sees *GNSS SPOOFED*). Steering by the false fix, it ends up displaced
+toward the spoofer.
+
+**GNSS-guided munitions** (`gnss: true` on the weapon: Excalibur, GMLRS,
+9M544) land within a few metres with satellites. When their path, as a
+straight line from the launcher to the aim point, comes within reach of a GNSS
+jammer hostile to the shooter, they fly the rest of the way on inertial
+guidance and add its error (`insDrift`, default 3 m/s) to their dispersion: an
+Excalibur round flying its last 27 s into a jammed area is about 90 m off.
+Against an entity target, the kill chance is multiplied by the chance the
+error still puts the round within its blast radius of the target.
+
+### Emission control
+
+Each unit or entity has **emission control** (EMCON) settings, in the
+inspector, `PATCH /api/v1/entities/{id}` or `/units/{id}` with `{"emcon":
+{...}}`, or MCP `set_emcon` (on a unit they apply to its members and
+subordinate units):
+
+- **Radio silence**: it transmits nothing, so enemy direction finders cannot
+  find it by its radio. The price is the radio itself, as if jammed: orders
+  reach it a minute late, it shares no contacts, calls no fire, hears no
+  codewords and sends no reports. The inspector shows *RADIO SILENCE*.
+- **Radar off**: its radars neither radiate nor detect. It cannot be found by
+  its radar, sends no Electromagnetic Emission PDU for it, and an
+  anti-radiation missile on its way loses it.
+- **Jamming** on or off (as the **Jamming** switch).
+
+What an entity **radiates** (`emitting` in its state): its radars while on,
+its jammer while jamming, its **radio** for 10 s after each transmission (a
+contact report, a call for fire, acknowledging an order, a codeword), and the
+**datalink** of a radio-linked unmanned system and of a ground control station
+(`groundControl`) flying one within its reach.
+
+### Direction finding
+
+Direction finders are sensors with `df`: the Prophet (`us-prophet`) and R-381T
+Taran (`ru-r381t`) take bearings to enemy radars, jammers, radios and
+datalinks out to 30 km with a 1.5° error; the ARM targeting receiver of the
+F-16CJ and Su-34 to radars and jammers out to 120 km with a 1° error. Once a
+second each station takes a bearing to every enemy emitter it hears within
+range and line of sight, and reports it on the radio: a station that is radio
+jammed or keeps radio silence adds nothing. A force's bearings are pooled into
+**DF contacts**, one per emitter:
+
+- **one station** gives a fix along its bearing, at a range estimated from the
+  signal strength (good to about 35 %): a long, thin ellipse;
+- **two or more** stations cross their bearings (weighted least squares, each
+  bearing weighted by the cross-track error it implies): a much tighter fix,
+  best when the bearings cross near a right angle. Two Prophets 10 km apart fix
+  an emitter 9 km away to a few hundred metres.
+
+Each contact has an **uncertainty ellipse** about 86 % likely to hold the
+emitter, drawn on the map; it is dropped 30 s after the last bearing, or when
+the emitter is destroyed. DF contacts belong to the force that found them
+(`GET /api/v1/df-contacts`, MCP `get_df_contacts`). They are not sensor
+contacts: nothing shoots at them directly. Instead:
+
+- a DF station with the **call for fire** reaction (Prophet and Taran have it)
+  calls for fire on a fix of a ground emitter no longer than 1 km
+  (semi-major), with the rounds spread over half its length; or give a **fire
+  mission** at the fix yourself;
+- anti-radiation missiles are fired at them (below).
+
+### Anti-radiation missiles
+
+An anti-radiation missile (`antiRadiation`: AGM-88 HARM on the F-16CJ, Kh-31P
+on the Su-34) is fired at a radar or jammer its force has located and still
+hears, within its range, and never at anything else. It homes on the emission:
+if the emitter still radiates when it arrives, it is hit as by any guided
+missile. If the emitter has fallen silent (radar off, jammer off), the missile
+flies on to where it last heard it and bursts there with a 30 m error of its
+own: a stationary SA-8 that switches its radar off just after launch is
+rarely hurt. The event log says *AGM-88 HARM anti-radiation missile lost its
+emitter and burst at (x, y)*.
+
+### Counter-UAS
+
+Small drones have their own armour class, `drone`: small (a radar sees one of
+0.01 m² at a third of the range it sees a 1 m² target), and killed or missed
+outright. Against them:
+
+- **counter-drone jammers** cut their datalinks and GNSS: L-MADIS and Silok
+  vehicles (3–4 km), the handheld DroneBuster and the Stupor rifle (1–1.5 km,
+  carried by an infantry team), Shipovnik-Aero (10 km, spoofing);
+- **gun air defence** with a radar that sees small drones (`cuas-radar`,
+  3.5 km against 0.01 m²; `spaag-radar`, 4 km): Stryker M-SHORAD (30 mm
+  proximity rounds, kill chance 0.45 a burst at short range, and Stinger) and
+  2K22 Tunguska (twin 30 mm, 0.4, and 9M311 missiles);
+- **interceptors**: the Coyote launcher (Block 2 interceptors out to 10 km,
+  0.85) and an FPV interceptor-drone team (3 km, 0.6);
+- existing air-defence weapons have a kill chance against drones too (Stinger
+  0.5, Osa 0.45; a 12.7 mm machine gun 0.08).
+
+### Active protection and decoys
+
+**Active protection systems** (`aps` on a type: Trophy on the M1A2 SEPv3, 8
+charges, 0.9; Arena-M on the T-72B3 variant, 22 charges, 0.75, over the 270°
+about the front) fire a charge at an incoming guided missile, slow rocket
+(RPG, AT4) or loitering munition just before it strikes, if it comes from
+inside the protected arc (and, for top attack, only if the system covers the
+roof). The charge defeats it with the system's probability: the event log
+says *M1A2 SEPv3 Abrams (Trophy) 3: Trophy defeated an incoming RPG-7 (5
+charges left)* and *RPG-7 intercepted short of …*. Charges run out; kinetic
+rounds and artillery are not engaged. The inspector shows the charges left,
+and an *APS spent* alert is raised when the last one is used.
+
+**Flares and chaff** (`decoys` on aircraft: AH-64E, Mi-24P, F-16CJ, Su-34) are
+released automatically when a guided missile is fired at the aircraft, one
+salvo a missile while salvos last, multiplying that missile's kill chance by
+the type's `pkFactor` (0.35–0.4).
+
+Both act on the shot and leave the armour and ballistic models alone: a
+missile that gets through is adjudicated as before. Plain M1A2, T-72B3, AH-64D
+and Mi-24V have neither, so existing scenarios play out as they did.
 
 ## Pattern of life
 
@@ -1008,8 +1161,8 @@ finding has a `severity`:
 | Severity | Meaning | Examples |
 | --- | --- | --- |
 | `block` | Stops the activity | destroyed, immobilised, out of fuel, pinned, halted on contact, broken, hold fire, out of range, no line of sight (and what blocks it, where) |
-| `warn` | Hampers it | low fuel, stuck, return-fire ROE, suppressed, radio or radar jammed, sensors cut by darkness or weather, no task |
-| `info` | Explains it | waiting for a plan condition, keeping formation, holding a position, slowed by forest, reloading, engaging |
+| `warn` | Hampers it | low fuel, stuck, return-fire ROE, suppressed, radio or radar jammed, radio silence, radar off, GNSS denied (*navigating by inertial for 90 s, error ~120 m*), active protection spent, sensors cut by darkness or weather, no task |
+| `info` | Explains it | waiting for a plan condition, keeping formation, holding a position, slowed by forest, reloading, engaging, what it radiates, active protection and decoys left, emitters located by direction finding |
 
 Most come with a `fix` (*Set ROE to "fire at will"*), and those about a place
 or another entity give `at` (x, y) and `aboutId`. Exercise control is also told
@@ -1021,8 +1174,8 @@ run: the random generator is not touched.
 
 **Alerts** are the attention queue: idle after its orders (10 s with nothing to
 do), task failed, broken, out of fuel or low on fuel, out of ammunition,
-leader lost, losses, under fire or first contact after a quiet minute, and
-radio jammed. Each is about a unit or a loose entity, with a severity
+leader lost, losses, under fire or first contact after a quiet minute, radio
+jammed, GNSS denied, and active protection spent. Each is about a unit or a loose entity, with a severity
 (critical, warning, info), the time it was last raised and a count. An alert
 about a lasting condition (broken, fuel, ammunition, jammed) closes by itself
 when the condition clears. Acknowledged while the condition lasts, it is not

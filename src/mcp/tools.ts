@@ -590,6 +590,31 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'set_emcon',
+    'Emission control for an entity, or a unit with its members and subordinate units. radioSilence: it transmits nothing, so enemy direction finders cannot locate it by its radio, but it shares no contacts, cannot call for fire or hear codewords, and orders reach it a minute late. radarOff: its radars neither radiate nor detect, and anti-radiation missiles lose them. jamming: switch its jammers on or off. Settings left out stay as they are.',
+    { id: z.string().describe('entity or unit id'), radioSilence: z.boolean().optional(), radarOff: z.boolean().optional(), jamming: z.boolean().optional() },
+    async ({ id, ...emcon }) => {
+      // An entity, else a unit.
+      const asEntity = await call('PATCH', `/api/v1/entities/${encodeURIComponent(id)}`, { emcon });
+      if (asEntity.status >= 400 && asEntity.status !== 404) throw new Error((asEntity.json as { error?: { message?: string } })?.error?.message ?? `HTTP ${asEntity.status}`);
+      const r = asEntity.status === 404 ? await api<{ name: string }>('PATCH', `/api/v1/units/${encodeURIComponent(id)}`, { emcon }) : (asEntity.json as { name: string });
+      const said = Object.entries(emcon)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => `${k} ${v ? 'on' : 'off'}`);
+      return `${r.name}: ${said.join(', ') || 'unchanged'}`;
+    },
+    { idempotentHint: true },
+  );
+
+  tool(
+    'get_df_contacts',
+    'Enemy emitters located by direction finding (SIGINT/ELINT stations such as Prophet or R-381T, and anti-radiation targeting receivers): radars, jammers, radios that transmitted in the last 10 s, drone datalinks and their ground control stations. Each has an estimated position with an uncertainty ellipse (semi-axes in m): one station gives a long ellipse along its bearing, two or more stations cross bearings into a tight fix. Fire a fire mission at a good fix (or let a DF station with call-for-fire do it).',
+    { force: force.optional().describe('exercise control: only this force\'s contacts') },
+    async ({ force: f }) => api('GET', `/api/v1/df-contacts${f !== undefined ? `?force=${f}` : ''}`),
+    { readOnlyHint: true },
+  );
+
+  tool(
     'quick_battle',
     'Replace the scenario with a generated, ready-to-run battle: pick the mission (from Blue\'s side), each force\'s nation, composition, size and support, time and weather. Both forces are placed on land either side of an objective (a town near the middle when there is one), with the mission\'s graphics and a synchronization matrix per force; start the simulation to fight it. Returns the mission brief.',
     {

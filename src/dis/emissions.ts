@@ -1,5 +1,6 @@
 // What WeRForces' entities radiate, as DIS Electromagnetic Emission emitter systems: one
-// system per radar sensor (SensorDef.radar) and one for a switched-on jammer. Deliberately
+// system per radar sensor (SensorDef.radar) that is not switched off by emission control,
+// and one for a switched-on jammer. Deliberately
 // simple: one beam each, with representative parameters by role rather than per-system
 // data. The mapping is documented in docs/reference/dis.md. Read-only on the simulation.
 
@@ -19,6 +20,7 @@ export const BEAM_JAMMING = 12;
 /** SISO-REF-010 emitter names for the catalog types whose real emitter is known (others send 0). */
 export const EMITTER_NAMES: Record<string, number> = {
   'us-f16': 1890, // AN/APG-68
+  'us-f16cj': 1890,
   'ru-su27': 21881, // N001V
   'us-ddg51': 7260, // AN/SPY-1D
   'ru-sa8': 19260, // Land Roll (target acquisition)
@@ -55,7 +57,8 @@ export function emitterSystems(engine: Engine, e: Entity): EmitterSystem[] {
   const name = EMITTER_NAMES[e.type.id] ?? 0;
   for (const sid of e.type.sensors) {
     const s = engine.catalog.sensors.get(sid);
-    if (!s?.radar) continue;
+    // Emission control: a radar switched off radiates nothing.
+    if (!s?.radar || e.radarOff) continue;
     const allRound = s.fov >= 2 * Math.PI - 1e-6;
     systems.push({
       name,
@@ -71,6 +74,9 @@ export function emitterSystems(engine: Engine, e: Entity): EmitterSystem[] {
     // Radio jammers cover VHF combat net radio (30-88 MHz), radar jammers X band (8-12 GHz).
     if (j.radio) beams.push(beam({ beamId: beams.length + 1, frequency: 59e6, frequencyRange: 58e6, erp: 63, beamFunction: BEAM_JAMMING }));
     if (j.radar) beams.push(beam({ beamId: beams.length + 1, frequency: 10e9, frequencyRange: 4e9, erp: 70, beamFunction: BEAM_JAMMING }));
+    // Drone datalink jammers the 2.4 and 5.8 GHz control bands (one beam over both), GNSS jammers L1/L2 (1.2-1.6 GHz).
+    if (j.datalink) beams.push(beam({ beamId: beams.length + 1, frequency: 4.1e9, frequencyRange: 3.6e9, erp: 50, beamFunction: BEAM_JAMMING }));
+    if (j.gnss) beams.push(beam({ beamId: beams.length + 1, frequency: 1.4e9, frequencyRange: 4e8, erp: 50, beamFunction: BEAM_JAMMING }));
     systems.push({ name, function: EMITTER_JAMMER, number: systems.length + 1, location, beams });
   }
   return systems;

@@ -1,5 +1,6 @@
 // Named, swappable physical models: armour by aspect (hit/kill), ballistics of unguided
-// direct fire, and radar detection range. Each is one interface with a default
+// direct fire, radar detection range, and navigation without satellites (inertial drift
+// under GNSS jamming, and spoofing). Each is one interface with a default
 // implementation; `Engine.models` holds the ones in use, so a study can swap one out for
 // an engine without touching the rest of the simulation.
 
@@ -45,10 +46,21 @@ export interface RadarModel {
   detectionRange(sensor: SensorDef, rcs: number): number;
 }
 
+/** Navigation: how far a GNSS navigator's position estimate drifts once satellites are lost or spoofed. */
+export interface NavigationModel {
+  readonly name: string;
+  readonly description: string;
+  /** Position error (m) after `t` s on inertial navigation alone, for a unit drifting at `drift` m/s. */
+  inertialError(t: number, drift: number): number;
+  /** How far (m) a spoofer has walked a receiver's position off after `t` s. */
+  spoofOffset(t: number): number;
+}
+
 export interface Models {
   hitKill: HitKillModel;
   ballistic: BallisticModel;
   radar: RadarModel;
+  navigation: NavigationModel;
 }
 
 // ---------------------------------------------------------------- hit/kill
@@ -189,4 +201,37 @@ export const radarEquation: RadarModel = {
   },
 };
 
-export const DEFAULT_MODELS: Readonly<Models> = { hitKill: aspectArmour, ballistic: dropAndSpread, radar: radarEquation };
+// ---------------------------------------------------------------- navigation
+
+/** Default inertial drift rate (m/s): a small drone's MEMS unit. Vehicles and munitions give their own. */
+export const DEFAULT_INS_DRIFT = 1;
+/** Default drift rate of GNSS-guided munitions (m/s). */
+export const DEFAULT_MUNITION_INS_DRIFT = 3;
+/** Time (s) over which inertial error turns from linear (velocity error) to quadratic (accelerometer bias). */
+export const INS_KNEE = 300;
+/** Inertial error never grows beyond this (m): dead reckoning on landmarks takes over. */
+export const MAX_INS_ERROR = 5000;
+/** How fast a spoofer walks a receiver off (m/s), and how far at most (m). */
+export const SPOOF_RATE = 5;
+export const MAX_SPOOF_OFFSET = 3000;
+
+/**
+ * Default navigation model. Without satellites a navigator dead-reckons on its inertial
+ * unit: the error grows as drift × t × (1 + t / 300 s), linear at first (a velocity error)
+ * and then quadratic (an uncorrected accelerometer bias), up to 5 km. A drone drifting at
+ * 1 m/s is about 70 m out after a minute and 170 m after two; a munition at 3 m/s is 50 m
+ * out after 15 s. A spoofer walks a receiver off at 5 m/s, up to 3 km, without it knowing.
+ */
+export const inertialDrift: NavigationModel = {
+  name: 'inertial-drift',
+  description: 'GNSS denied: inertial error grows linearly, then quadratically, with the time since the fix was lost; spoofing walks the position off at a steady rate.',
+  inertialError(t, drift) {
+    if (t <= 0) return 0;
+    return Math.min(MAX_INS_ERROR, drift * t * (1 + t / INS_KNEE));
+  },
+  spoofOffset(t) {
+    return Math.min(MAX_SPOOF_OFFSET, SPOOF_RATE * Math.max(0, t));
+  },
+};
+
+export const DEFAULT_MODELS: Readonly<Models> = { hitKill: aspectArmour, ballistic: dropAndSpread, radar: radarEquation, navigation: inertialDrift };

@@ -59,6 +59,7 @@ const PLAYER_ROUTES: [string, RegExp][] = [
   ['GET', /^\/api\/v1\/entities\/[^/]+\/path\/?$/],
   ['GET', /^\/api\/v1\/(entities|units)\/[^/]+\/explain\/?$/],
   ['GET', /^\/api\/v1\/alerts\/?$/],
+  ['GET', /^\/api\/v1\/df-contacts\/?$/],
   ['POST', /^\/api\/v1\/orders\/?$/],
   ['POST', /^\/api\/v1\/entities\/[^/]+\/drive\/?$/],
   ['GET', /^\/api\/v1\/codewords\/?$/],
@@ -136,6 +137,12 @@ export class ApiV1 {
   private geo(p: { x: number; y: number }) {
     const g = frameFor(this.engine.terrain.spec).toGeodetic({ x: p.x, y: p.y, z: 0 });
     return { lat: Math.round(((g.lat * 180) / Math.PI) * 1e7) / 1e7, lon: Math.round(((g.lon * 180) / Math.PI) * 1e7) / 1e7 };
+  }
+
+  /** `{radioSilence?, radarOff?, jamming?}` from a request body. */
+  private emcon(v: unknown): { radioSilence?: boolean; radarOff?: boolean; jamming?: boolean } {
+    const o = obj(v);
+    return { radioSilence: o.radioSilence as boolean | undefined, radarOff: o.radarOff as boolean | undefined, jamming: o.jamming as boolean | undefined };
   }
 
   entityView(e: EntitySnapshot) {
@@ -533,6 +540,7 @@ export class ApiV1 {
       if (b.roe !== undefined) this.run({ cmd: 'setRoe', targetId: id, roe: b.roe as never });
       if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
       if (b.jamming !== undefined) this.run({ cmd: 'setJamming', id, on: b.jamming as boolean });
+      if (b.emcon !== undefined) this.run({ cmd: 'setEmcon', targetId: id, ...this.emcon(b.emcon) });
       if (b.position !== undefined || b.x !== undefined || b.lat !== undefined) {
         const p = this.point(b.position ?? b);
         this.run({ cmd: 'moveEntity', id, x: p.x, y: p.y, heading: b.heading as number | undefined });
@@ -590,6 +598,14 @@ export class ApiV1 {
       });
     }
 
+    // Enemy emitters located by direction finding: the caller's force's (exercise control: all, or ?force=).
+    r.get(`${P}/df-contacts`, (req) => {
+      let list = this.state().dfContacts ?? [];
+      const f = req.query.get('force');
+      if (f) list = list.filter((c) => String(c.force) === f || FORCE_NAMES[c.force].toLowerCase() === f.toLowerCase());
+      return { json: list.map((c) => ({ ...c, ...this.geo(c), orientationDeg: Math.round((((c.orientation * 180) / Math.PI) % 360 + 360) % 360), age: Math.round((this.engine.time - c.lastSeen) * 10) / 10 })) };
+    });
+
     // ---------------------------------------------------------------- units
     r.get(`${P}/units`, (req) => {
       let list = this.state().units;
@@ -638,6 +654,7 @@ export class ApiV1 {
       if (b.roe !== undefined) this.run({ cmd: 'setRoe', targetId: id, roe: b.roe as never });
       if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
       if (b.superiorId !== undefined) this.run({ cmd: 'setSuperior', unitId: id, superiorId: b.superiorId as string | null });
+      if (b.emcon !== undefined) this.run({ cmd: 'setEmcon', targetId: id, ...this.emcon(b.emcon) });
       return { json: this.unitView(this.unit(id)) };
     });
     r.delete(`${P}/units/{id}`, (req) => {

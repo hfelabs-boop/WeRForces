@@ -93,7 +93,8 @@ export function filterState(engine: Engine, s: SimState, force: ForceId): SimSta
   const seen = contactsOf(engine, force);
   const entities: EntitySnapshot[] = [];
   for (const e of s.entities) {
-    if (e.force === force) entities.push(e);
+    // A spoofed navigator does not know it is.
+    if (e.force === force) entities.push(e.gnss === 'spoofed' ? { ...e, gnss: undefined, navError: undefined } : e);
     else {
       const c = seen.get(e.id);
       if (c && !e.embarkedIn) entities.push(contactView(engine, e, c));
@@ -111,6 +112,8 @@ export function filterState(engine: Engine, s: SimState, force: ForceId): SimSta
     schedule: s.schedule?.filter((o) => forceOf(engine, o.targetId) === force),
     alerts: s.alerts?.filter((a) => a.force === force),
     commanders: s.commanders?.filter((c) => c.force === force),
+    // Emitters this force's direction finders have located.
+    dfContacts: ((list) => (list.length ? list : undefined))((s.dfContacts ?? []).filter((c) => c.force === force)),
     dis: undefined,
   };
 }
@@ -184,6 +187,7 @@ const PLAYER_COMMANDS = new Set<Command['cmd']>([
   'startPhase',
   'setCommander',
   'setJamming',
+  'setEmcon',
   'drive',
   'batch',
   'aggregate',
@@ -253,6 +257,7 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
     case 'stop':
     case 'setRoe':
     case 'setReactions':
+    case 'setEmcon':
       ownObject(c.targetId, 'object');
       return;
     case 'setFormation':
