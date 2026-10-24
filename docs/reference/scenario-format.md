@@ -255,6 +255,18 @@ with the scenario:
 }
 ```
 
+Optional model fields (all may be left out; see
+[Concepts](../concepts.md#armour-by-aspect)):
+
+| Section | Field | Meaning |
+| --- | --- | --- |
+| entity type | `protection` | `{front, side, rear, top}` armour in mm RHA equivalent; all four |
+| entity type | `rcs` | radar cross-section in m² (default by symbol and domain) |
+| weapon | `penetration` | armour penetration in mm RHA equivalent |
+| weapon | `topAttack` | `true`: hits the top armour (as indirect fire does) |
+| weapon | `spreadMrad`, `rangeError` | unguided direct fire: one-sigma angular spread (mrad) and range-estimate error (fraction, default 0.05); turn on the ballistic model |
+| sensor | `refRange`, `refRcs` | radar: detection range (m) against a target of `refRcs` m² (default 1); range scales with RCS^¼ up to `maxRange` |
+
 Every entry is checked as in the editor, and an entry with the id of a
 built-in one replaces it in this scenario. The same JSON works as a
 `--catalog` file ([Tutorial 9](../tutorials/09-extending-the-catalog.md)).

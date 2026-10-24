@@ -24,6 +24,7 @@ src/sim           The simulation engine; no I/O, usable as a library
   units.ts          Unit: formations, leader succession, deployment, the chain of command
   sensors.ts        detection
   combat.ts         target and weapon selection, fly-out, damage, indirect fire and blast
+  models.ts         swappable hit/kill (armour by aspect), ballistic and radar models
   fires.ts          automatic call for fire
   morale.ts         suppression, pinning, unit morale, breaking and rallying
   environment.ts    sun, light level, weather, sensor range at night
@@ -247,6 +248,7 @@ npm run docs:gen      # regenerate docs/reference/catalog.md and mcp-tools.md
 | `viewshed.test.ts` | viewshed grids |
 | `life.test.ts` | pattern of life: civilians kept topped up, fleeing |
 | `ew.test.ts` | radio and radar jamming |
+| `fidelity.test.ts` | armour by aspect, ballistics of unguided rounds, the radar range equation, swapping models |
 | `drive.test.ts` | direct control |
 | `catalog-edit.test.ts` | catalog editor validation and per-scenario entries |
 | `wizard.test.ts` | quick battles |
