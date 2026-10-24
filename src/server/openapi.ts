@@ -466,7 +466,7 @@ export function buildOpenApi(baseUrl: string): Schema {
           properties: {
             url: { type: 'string', format: 'uri' },
             format: { enum: ['json', 'slack', 'discord'] },
-            kinds: { type: 'array', items: { enum: ['fire', 'detonation', 'damaged', 'destroyed', 'detected', 'task', 'created', 'deleted', 'info'] } },
+            kinds: { type: 'array', items: { enum: ['fire', 'detonation', 'damaged', 'destroyed', 'detected', 'task', 'created', 'deleted', 'info', 'radio'] } },
             secret: { type: 'string', description: 'Signs payloads: X-WeRForces-Signature: sha256=<hmac>' },
             name: { type: 'string' },
           },

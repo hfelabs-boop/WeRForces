@@ -15,8 +15,11 @@ A scenario saved at time 0 is a clean starting point. Saved while running
 damage, ammunition, contacts and plan/task progress, units carry their leader
 and plan progress, and the file adds munitions in flight (`shots`) and the
 random generator state (`rngState`), smoke clouds (`smoke`) and orders still
-on their way (`orders`). Loading a checkpoint continues the run
-exactly as it would have gone on. Destroyed entities are kept as wrecks.
+on their way (`orders`). Loading a checkpoint continues the run from that
+state. Moving entities plan their route again from where they are, so the run
+soon drifts from the one that was saved: two loads of the same checkpoint play
+out identically, but not necessarily like the original run. Destroyed entities
+are kept as wrecks.
 
 The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
 

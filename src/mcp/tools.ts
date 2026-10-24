@@ -205,7 +205,7 @@ export function createMcpServer(call: ApiCaller): McpServer {
     'Recent simulation events (detections, fire, hits, kills, task changes). Use `since` with the last seq you saw.',
     {
       since: z.number().int().optional(),
-      kinds: z.array(z.enum(['fire', 'detonation', 'damaged', 'destroyed', 'detected', 'task', 'created', 'deleted', 'info'])).optional(),
+      kinds: z.array(z.enum(['fire', 'detonation', 'damaged', 'destroyed', 'detected', 'task', 'created', 'deleted', 'info', 'radio'])).optional(),
       limit: z.number().int().min(1).max(500).optional(),
     },
     async (a) => {

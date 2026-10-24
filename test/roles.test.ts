@@ -144,4 +144,33 @@ describe('fogged event log', () => {
     expect(det?.text).toContain('BRDM-2 (E2)');
     expect(evs.some((e) => e.entityId === 'E3' || e.targetId === 'E3')).toBe(false);
   });
+
+  it("hides another force's radio traffic and detections, even about this force", async () => {
+    const { filterEvents } = await import('../src/server/fog.js');
+    const { engine } = scene();
+    const red = engine.createUnitFromTemplate('ru-tank-platoon', 2, 2500, 2400, 0, 'Red Tigers');
+    const from = engine.eventsSince(0).length;
+    // Red reports and detects Blue's scout, then shoots at it.
+    engine.radio(red.leader!, 'Red Tigers: contact, HMMWV at 1000 2000', 'E1');
+    engine.log('detected', `${red.leader!.name} detected Scout`, red.leader!.id, 'E1');
+    engine.log('fire', `${red.leader!.name} (Red Tigers) fired at Scout`, red.leader!.id, 'E1');
+    const blue = filterEvents(engine, engine.eventsSince(0).slice(from), 1);
+    expect(blue.map((e) => e.kind)).toEqual(['fire']);
+    expect(blue[0].text).not.toMatch(/Red Tigers/);
+    expect(blue[0].text).toContain(`enemy unit (${red.id})`);
+  });
+});
+
+describe('fire missions', () => {
+  it('are refused for units and entities without artillery', async () => {
+    const { executeCommand } = await import('../src/server/commands.js');
+    const { engine } = scene();
+    const runner = new SimRunner(engine, 0.1, 20, 0);
+    const tanks = engine.createUnitFromTemplate('us-tank-platoon', 1, 500, 500);
+    const r = executeCommand(runner, { cmd: 'assignTask', targetId: tanks.id, task: { type: 'fireMission', target: { x: 2000, y: 2000 } } });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/no artillery or mortars/);
+    const guns = engine.createUnitFromTemplate('us-paladin-platoon', 1, 500, 800);
+    expect(executeCommand(runner, { cmd: 'assignTask', targetId: guns.id, task: { type: 'fireMission', target: { x: 2000, y: 2000 } } }).ok).toBe(true);
+  });
 });

@@ -88,7 +88,7 @@ export class ApiV1 {
       throw err;
     }
     const r = executeCommand(this.ctx.runner, c);
-    if (!r.ok) throw new HttpError(/^unknown (entity|unit|object|local entity|graphic)/.test(r.error ?? '') ? 404 : 400, r.error ?? 'command failed');
+    if (!r.ok) throw new HttpError(/^unknown (entity|unit|object|local entity|graphic)\b(?! type)/.test(r.error ?? '') ? 404 : 400, r.error ?? 'command failed');
     return r;
   }
 

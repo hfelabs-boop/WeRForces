@@ -895,7 +895,7 @@ class App {
       if (/hooks\.slack\.com/.test(hookUrl.value)) hookFormat.value = 'slack';
       else if (/discord(app)?\.com\/api\/webhooks/.test(hookUrl.value)) hookFormat.value = 'discord';
     });
-    const kindNames = ['detonation', 'damaged', 'destroyed', 'detected', 'task', 'info', 'fire', 'created', 'deleted'];
+    const kindNames = ['detonation', 'damaged', 'destroyed', 'detected', 'task', 'info', 'radio', 'fire', 'created', 'deleted'];
     const defaultKinds = new Set(['damaged', 'destroyed', 'task', 'info']);
     const kindBoxes = kindNames.map((k) => [k, h('input', { type: 'checkbox', checked: defaultKinds.has(k) }) as HTMLInputElement] as const);
 

@@ -296,9 +296,18 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         e.z = e.domain === 'air' ? engine.terrain.surfaceHeight(x, y) + agl : e.domain === 'surface' ? 0 : engine.terrain.elevation(x, y);
         return;
       }
-      case 'assignTask':
-        engine.issueOrder(str(c.targetId, 'targetId'), { task: validateTask(c.task) });
+      case 'assignTask': {
+        const targetId = str(c.targetId, 'targetId');
+        const task = validateTask(c.task);
+        if (task.type === 'fireMission') {
+          // Refuse up front rather than fail later in the event log.
+          const members = engine.units.get(targetId)?.memberList ?? [engine.entities.get(targetId)].filter((e) => !!e);
+          const tubes = members.filter((m) => m.alive && m.type.weapons.some((w) => engine.catalog.weapon(w).indirect && (!task.weaponId || w === task.weaponId)));
+          if (members.length && !tubes.length) throw new ValidationError(`${engine.nameOf(targetId)} has no ${task.weaponId ? `weapon ${task.weaponId}` : 'artillery or mortars'} for a fire mission`);
+        }
+        engine.issueOrder(targetId, { task });
         return;
+      }
       case 'assignPlan':
         engine.issueOrder(str(c.targetId, 'targetId'), { plan: validatePlan(c.plan) });
         return;

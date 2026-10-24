@@ -60,7 +60,7 @@ Recent simulation events (detections, fire, hits, kills, task changes). Use `sin
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `since` | integer (-9007199254740991–9007199254740991) |  |  |
-| `kinds` | array of `"fire"` \| `"detonation"` \| `"damaged"` \| `"destroyed"` \| `"detected"` \| `"task"` \| `"created"` \| `"deleted"` \| `"info"` |  |  |
+| `kinds` | array of `"fire"` \| `"detonation"` \| `"damaged"` \| `"destroyed"` \| `"detected"` \| `"task"` \| `"created"` \| `"deleted"` \| `"info"` \| `"radio"` |  |  |
 | `limit` | integer (1–500) |  |  |
 
 ## `query_terrain` _(read-only)_

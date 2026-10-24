@@ -80,6 +80,9 @@ function forceOf(engine: Engine, id: string): ForceId | undefined {
   return engine.entities.get(id)?.force ?? engine.units.get(id)?.force;
 }
 
+/** Kinds of another force's events a player notices when they are aimed at its own. */
+const PERCEIVED = new Set<SimEvent['kind']>(['fire', 'detonation', 'damaged', 'destroyed']);
+
 /** How a player refers to another force's entity: by type and id, not its real name. */
 function contactName(engine: Engine, id: string): string | undefined {
   const e = engine.entities.get(id);
@@ -94,14 +97,18 @@ export function filterEvents(engine: Engine, events: SimEvent[], force: ForceId)
   const forceOf = (id?: string) => (id ? (engine.entities.get(id)?.force ?? engine.units.get(id)?.force) : undefined);
   const out: SimEvent[] = [];
   for (const ev of events) {
-    const visible = (ev.kind === 'info' && !ev.entityId) || forceOf(ev.entityId) === force || forceOf(ev.targetId) === force;
+    // Another force's doings show only when they land on this force: being shot at,
+    // hit or killed. Its radio traffic, detections and orders stay hidden.
+    const visible = (ev.kind === 'info' && !ev.entityId) || forceOf(ev.entityId) === force || (forceOf(ev.targetId) === force && PERCEIVED.has(ev.kind));
     if (!visible) continue;
     let text = ev.text;
     for (const id of [ev.entityId, ev.targetId]) {
       if (!id || forceOf(id) === force) continue;
-      const real = engine.entities.get(id)?.name;
+      const e = engine.entities.get(id);
       const alias = contactName(engine, id);
-      if (real && alias) text = text.split(real).join(alias);
+      if (e && alias) text = text.split(e.name).join(alias);
+      // Nor the name of its unit.
+      if (e?.unit && text.includes(e.unit.name)) text = text.split(e.unit.name).join(`enemy unit (${e.unit.id})`);
     }
     out.push(text === ev.text ? ev : { ...ev, text });
   }

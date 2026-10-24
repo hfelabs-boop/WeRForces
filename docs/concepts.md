@@ -538,5 +538,7 @@ the square of the entity count.
 writes a full checkpoint: damage, ammunition, contacts, plan and task progress
 (a route resumes from its current waypoint, a fire mission keeps the rounds
 still to fire), munitions in flight, passengers and the random number state.
-Loading it continues the run exactly; only route planning restarts from the
-current positions.
+Loading it continues the run from that state, but route planning restarts
+from the current positions (and patrols rejoin their route at the nearest
+point), so it drifts from the run that was saved. Loading the same checkpoint
+twice gives the same run.
