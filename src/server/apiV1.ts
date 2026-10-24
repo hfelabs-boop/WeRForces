@@ -610,6 +610,8 @@ export class ApiV1 {
     const t = { ...obj(body) };
     if (t.target && typeof t.target === 'object') t.target = this.point(t.target, 'target');
     if (t.center && typeof t.center === 'object') t.center = this.point(t.center, 'center');
+    if (t.position && typeof t.position === 'object') t.position = this.point(t.position, 'position');
+    if (t.fallback && typeof t.fallback === 'object') t.fallback = this.point(t.fallback, 'fallback');
     return t;
   }
 

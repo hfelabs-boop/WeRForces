@@ -288,6 +288,28 @@ export function buildOpenApi(baseUrl: string): Schema {
               description: 'Drive to a friendly supply vehicle (the nearest with stock, or supplierId), halt beside it and take on fuel and ammunition. Units send every member that needs it.',
               properties: { type: { const: 'resupply' }, supplierId: { type: 'string' } },
             },
+            {
+              type: 'object',
+              required: ['type', 'position'],
+              description:
+                'Take a position and hold it facing `facing` (degrees; default the direction of the move). overwatch: watch and engage (optional `duration` s). defend: dig in and fight from it. screen: return-fire ROE, fall back to `fallback` (default 2 km to the rear) when an enemy comes within `breakContact` m. ambush: weapons tight until an enemy enters the `killZoneId` area, then everyone opens fire. Units deploy in a line `width` m wide. Infantry dig in after 90 s, vehicles go hull-down after 30 s: harder to see and hit.',
+              properties: {
+                type: { enum: ['overwatch', 'defend', 'screen', 'ambush'] },
+                position: ref('Position'),
+                facing: { type: 'number', minimum: 0, maximum: 360 },
+                width: { type: 'number' },
+                duration: { type: 'number' },
+                killZoneId: { type: 'string' },
+                fallback: ref('Position'),
+                breakContact: { type: 'number' },
+              },
+            },
+            {
+              type: 'object',
+              required: ['type', 'areaId'],
+              description: "Sweep an area in parallel tracks spaced to the searcher's sensor range (or `spacing` m), then report what was found.",
+              properties: { type: { const: 'search' }, areaId: { type: 'string' }, spacing: { type: 'number' }, speed: { type: 'number' } },
+            },
           ],
         },
         PlanStatement: {

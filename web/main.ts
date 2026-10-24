@@ -1171,7 +1171,17 @@ class App {
         add(`Breach a lane through ${hitGraphic.name}`, () => this.task(sel, { type: 'breach', graphicId: hitGraphic.id }));
         add('Move here', () => this.task(sel, { type: 'moveTo', target: world }));
       } else {
+        if (hitGraphic?.kind === 'area') {
+          add(`Search ${hitGraphic.name}`, () => this.task(sel, { type: 'search', areaId: hitGraphic.id }));
+          const here = this.entity(sel) ?? this.entity(this.unit(sel)?.leaderId);
+          if (here && this.domainOf(sel) !== 'air') add(`Ambush ${hitGraphic.name} from here`, () => this.task(sel, { type: 'ambush', position: { x: Math.round(here.x), y: Math.round(here.y) }, killZoneId: hitGraphic.id }));
+        }
         add('Move here', () => this.task(sel, { type: 'moveTo', target: world }));
+        if (this.domainOf(sel) !== 'air') {
+          add('Overwatch here', () => this.task(sel, { type: 'overwatch', position: world }));
+          add('Defend here', () => this.task(sel, { type: 'defend', position: world }));
+          add('Screen here', () => this.task(sel, { type: 'screen', position: world }));
+        }
         if (this.passengerCount(sel) > 0) {
           add('Move here and dismount', () => {
             this.planDrafts.set(sel, { name: 'Move and dismount', statements: [{ kind: 'task', task: { type: 'moveTo', target: world } }, { kind: 'task', task: { type: 'dismount' } }] });
@@ -1499,6 +1509,14 @@ class App {
             return `Breach ${name(t.graphicId)}`;
           case 'resupply':
             return t.supplierId ? `Resupply from ${name(t.supplierId)}` : 'Resupply';
+          case 'overwatch':
+          case 'defend':
+          case 'screen':
+            return `${t.type[0].toUpperCase()}${t.type.slice(1)} ${fmtGrid(t.position.x, t.position.y)}`;
+          case 'ambush':
+            return `Ambush ${name(t.killZoneId)}`;
+          case 'search':
+            return `Search ${name(t.areaId)}`;
           default:
             return t.type;
         }
@@ -1794,6 +1812,7 @@ class App {
           e.pinned ? 'PINNED' : '',
           e.withdrawn ? 'WITHDRAWING' : '',
           e.halted ? 'HALTED (contact)' : '',
+          e.prepared === 'dugIn' ? 'DUG IN' : e.prepared === 'hullDown' ? 'HULL-DOWN' : '',
           e.plan,
           e.task,
         ]

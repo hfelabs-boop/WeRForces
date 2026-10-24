@@ -28,7 +28,35 @@ export function formationOffset(formation: Formation, k: number, spacing: number
 
 /** Unit tasks that every member executes itself, rather than the leader with the rest in formation. */
 export function perMemberTask(spec: TaskSpec): boolean {
-  return spec.type === 'attack' || spec.type === 'fireMission' || spec.type === 'mount' || spec.type === 'dismount' || spec.type === 'resupply';
+  return spec.type === 'attack' || spec.type === 'fireMission' || spec.type === 'mount' || spec.type === 'dismount' || spec.type === 'resupply' || DEPLOYED.has(spec.type);
+}
+
+/** Tasks for which a unit's members deploy in a line across the facing direction. */
+const DEPLOYED = new Set<TaskSpec['type']>(['overwatch', 'defend', 'ambush', 'screen']);
+
+type DeployedSpec = Extract<TaskSpec, { type: 'overwatch' | 'defend' | 'ambush' | 'screen' }>;
+
+/** Each member's own spec: positions spread along a line across the facing, centred on the given one. */
+function deploy(spec: DeployedSpec, members: Entity[], from: Vec2, spacing: number, engine: Engine): DeployedSpec[] {
+  let facing = spec.facing;
+  if (facing === undefined) {
+    let toward: Vec2 | undefined;
+    if (spec.type === 'ambush') {
+      const zone = engine.graphics.get(spec.killZoneId);
+      if (zone?.points.length) toward = zone.points.reduce((s, p) => ({ x: s.x + p.x / zone.points.length, y: s.y + p.y / zone.points.length }), { x: 0, y: 0 });
+    }
+    const a = toward ? spec.position : from;
+    const b = toward ?? spec.position;
+    facing = Math.hypot(b.x - a.x, b.y - a.y) > 5 ? (Math.atan2(b.x - a.x, b.y - a.y) * 180) / Math.PI : 0;
+    facing = (facing + 360) % 360;
+  }
+  const n = members.length;
+  const gap = n > 1 && 'width' in spec && spec.width ? spec.width / (n - 1) : spacing;
+  const h = (facing * Math.PI) / 180;
+  return members.map((_, i) => {
+    const off = rotateOffset({ x: (i - (n - 1) / 2) * gap, y: 0 }, h);
+    return { ...spec, facing, position: { x: Math.round(spec.position.x + off.x), y: Math.round(spec.position.y + off.y) } };
+  });
 }
 
 export class Unit implements Taskable {
@@ -95,6 +123,16 @@ export class Unit implements Taskable {
       const alive = this.alive();
       const tubes = alive.filter((m) => indirectWeaponFor(engine, m, spec.target, spec.weaponId));
       for (const m of tubes.length ? tubes : alive) engine.setEntityTask(m, createTask(spec));
+      return;
+    }
+    if (DEPLOYED.has(spec.type)) {
+      const alive = this.alive();
+      // Members keep their left-to-right order across the line.
+      const specs = deploy(spec as DeployedSpec, alive, this.centroid(), Math.max(this.spacing, leader.domain === 'lifeform' ? 15 : 60), engine);
+      const h = ((specs[0]?.facing ?? 0) * Math.PI) / 180;
+      const side = (m: Entity) => (m.x - leader.x) * Math.cos(h) - (m.y - leader.y) * Math.sin(h);
+      const order = [...alive].sort((a, b) => side(a) - side(b));
+      order.forEach((m, i) => engine.setEntityTask(m, createTask(specs[i])));
       return;
     }
     if (spec.type === 'resupply') {

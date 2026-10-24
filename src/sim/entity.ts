@@ -67,6 +67,8 @@ export class Entity {
   /** Morale of an entity that is not in a unit (units keep their own). */
   morale = 1;
   moraleState: MoraleState = 'steady';
+  /** In a prepared position: infantry dug in, or a vehicle hull-down. */
+  prepared?: 'dugIn' | 'hullDown';
   /** 0..1 fuel left. */
   fuel = 1;
   /** Supply vehicles: full loads left to hand out. */

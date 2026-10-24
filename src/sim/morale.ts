@@ -45,7 +45,8 @@ export function isPinned(engine: Engine, e: Entity): boolean {
 
 /** Multiplier on the chance of hitting a target: pinned infantry are lying flat. */
 export function exposureFactor(e: Entity): number {
-  return e.pinned ? 0.5 : 1;
+  const prepared = e.prepared === 'dugIn' ? 0.4 : e.prepared === 'hullDown' ? 0.6 : 1;
+  return (e.pinned ? 0.5 : 1) * prepared;
 }
 
 function moraleOf(e: Entity): MoraleState {

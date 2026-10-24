@@ -127,12 +127,12 @@ Delete an entity, a unit (with its members) or a graphic.
 
 ## `assign_task`
 
-Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
+Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm. Tactical tasks: overwatch/defend/screen need `to` (the position) and take `facing` (degrees) and `width` (units deploy in a line); ambush also needs `graphicId` (the kill zone area) and opens fire only when an enemy enters it; screen falls back when an enemy comes within 1.5 km; search needs `graphicId` (an area) and sweeps it. Holding still, infantry dig in and vehicles go hull-down. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `targetId` | string | yes | entity (E..) or unit (U..) id |
-| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` \| `"mount"` \| `"dismount"` \| `"breach"` \| `"resupply"` | yes |  |
+| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` \| `"mount"` \| `"dismount"` \| `"breach"` \| `"resupply"` \| `"overwatch"` \| `"defend"` \| `"screen"` \| `"ambush"` \| `"search"` | yes |  |
 | `to` | {x, y, lat, lon, town} |  | Location as {x,y}, {lat,lon} or {town} |
 | `routeId` | string |  |  |
 | `targetEntityId` | string |  |  |
@@ -140,7 +140,9 @@ Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMiss
 | `radius` | number |  | orbit radius in m (default 2000), or fire mission sheaf radius (default 0) |
 | `rounds` | integer (1–100) |  | fire mission rounds per tube (default 3) |
 | `smoke` | boolean |  | fire mission: smoke rounds instead of high explosive |
-| `graphicId` | string |  | breach: the minefield or obstacle graphic |
+| `graphicId` | string |  | breach: the minefield or obstacle; ambush: the kill zone area; search: the area |
+| `facing` | number (0–360) |  | overwatch/defend/screen/ambush: direction to face, degrees from north |
+| `width` | number |  | defend/screen/ambush: frontage in m for a unit |
 | `speedKmh` | number |  |  |
 
 ## `assign_plan`

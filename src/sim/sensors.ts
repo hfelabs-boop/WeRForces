@@ -21,6 +21,8 @@ export function detectionProbability(engine: Engine, observer: Entity, target: E
     if (target.domain === 'lifeform') p *= 0.6;
   }
   if (target.speed > 1) p *= 1.3;
+  // Dug in or hull-down and quiet: hard to spot.
+  else if (target.prepared && engine.time - target.lastFiredAt >= 5) p *= 0.5;
   if (engine.time - target.lastFiredAt < 5) p *= 2;
   // Contacts already being tracked are easy to maintain.
   if (observer.contacts.has(target.id)) p = Math.max(p, 0.95);

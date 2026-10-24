@@ -195,6 +195,16 @@ export type TaskSpec =
   | { type: 'breach'; graphicId: string }
   /** Go to a friendly supply vehicle (the nearest, or the one given), halt beside it and take on fuel and ammunition. */
   | { type: 'resupply'; supplierId?: string }
+  /** Support by fire: take a position and watch toward `facing` (degrees; default: the direction of the move), for `duration` s or until changed. */
+  | { type: 'overwatch'; position: Vec2; facing?: number; duration?: number }
+  /** Hold a position and fight from it; after a while in place, infantry dig in and vehicles go hull-down. Units deploy in a line across `facing`, `width` m wide. */
+  | { type: 'defend'; position: Vec2; facing?: number; width?: number }
+  /** Wait in position with weapons tight; open fire together when an enemy enters the kill zone area (or the ambush is found). */
+  | { type: 'ambush'; position: Vec2; killZoneId: string; facing?: number; width?: number; sprung?: boolean }
+  /** Watch from a position with return-fire ROE; fall back (to `fallback`, default 2 km to the rear) when an enemy comes within `breakContact` m (default 1500). */
+  | { type: 'screen'; position: Vec2; facing?: number; width?: number; fallback?: Vec2; breakContact?: number }
+  /** Sweep an area in parallel tracks spaced to the searcher's sensor range (or `spacing` m). */
+  | { type: 'search'; areaId: string; spacing?: number; speed?: number; startIndex?: number }
   /** Infantry walk to a carrier (entity, or any member of a unit with free seats) and board it. */
   | { type: 'mount'; carrierId: string }
   /** A carrier stops and lets all its passengers out. */
@@ -382,6 +392,7 @@ export interface EntityState {
   fuel?: number;
   /** Supply vehicles: loads left. */
   supplies?: number;
+  prepared?: 'dugIn' | 'hullDown';
 }
 
 export interface UnitRecord {
@@ -526,6 +537,8 @@ export interface EntitySnapshot {
   fuel?: number;
   /** Supply vehicles: full loads of fuel and ammunition left to hand out. */
   supplies?: number;
+  /** In a prepared position: infantry dug in, or a vehicle hull-down (harder to see and hit). */
+  prepared?: 'dugIn' | 'hullDown';
 }
 
 export interface UnitSnapshot {

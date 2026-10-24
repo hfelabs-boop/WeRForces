@@ -92,6 +92,28 @@ export function validateTask(v: unknown): TaskSpec {
       return { type: 'breach', graphicId: str(t.graphicId, 'graphicId') };
     case 'resupply':
       return t.supplierId === undefined ? { type: 'resupply' } : { type: 'resupply', supplierId: str(t.supplierId, 'supplierId') };
+    case 'overwatch':
+    case 'defend':
+    case 'ambush':
+    case 'screen': {
+      const opt = (k: string, min: number, max: number) => {
+        if (t[k] === undefined) return undefined;
+        const x = num(t[k], k);
+        if (x < min || x > max) throw new ValidationError(`${k} must be between ${min} and ${max}`);
+        return x;
+      };
+      const base = { position: vec(t.position, 'position'), facing: opt('facing', 0, 360) };
+      if (t.type === 'overwatch') return { type: 'overwatch', ...base, duration: opt('duration', 0, 1e7) };
+      const width = opt('width', 0, 10000);
+      if (t.type === 'defend') return { type: 'defend', ...base, width };
+      if (t.type === 'ambush') return { type: 'ambush', ...base, width, killZoneId: str(t.killZoneId, 'killZoneId'), sprung: t.sprung === true || undefined };
+      return { type: 'screen', ...base, width, fallback: t.fallback === undefined ? undefined : vec(t.fallback, 'fallback'), breakContact: opt('breakContact', 100, 20000) };
+    }
+    case 'search': {
+      const spacing = t.spacing === undefined ? undefined : num(t.spacing, 'spacing');
+      if (spacing !== undefined && (spacing < 20 || spacing > 10000)) throw new ValidationError('spacing must be between 20 and 10000 m');
+      return { type: 'search', areaId: str(t.areaId, 'areaId'), spacing, speed, startIndex: t.startIndex === undefined ? undefined : Math.max(0, Math.floor(num(t.startIndex, 'startIndex'))) };
+    }
     default:
       throw new ValidationError(`unknown task type ${String(t.type)}`);
   }

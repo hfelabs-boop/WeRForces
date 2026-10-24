@@ -295,10 +295,10 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'assign_task',
-    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
+    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm. Tactical tasks: overwatch/defend/screen need `to` (the position) and take `facing` (degrees) and `width` (units deploy in a line); ambush also needs `graphicId` (the kill zone area) and opens fire only when an enemy enters it; screen falls back when an enemy comes within 1.5 km; search needs `graphicId` (an area) and sweeps it. Holding still, infantry dig in and vehicles go hull-down. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
     {
       targetId: z.string().describe('entity (E..) or unit (U..) id'),
-      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission', 'mount', 'dismount', 'breach', 'resupply']),
+      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission', 'mount', 'dismount', 'breach', 'resupply', 'overwatch', 'defend', 'screen', 'ambush', 'search']),
       to: position.optional(),
       routeId: z.string().optional(),
       targetEntityId: z.string().optional(),
@@ -306,7 +306,9 @@ export function createMcpServer(call: ApiCaller): McpServer {
       radius: z.number().optional().describe('orbit radius in m (default 2000), or fire mission sheaf radius (default 0)'),
       rounds: z.number().int().min(1).max(100).optional().describe('fire mission rounds per tube (default 3)'),
       smoke: z.boolean().optional().describe('fire mission: smoke rounds instead of high explosive'),
-      graphicId: z.string().optional().describe('breach: the minefield or obstacle graphic'),
+      graphicId: z.string().optional().describe('breach: the minefield or obstacle; ambush: the kill zone area; search: the area'),
+      facing: z.number().min(0).max(360).optional().describe('overwatch/defend/screen/ambush: direction to face, degrees from north'),
+      width: z.number().optional().describe('defend/screen/ambush: frontage in m for a unit'),
       speedKmh: z.number().optional(),
     },
     async (a) => {
@@ -328,6 +330,12 @@ export function createMcpServer(call: ApiCaller): McpServer {
             ? { type: 'breach', graphicId: need(a.graphicId, 'graphicId') }
             : a.type === 'resupply'
             ? { type: 'resupply', supplierId: a.targetEntityId }
+            : a.type === 'overwatch' || a.type === 'defend' || a.type === 'screen'
+            ? { type: a.type, position: need(a.to, 'to'), facing: a.facing, width: a.type === 'overwatch' ? undefined : a.width, duration: a.type === 'overwatch' ? a.duration : undefined }
+            : a.type === 'ambush'
+            ? { type: 'ambush', position: need(a.to, 'to'), killZoneId: need(a.graphicId, 'graphicId'), facing: a.facing, width: a.width }
+            : a.type === 'search'
+            ? { type: 'search', areaId: need(a.graphicId, 'graphicId'), speed }
             : a.type === 'orbit'
             ? { type: 'orbit', center: need(a.to, 'to'), radius: a.radius ?? 2000, duration: a.duration }
             : a.type === 'followRoute' || a.type === 'patrol'

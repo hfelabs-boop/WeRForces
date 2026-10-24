@@ -641,6 +641,21 @@ export class Engine {
         if (!this.terrain.inBounds(p.x, p.y)) throw new Error('destination is outside the terrain');
         break;
       }
+      case 'overwatch':
+      case 'defend':
+      case 'ambush':
+      case 'screen':
+        if (!this.terrain.inBounds(spec.position.x, spec.position.y)) throw new Error('position is outside the terrain');
+        if (spec.type === 'ambush') {
+          const g = this.graphics.get(spec.killZoneId);
+          if (!g || g.kind !== 'area') throw new Error(`unknown area ${spec.killZoneId}`);
+        }
+        break;
+      case 'search': {
+        const g = this.graphics.get(spec.areaId);
+        if (!g || g.kind !== 'area') throw new Error(`unknown area ${spec.areaId}`);
+        break;
+      }
       default:
         break;
     }
@@ -950,7 +965,11 @@ export class Engine {
       if (c) this.syncPassenger(e, c);
       else e.embarkedIn = undefined;
     }
-    if (this.rules.fuel) for (const e of this.entities.values()) if (e.type.endurance) burnFuel(this, e, dt);
+    for (const e of this.entities.values()) {
+      if (this.rules.fuel && e.type.endurance) burnFuel(this, e, dt);
+      // Moving out of a prepared position gives it up.
+      if (e.prepared && e.speed > 0.5) e.prepared = undefined;
+    }
 
     for (const e of this.entities.values()) {
       if (e.remote) continue;
@@ -1129,6 +1148,7 @@ export class Engine {
     if (st.morale !== undefined) e.morale = st.morale;
     if (st.moraleState) e.moraleState = st.moraleState;
     if (st.fuel !== undefined) e.fuel = st.fuel;
+    if (st.prepared) e.prepared = st.prepared;
     if (st.supplies !== undefined) e.supplies = st.supplies;
   }
 
@@ -1181,6 +1201,7 @@ export class Engine {
         morale: e.morale < 1 ? e.morale : undefined,
         moraleState: e.moraleState !== 'steady' ? e.moraleState : undefined,
         fuel: e.fuel < 1 ? e.fuel : undefined,
+        prepared: e.prepared,
         supplies: e.type.supply && e.supplies !== e.type.supply.capacity ? e.supplies : undefined,
       },
     };
@@ -1302,6 +1323,7 @@ export class Engine {
       moraleState: e.unit || !this.rules.morale || e.moraleState === 'steady' ? undefined : e.moraleState,
       fuel: e.type.endurance && this.rules.fuel ? Math.round(e.fuel * 1000) / 1000 : undefined,
       supplies: e.type.supply ? Math.round(e.supplies * 100) / 100 : undefined,
+      prepared: e.prepared,
     };
   }
 

@@ -48,6 +48,14 @@ export function describeStatement(st: PlanStatement, engine?: Engine): string {
           return `Breach ${engine?.graphics.get(t.graphicId)?.name ?? t.graphicId}`;
         case 'resupply':
           return t.supplierId ? `Resupply from ${engine?.entities.get(t.supplierId)?.name ?? t.supplierId}` : 'Resupply';
+        case 'overwatch':
+        case 'defend':
+        case 'screen':
+          return `${t.type[0].toUpperCase()}${t.type.slice(1)} (${Math.round(t.position.x)}, ${Math.round(t.position.y)})${t.facing !== undefined ? ` facing ${Math.round(t.facing)}°` : ''}`;
+        case 'ambush':
+          return `Ambush ${engine?.graphics.get(t.killZoneId)?.name ?? t.killZoneId} from (${Math.round(t.position.x)}, ${Math.round(t.position.y)})`;
+        case 'search':
+          return `Search ${engine?.graphics.get(t.areaId)?.name ?? t.areaId}`;
         case 'fireMission':
           return `${t.smoke ? 'Smoke' : 'Fire'} mission at (${Math.round(t.target.x)}, ${Math.round(t.target.y)}), ${t.rounds ?? DEFAULT_MISSION_ROUNDS} rounds`;
       }

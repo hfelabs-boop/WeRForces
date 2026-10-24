@@ -1,11 +1,12 @@
 // Tasks: the atomic behaviours an entity (or a unit's leader) executes.
 // Each task produces a steering command per tick and reports running/done/failed.
 
-import { bearing, dist2d, rotateOffset } from '../shared/math.js';
+import { bearing, dist2d, pointInPolygon, rotateOffset } from '../shared/math.js';
 import type { TaskSpec, Vec2, WeaponDef } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import { fireIndirect } from './combat.js';
 import type { Entity } from './entity.js';
+import { sensorRange } from './environment.js';
 import { needsSupply, RESUPPLY_RANGE, suppliersFor } from './supply.js';
 
 export type TaskStatus = 'running' | 'done' | 'failed';
@@ -697,5 +698,320 @@ export function createTask(spec: TaskSpec): Task {
       return new BreachTask(spec.graphicId);
     case 'resupply':
       return new ResupplyTask(spec.supplierId);
+    case 'overwatch':
+      return new OverwatchTask(spec);
+    case 'defend':
+      return new DefendTask(spec);
+    case 'ambush':
+      return new AmbushTask(spec);
+    case 'screen':
+      return new ScreenTask(spec);
+    case 'search':
+      return new SearchTask(spec);
   }
+}
+
+// ---------------------------------------------------------------- tactical tasks
+
+/** Seconds holding still before infantry are dug in / vehicles hull-down. */
+export const PREPARE_TIME = { lifeform: 90, vehicle: 30 };
+
+/** Bearing in radians from degrees, or undefined. */
+function facingOf(deg: number | undefined): number | undefined {
+  return deg === undefined ? undefined : (deg * Math.PI) / 180;
+}
+
+/**
+ * Move to a position, then hold it facing a direction. After holding still for a while
+ * the entity is in a prepared position (dug in, or hull-down), harder to see and hit.
+ */
+abstract class HoldPositionTask extends Task {
+  protected path = new PathFollower();
+  protected arrived = false;
+  protected heldFor = 0;
+  /** Radians; the direction of the move when not given. */
+  protected facing?: number;
+
+  constructor(spec: TaskSpec, readonly position: Vec2, facingDeg?: number) {
+    super(spec);
+    this.facing = facingOf(facingDeg);
+  }
+
+  protected override start({ engine, entity }: TaskContext): void {
+    if (this.facing === undefined) this.facing = dist2d(entity, this.position) > 5 ? bearing(entity, this.position) : entity.heading;
+    if (dist2d(entity, this.position) <= arriveRadius(entity) * 2) this.arrived = true;
+    else if (!this.path.plan(entity, engine, this.position)) this.fail('no route to the position');
+  }
+
+  /** Steps the move or the hold; true while holding the position. */
+  protected hold({ engine, entity, dt }: TaskContext, speed = entity.cruiseSpeed): boolean {
+    if (!this.arrived) {
+      if (this.path.step(entity, engine, dt, speed)) this.arrived = true;
+      else return false;
+    }
+    entity.steer = { x: entity.x, y: entity.y, speed: 0, arrive: true, finalHeading: this.facing };
+    if (entity.domain === 'air' || entity.domain === 'surface') return true;
+    if (entity.speed < 0.3) this.heldFor += dt;
+    else this.heldFor = 0;
+    if (!entity.prepared) {
+      const need = entity.domain === 'lifeform' ? PREPARE_TIME.lifeform : PREPARE_TIME.vehicle;
+      if (this.heldFor >= need) entity.prepared = entity.domain === 'lifeform' ? 'dugIn' : 'hullDown';
+    }
+    return true;
+  }
+
+  override cancel(entity: Entity): void {
+    super.cancel(entity);
+    entity.prepared = undefined;
+  }
+
+  override get remainingPath(): Vec2[] {
+    return this.arrived ? [] : this.path.remaining;
+  }
+
+  protected where(): string {
+    return `(${Math.round(this.position.x)}, ${Math.round(this.position.y)})`;
+  }
+}
+
+/** Support by fire: take a position and watch (and engage) toward a direction. */
+export class OverwatchTask extends HoldPositionTask {
+  private watched = 0;
+
+  constructor(readonly s: Extract<TaskSpec, { type: 'overwatch' }>) {
+    super(s, s.position, s.facing);
+  }
+
+  protected tick(ctx: TaskContext): TaskStatus {
+    if (!this.hold(ctx)) return 'running';
+    this.watched += ctx.dt;
+    return this.s.duration !== undefined && this.watched >= this.s.duration ? 'done' : 'running';
+  }
+
+  describe(): string {
+    return `Overwatch from ${this.where()}${this.arrived ? '' : ' (moving)'}`;
+  }
+}
+
+/** Defend a position: hold it, dig in, and fight from it without chasing. */
+export class DefendTask extends HoldPositionTask {
+  constructor(readonly s: Extract<TaskSpec, { type: 'defend' }>) {
+    super(s, s.position, s.facing);
+  }
+
+  protected tick(ctx: TaskContext): TaskStatus {
+    this.hold(ctx);
+    return 'running';
+  }
+
+  describe(): string {
+    return `Defend ${this.where()}${this.arrived ? '' : ' (moving)'}`;
+  }
+}
+
+/**
+ * Ambush: take a position with weapons tight, and open fire all at once when an enemy
+ * enters the kill zone (or the ambush is discovered).
+ */
+export class AmbushTask extends HoldPositionTask {
+  sprung = false;
+
+  constructor(readonly s: Extract<TaskSpec, { type: 'ambush' }>) {
+    super(s, s.position, s.facing);
+  }
+
+  protected override start(ctx: TaskContext): void {
+    const zone = ctx.engine.graphics.get(this.s.killZoneId);
+    if (!zone || zone.kind !== 'area' || zone.points.length < 3) {
+      this.fail('the kill zone must be an area');
+      return;
+    }
+    if (this.facing === undefined) {
+      const c = zone.points.reduce((s, p) => ({ x: s.x + p.x / zone.points.length, y: s.y + p.y / zone.points.length }), { x: 0, y: 0 });
+      this.facing = bearing(this.position, c);
+    }
+    super.start(ctx);
+    if (this.s.sprung) this.sprung = true;
+    ctx.entity.roe = this.sprung ? 'fireAtWill' : 'holdFire';
+  }
+
+  protected tick(ctx: TaskContext): TaskStatus {
+    const { engine, entity } = ctx;
+    this.hold(ctx);
+    if (this.sprung) return 'running';
+    const zone = engine.graphics.get(this.s.killZoneId);
+    let trigger = entity.underFireUntil > engine.time;
+    if (!trigger && zone) {
+      for (const id of entity.contacts.keys()) {
+        const t = engine.entities.get(id);
+        if (t && t.alive && engine.isHostile(entity.force, t.force) && pointInPolygon(t, zone.points)) {
+          trigger = true;
+          break;
+        }
+      }
+    }
+    if (trigger) {
+      // Spring it for the whole unit at once.
+      const group = entity.unit ? entity.unit.alive() : [entity];
+      for (const m of group) {
+        if (m.task instanceof AmbushTask && !m.task.sprung) {
+          m.task.sprung = true;
+          m.roe = 'fireAtWill';
+        }
+      }
+      engine.log('task', `${entity.unit?.name ?? entity.name} sprang the ambush on ${zone?.name ?? 'the kill zone'}`, entity.unit?.id ?? entity.id);
+    }
+    return 'running';
+  }
+
+  override resumeSpec(): TaskSpec {
+    return { ...this.s, sprung: this.sprung || undefined };
+  }
+
+  describe(engine: Engine): string {
+    const zone = engine.graphics.get(this.s.killZoneId);
+    return this.sprung ? `Ambush on ${zone?.name ?? this.s.killZoneId}: sprung` : `Ambush on ${zone?.name ?? this.s.killZoneId}${this.arrived ? ', waiting' : ' (moving)'}`;
+  }
+}
+
+/**
+ * Screen: watch from a position with return-fire ROE, and fall back once an enemy comes
+ * closer than the break-contact distance.
+ */
+export class ScreenTask extends HoldPositionTask {
+  private falling = false;
+
+  constructor(readonly s: Extract<TaskSpec, { type: 'screen' }>) {
+    super(s, s.position, s.facing);
+  }
+
+  protected override start(ctx: TaskContext): void {
+    super.start(ctx);
+    if (this.status === 'running') ctx.entity.roe = 'returnFire';
+  }
+
+  private fallback(): Vec2 {
+    if (this.s.fallback) return this.s.fallback;
+    const back = (this.facing ?? 0) + Math.PI;
+    return { x: this.position.x + Math.sin(back) * 2000, y: this.position.y + Math.cos(back) * 2000 };
+  }
+
+  protected tick(ctx: TaskContext): TaskStatus {
+    const { engine, entity, dt } = ctx;
+    if (this.falling) return this.path.step(entity, engine, dt, entity.type.maxSpeed * 0.8) ? 'done' : 'running';
+    this.hold(ctx);
+    const breakAt = this.s.breakContact ?? 1500;
+    for (const id of entity.contacts.keys()) {
+      const t = engine.entities.get(id);
+      if (!t || !t.alive || !engine.isHostile(entity.force, t.force) || dist2d(entity, t) > breakAt) continue;
+      const fb = this.fallback();
+      const edge = engine.terrain.spec.size - 50;
+      const to = { x: Math.max(50, Math.min(edge, fb.x)), y: Math.max(50, Math.min(edge, fb.y)) };
+      this.falling = true;
+      entity.prepared = undefined;
+      if (!this.path.plan(entity, engine, to)) return this.fail('no route to fall back');
+      engine.log('task', `${entity.name}: enemy within ${Math.round(dist2d(entity, t))} m, screen falling back`, entity.id, t.id);
+      return 'running';
+    }
+    return 'running';
+  }
+
+  describe(): string {
+    return this.falling ? 'Screen: falling back' : `Screen from ${this.where()}${this.arrived ? '' : ' (moving)'}`;
+  }
+
+  override get remainingPath(): Vec2[] {
+    return this.falling || !this.arrived ? this.path.remaining : [];
+  }
+}
+
+/** Search an area: sweep it in parallel tracks spaced to the entity's sensor range. */
+export class SearchTask extends Task {
+  private path = new PathFollower();
+  private tracks: Vec2[] = [];
+  private index = 0;
+  private found = new Set<string>();
+
+  constructor(readonly s: Extract<TaskSpec, { type: 'search' }>) {
+    super(s);
+  }
+
+  protected override start({ engine, entity }: TaskContext): void {
+    const area = engine.graphics.get(this.s.areaId);
+    if (!area || area.kind !== 'area' || area.points.length < 3) {
+      this.fail('not an area');
+      return;
+    }
+    let reach = 300;
+    for (const sid of entity.type.sensors) reach = Math.max(reach, sensorRange(engine.catalog.sensors.get(sid)!, engine.env));
+    const spacing = this.s.spacing ?? Math.max(100, Math.min(1500, reach));
+    this.tracks = sweepTracks(area.points, spacing).filter((p) => engine.terrain.mobilityFactor(p.x, p.y, entity.domain, entity.type.offroadFactor) > 0 || entity.domain === 'air');
+    // Start from whichever end is nearer.
+    if (this.tracks.length && dist2d(entity, this.tracks.at(-1)!) < dist2d(entity, this.tracks[0])) this.tracks.reverse();
+    this.index = Math.min(this.s.startIndex ?? 0, this.tracks.length);
+    if (!this.tracks.length) this.fail('nothing to search');
+  }
+
+  protected tick({ engine, entity, dt }: TaskContext): TaskStatus {
+    for (const id of entity.contacts.keys()) {
+      const t = engine.entities.get(id);
+      if (t && engine.isHostile(entity.force, t.force)) this.found.add(id);
+    }
+    while (this.index < this.tracks.length) {
+      const wp = this.tracks[this.index];
+      if (!this.path.goal || this.path.goal.x !== wp.x || this.path.goal.y !== wp.y) {
+        if (!this.path.plan(entity, engine, wp)) {
+          this.index++;
+          continue;
+        }
+      }
+      if (!this.path.step(entity, engine, dt, this.s.speed ?? entity.cruiseSpeed, this.index === this.tracks.length - 1)) return 'running';
+      this.index++;
+    }
+    const area = engine.graphics.get(this.s.areaId);
+    engine.log('task', `${entity.name} finished searching ${area?.name ?? this.s.areaId}: ${this.found.size} enemy found`, entity.id);
+    return 'done';
+  }
+
+  describe(engine: Engine): string {
+    const area = engine.graphics.get(this.s.areaId);
+    return `Search ${area?.name ?? this.s.areaId}${this.tracks.length ? ` (${Math.min(this.index + 1, this.tracks.length)}/${this.tracks.length})` : ''}`;
+  }
+
+  override resumeSpec(): TaskSpec {
+    return { ...this.s, startIndex: this.index };
+  }
+
+  override get remainingPath(): Vec2[] {
+    return [...this.path.remaining, ...this.tracks.slice(this.index + 1)];
+  }
+}
+
+/** Waypoints for a back-and-forth sweep of a polygon, tracks `spacing` apart along its long axis. */
+export function sweepTracks(poly: Vec2[], spacing: number): Vec2[] {
+  const xs = poly.map((p) => p.x);
+  const ys = poly.map((p) => p.y);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  // Tracks run along the longer side, so there are fewer turns.
+  const alongX = x1 - x0 >= y1 - y0;
+  const out: Vec2[] = [];
+  const across0 = alongX ? y0 : x0;
+  const across1 = alongX ? y1 : x1;
+  const n = Math.max(1, Math.round((across1 - across0) / spacing));
+  for (let i = 0; i < n; i++) {
+    const c = across0 + (across1 - across0) * ((i + 0.5) / n);
+    // Where this track is inside the polygon.
+    const along: number[] = [];
+    const a0 = alongX ? x0 : y0;
+    const a1 = alongX ? x1 : y1;
+    for (let a = a0; a <= a1; a += Math.max(10, spacing / 10)) {
+      const p = alongX ? { x: a, y: c } : { x: c, y: a };
+      if (pointInPolygon(p, poly)) along.push(a);
+    }
+    if (!along.length) continue;
+    const ends = [along[0], along[along.length - 1]];
+    if (i % 2) ends.reverse();
+    for (const a of ends) out.push(alongX ? { x: Math.round(a), y: Math.round(c) } : { x: Math.round(c), y: Math.round(a) });
+  }
+  return out;
 }
