@@ -44,6 +44,7 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
   "patternOfLife": { "vehicles": 20, "pedestrians": 40 },
   "catalog": { "entityTypes": [ ... ] },
   "syncMatrices": [ ... ],
+  "aggregation": { "disaggregateRange": 3000, "reaggregateRange": 5000 },
   "codewords": [ ... ],
   "shots": [ ... ],
   "rngState": 1234567890
@@ -64,6 +65,7 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
 | `patternOfLife` | | Background civilians to keep on the map: `vehicles` and `pedestrians`, 0–300 each (missing means none) ([Concepts](../concepts.md#pattern-of-life)) |
 | `catalog` | | Catalog entries this scenario adds or changes, made in the catalog editor: `entityTypes`, `weapons`, `sensors`, `unitTemplates`, each a list of entries as in `GET /api/v1/catalog`. Checked on load and merged by id over the server's catalog, before the entities are created ([below](#catalog)) |
 | `syncMatrices` | | One synchronization matrix per force ([below](#syncmatrices)) |
+| `aggregation` | | When aggregated units split up near enemy entities and join up again: `autoDisaggregate`, `disaggregateRange` (m), `autoReaggregate`, `reaggregateRange` (m), `reaggregateDelay` (s). Missing fields keep their defaults ([Concepts](../concepts.md#aggregate-level)) |
 | `codewords` | | Checkpoints: codewords sent so far, `{force, codeword, time}` |
 | `shots` | | Checkpoints: munitions in flight (`shooterId`, `targetId`, `weaponId`, `from`, `to`, `fireTime`, `impactTime`, `range`) |
 | `smoke` | | Checkpoints: smoke clouds (`id`, `x`, `y`, `radius`, `until`: the simulation time it is gone) |
@@ -164,10 +166,27 @@ Otherwise loading fails and the previous scenario stays loaded.
 
 The first member is the initial leader. Units also take a `task`, `reactions`
 and, in checkpoints, a `state` with `planIndex`, `taskState`, `taskDone`,
-`leaderId`, `withdrawn`, `morale`, `moraleState` and `lossesSeen`. `echelon` is
+`leaderId`, `withdrawn`, `morale`, `moraleState`, `lossesSeen` and
+`reaggregate` (`{quietSince}`: it split up by itself and joins up again when
+the enemy has gone). `echelon` is
 one of `team`, `section`, `platoon`, `company`, `flight` or `group`: it sets the
 symbol and, with `rules.orderDelay`, how long orders take to arrive. Members
 must be listed in `entities` and share the unit's force.
+
+An **aggregated** unit ([Concepts](../concepts.md#aggregate-level)) has
+`aggregate`: its position and heading,
+
+```json
+"aggregate": { "x": 4210.5, "y": 6120.0, "heading": 1.571 }
+```
+
+and, in checkpoints, its `speed`, `posture` and `postureSince`,
+`pendingLosses` and `pendingRounds` (fractions still to be taken, per entity
+type and per weapon), `contacts` (enemy aggregates seen: `id`, `lastSeen`,
+`x`, `y`), `seenBy` (forces that have seen it), `attackers` and `lastFiredAt`.
+Its members are still listed in `entities`, with their own state; on loading
+they are taken out of the entity-level simulation again. A `task` is carried
+on by the aggregate (`state.taskState` holds its progress).
 
 `parentId` is the unit's superior in the chain of command, for example the
 company a platoon belongs to. It must be another unit of the same force, and

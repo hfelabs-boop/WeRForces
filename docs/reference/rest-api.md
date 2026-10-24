@@ -46,6 +46,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | PUT | `/simulation/time-scale` | `{"scale": 8}` | Status |
 | GET / PUT | `/simulation/rules` | `{"suppression": true, "morale": true, "fuel": true, "orderDelay": false}` (any subset) | The rules ([optional models](../concepts.md#optional-models)) |
 | GET / PUT | `/simulation/pattern-of-life` | `{"vehicles": 20, "pedestrians": 40}` (0–300 each; either) | The numbers of background civilians kept on the map ([pattern of life](../concepts.md#pattern-of-life)) |
+| GET / PUT | `/simulation/aggregation` | `{"autoDisaggregate": true, "disaggregateRange": 3000, "autoReaggregate": true, "reaggregateRange": 5000, "reaggregateDelay": 120}` (any subset) | The [aggregation policy](../concepts.md#aggregate-level): when aggregates split up near enemy entities, and when units that split by themselves join up again |
 | GET / PUT | `/simulation/environment` | `{"date": "2026-06-21", "time": 4.5, "visibility": 800, "precipitation": "rain", "windSpeed": 6, "windFrom": 270}` (any subset) | The environment plus `localDate`, `localTime`, `sunAltitude`, `light`, `period` |
 
 ### Scenarios
@@ -81,6 +82,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | POST | `/units` | `{"templateId", "force", "position", "heading"?, "name"?}` or `{"entityIds": [...], "name"?, "formation"?}` |
 | GET / PATCH / DELETE | `/units/{id}` | PATCH: `{"name"?, "formation"?, "roe"?, "reactions"?, "superiorId"?}` (`superiorId`: put under another unit, `null` for none). DELETE removes the members too; its subordinates become independent |
 | POST | `/units/{id}/task` · `/plan` · `/stop` · `/embark` · `/disembark` | as for entities. A unit embarking into a carrier unit shares out the seats |
+| POST | `/units/{id}/aggregate` · `/units/{id}/disaggregate` | Simulate the unit and the units under it as aggregates ([aggregate level](../concepts.md#aggregate-level)), or split them back into their entities. 400 with the reason when it cannot be done (aircraft, mounted or immobilised members, a task an aggregate cannot do, already aggregated). Returns the unit |
 | GET / POST | `/graphics` | POST `{"kind": "route\|area\|phaseLine\|point\|minefield\|obstacle", "points": [...], "name"?, "force"?, "density"?}` (`density`: minefields, strikes per 100 m) |
 | GET / PATCH / DELETE | `/graphics/{id}` | PATCH `{"name"?, "points"?, "density"?}` |
 
@@ -90,6 +92,16 @@ simulation time and local time of arrival), or `{"remaining": ..., "stalled":
 "out of fuel"}` ([travel estimates](../concepts.md#travel-estimates)). Jammers
 carry `jamming` (on or off), and entities whose radio or radar is jammed
 `jammed: ["radio"]`. Background civilians carry `ambient: true`.
+
+An aggregated unit carries `aggregate`: `alive` and `total` members,
+`strength` per entity type (`alive`, `effective`: less losses still being
+taken, `total`), `combatPower`, `heading`, `speed`, `posture` (`moving`,
+`halted`, `defending`, `dugIn`), `unitSpeed`, `sensorRange`, pooled `ammo` and
+`fuel` (0–1), `engagingId` and `contacts` (enemy unit ids). Its members are
+not in `/entities` and not in the unit's `members`; wrecks are. For players,
+enemy aggregates their force has seen are listed by `/units` as contacts
+(`enemy platoon (U6)`, with `contactAge`), with the types and numbers seen and
+nothing else.
 
 ### Tasks
 

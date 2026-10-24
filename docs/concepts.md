@@ -631,6 +631,127 @@ dismounted infantry (lifeform entities) can ride. Passengers:
 If the carrier is **destroyed**, each passenger dies with it with probability
 0.5 and the rest bail out; after a **mobility kill** they all bail out.
 
+## Aggregate level
+
+A unit can be **aggregated**: simulated as one object instead of entity by
+entity (inspector **Aggregate**, `POST /api/v1/units/{id}/aggregate`, MCP
+`aggregate_unit`). Use it for forces away from the action, so a large scenario
+stays fast; they split back into entities when the enemy comes near.
+Aggregating a unit aggregates the units under it too, each as its own
+aggregate.
+
+**What changes.** The members leave the entity-level simulation: they are not
+in the entity list, on the map, over DIS or on TAK, and they neither see nor
+shoot nor are shot at as entities. They keep their own state (damage,
+ammunition, fuel) inside the aggregate. Members already destroyed stay on the
+map as wrecks. The aggregate has:
+
+| Property | Value |
+| --- | --- |
+| Position, heading | where its living members were (their centre) and its leader's heading |
+| Speed | its slowest member's: the lowest of each member's cruise speed and top speed × the ground's mobility for its type, where the aggregate is (roads, off-road, forest, slope, weather) |
+| Strength | living members per entity type (whole members), and *effective* strength (less losses still being taken, below) |
+| Combat power | potential kills a minute against its best targets at short range, summed over members (shown, not used by the model) |
+| Sensor range | its best member's sensor against ground targets, in the current light and weather, all round |
+| Ammunition, fuel | pooled: shown as a share of the full load; rounds are taken from the member with the most, fuel is burned by each vehicle as it drives |
+| Morale | the unit's (losses and fire count as for any unit) |
+| Posture | *moving*, *halted*, *defending*, or *dug in* after holding a defended position for 90 s (infantry) or 30 s (vehicles only) |
+
+**Orders.** An aggregate carries out *Move to*, *Follow route*, *Wait*,
+*Defend*, *Overwatch* and *Attack* itself: it plans a route for its most
+restricted member (vehicles if it has any) and drives it at unit speed;
+*Defend* and *Overwatch* take the position and hold it; *Attack* closes on the
+target's unit (the aggregate, or the entity) until it is within 80 % of its
+longest direct-fire range with line of sight, then holds and fires. Any other
+order (patrol, fire mission, mount, screen, search…) splits it into entities
+first, and they carry it out. Plans, reactions, ROE and orders down the chain
+of command work as for any unit. Air units, units with members mounted,
+carrying passengers or immobilised, and units on a task an aggregate cannot do
+cannot be aggregated.
+
+**Detection.** Once a second an aggregate sees every enemy aggregate within
+its sensor range to which there is line of sight from its position (at its
+best sensor height) to the other's (2 m up). An enemy force sees an aggregate
+when one of its aggregates does, or one of its entities has a sensor that
+reaches it with line of sight, or the aggregate fires on it. There is no random
+draw: an aggregate is a large, busy target.
+
+**Aggregate combat (Lanchester square law).** An aggregate fires on the enemy
+aggregate it attacks, otherwise the nearest one it sees within its direct-fire
+reach (ROE apply: *return fire* answers aggregates that fired on it in the
+last minute). Every shooter type *i* spreads its fire over the target types it
+can hurt, in proportion to their numbers, and every step each target type *j*
+loses
+
+  d*m*<sub>j</sub>/d*t* = − Σ<sub>i</sub> *n*<sub>i</sub> × (*m*<sub>j</sub> ÷ Σ<sub>l</sub> *m*<sub>l</sub>) × *k*<sub>ij</sub>
+
+where *n*<sub>i</sub> and *m*<sub>j</sub> are effective strengths (shooters
+that have ammunition for the weapon and no firepower kill) and *k*<sub>ij</sub>
+is one shooter's kill rate against one target, with the weapon that does best:
+
+  *k*<sub>ij</sub> = *Pk*(armour of *j*) × (1 − 0.5 × (range / max range)²) × 0.2 ÷ reload time × shooter × exposure × cover
+
+| Factor | Value |
+| --- | --- |
+| Pk, range | the weapon's Pk against the target's armour class, falling with range as at entity level; 0 beyond its range or below its minimum range |
+| 0.2 ÷ reload time | shots a second: the rate of fire, times the share of the time a shooter has a target acquired and laid on (0.2) |
+| Shooter | × 0.5 on the move; × 0.8 shaken, × 0.6 broken |
+| Exposure (target posture) | moving × 1, halted × 0.9, defending × 0.75, dug in × 0.4 (infantry) or × 0.6 (vehicles, hull-down) |
+| Cover (where the target is) | forest × 0.75 (vehicles and infantry); infantry among buildings × 0.6 |
+
+For two homogeneous aggregates (*A* shooters with kill rate α against *B*'s
+type, *B* with β back) this is the square law, dA/dt = −β*B*, dB/dt = −α*A*,
+with the closed form *A*(*t*) = *A*₀ cosh(√(αβ) *t*) − √(β/α) *B*₀
+sinh(√(αβ) *t*); the side with the larger α*A*₀² wins with
+√(*A*₀² − (β/α) *B*₀²) left. All aggregates fire, then all losses are taken,
+so the order does not matter. The tests check the model against this result.
+
+**Losses.** Losses build up as fractions per entity type; each time they pass
+a whole member, a member of that type is destroyed (the seeded random generator
+picks which, so runs repeat) and left on the map as a wreck where the
+aggregate is. The event log has a hit and a *destroyed by* event naming the
+member of the shooting type that did most of the damage and its weapon, so the
+after-action review counts kills as usual. Rounds are taken from the members as
+they are fired. An aggregate that loses its leader gets a new one; one that
+loses everyone becomes an ordinary unit of wrecks.
+
+**Aggregates and entities.** Aggregates do not fight entities: an aggregate
+**disaggregates** (splits into its members) when an enemy entity (not
+aggregated, alive, not a passenger) comes within `disaggregateRange` (3 km by
+default, checked once a second), and the fight is then fought entity by
+entity. With automatic disaggregation off, aggregates and enemy entities
+ignore each other until told otherwise. Members are put back **in formation**
+around the aggregate's position (the unit's formation and spacing, centred on
+it, facing its heading), each with its own damage, ammunition and fuel, dug in
+or hull-down if the aggregate was, and the unit carries on with its order at
+entity level. Aggregating it again puts it back where its members' centre is,
+so a round trip keeps strength and position.
+
+**Joining up again.** A unit that split up by itself (near the enemy, or for
+an order an aggregate cannot carry out) aggregates again once no enemy entity
+has been within `reaggregateRange` (5 km) of it for `reaggregateDelay` (120 s),
+and an aggregate could carry out what it is doing. The two distances are
+hysteresis: it does not flip back and forth at one range. Disaggregating on
+command keeps it at entity level.
+
+| Policy (`PUT /api/v1/simulation/aggregation`, Simulation settings, scenario `aggregation`) | Default |
+| --- | --- |
+| `autoDisaggregate` | on |
+| `disaggregateRange` | 3000 m |
+| `autoReaggregate` | on |
+| `reaggregateRange` | 5000 m (at least `disaggregateRange`) |
+| `reaggregateDelay` | 120 s |
+
+**Everywhere else.** Snapshots show an aggregated unit with an `aggregate`
+field (strength, posture, speed, pooled ammunition and fuel, what it engages)
+and without its members among the entities; the map draws it as one unit
+symbol with a strength bar. Scenarios and checkpoints save it (`units[].aggregate`).
+The recorder keeps its members at its position, so replays show it as one
+symbol and strength curves stay whole. Players see enemy aggregates as unit
+contacts once their force has seen them: where, which types and how many, not
+their orders or supplies. **Why?** starts with *Aggregated:* and gives its
+strength, posture, fire and sensors.
+
 ## Fog of war and roles
 
 A server started with `--player blue:KEY` (and `--api-key` for exercise control)

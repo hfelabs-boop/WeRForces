@@ -100,6 +100,11 @@ When zoomed out (or with *Units: aggregate*), each unit is drawn as one symbol
 at its leader, with its echelon above (••• platoon, •• section, Ø team) and its
 strength in the label, e.g. *(3/4)*. Zoom in to see the individual vehicles.
 
+An **aggregated** unit (simulated as one object, see [Unit](#unit)) is always
+one symbol, at any zoom, with a **strength bar** under it (green, then amber
+below two thirds, red below one third), a heading line while it moves, and a
+dashed red line to the enemy aggregate it is firing on.
+
 Effects: shots appear as yellow tracer lines from shooter to target. Detonations
 appear as an orange flash for a hit and a grey puff for a miss. Smoke clouds are
 grey discs that drift with the wind. At night and in twilight the map darkens.
@@ -245,6 +250,21 @@ A unit with subordinates (a company) passes orders down: a move keeps the
 platoons' positions relative to each other, *Defend*/*Overwatch*/*Screen*/
 *Ambush* spread them in a line with the HQ behind, and other tasks go to all.
 A plan step lasts until the subordinates have finished too.
+
+**Aggregate** / **Disaggregate** (next to **Center**) switches the unit, and
+the units under it, between entity level and [aggregate level](concepts.md#aggregate-level).
+Aggregated, the unit is one object: its members disappear from the map and the
+objects tree, **Strength** reads *4/4 (aggregated)*, the activity starts with
+*AGGREGATED* (and *ENGAGING …* while it fires), and **Members** lists its
+strength per entity type with a bar, then its posture, speed, combat power,
+sensor range and pooled ammunition and fuel. It moves, defends and attacks as
+a unit, and splits into its entities by itself when enemy entities come near
+(see [Simulation settings](#simulation-settings)). **Disaggregate** puts the
+members back in formation around it, with their own damage, ammunition and
+fuel; **Aggregate** is refused (with the reason) for aircraft, units with
+mounted or immobilised members, and units on a task an aggregate cannot carry
+out. The objects tree shows an aggregate as one line with its strength, e.g.
+*Team ARMOR [4/4]*. Right-click an enemy aggregate to **Attack** it.
 
 ### Several selected
 
@@ -559,6 +579,11 @@ File → **Simulation settings…** (or click the time-of-day chip):
   [Concepts](concepts.md#optional-models).
 - **Time and weather** at the scenario start: date, time of day, visibility,
   precipitation and wind. See [Concepts](concepts.md#night-and-weather).
+- **Aggregate level**: whether aggregated units **split near enemy entities**
+  and within what distance (3000 m), and whether units that split by
+  themselves **join up again** once no enemy entity is within a larger
+  distance (5000 m) for a while (120 s). See
+  [Concepts](concepts.md#aggregate-level).
 - **Civilians (pattern of life)**: how many civilian **Cars** and **People**
   (0–300 each) to keep on the map. Cars drive between the towns along the
   roads; people walk about the towns. They are neutral (force 3) and run from
