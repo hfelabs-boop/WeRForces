@@ -440,6 +440,16 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
       case 'setReactions':
         engine.setReactions(str(c.targetId, 'targetId'), validateReactions(c.reactions));
         return;
+      case 'setJamming': {
+        const e = engine.entities.get(str(c.id, 'id'));
+        if (!e || e.remote) throw new ValidationError('unknown local entity');
+        if (!e.type.jammer) throw new ValidationError(`${e.name} is not a jammer`);
+        if (typeof c.on !== 'boolean') throw new ValidationError('on must be true or false');
+        e.jamming = c.on;
+        engine.log('info', `${e.name}: jamming ${c.on ? 'on' : 'off'}`, e.id);
+        engine.ew.update();
+        return;
+      }
       case 'setPatternOfLife': {
         const n = (v: unknown, what: string) => {
           if (v === undefined) return undefined;

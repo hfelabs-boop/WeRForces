@@ -141,6 +141,7 @@ const PLAYER_COMMANDS = new Set<Command['cmd']>([
   'sendCodeword',
   'setSyncMatrix',
   'startPhase',
+  'setJamming',
 ]);
 
 /**
@@ -205,6 +206,7 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
     case 'setFormation':
       ownObject(c.unitId, 'unit');
       return;
+    case 'setJamming':
     case 'rename':
     case 'updateGraphic':
       ownObject(c.id, 'object');

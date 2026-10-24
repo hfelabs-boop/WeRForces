@@ -481,6 +481,7 @@ export class ApiV1 {
       if (b.name !== undefined) this.run({ cmd: 'rename', id, name: b.name as string });
       if (b.roe !== undefined) this.run({ cmd: 'setRoe', targetId: id, roe: b.roe as never });
       if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
+      if (b.jamming !== undefined) this.run({ cmd: 'setJamming', id, on: b.jamming as boolean });
       if (b.position !== undefined || b.x !== undefined || b.lat !== undefined) {
         const p = this.point(b.position ?? b);
         this.run({ cmd: 'moveEntity', id, x: p.x, y: p.y, heading: b.heading as number | undefined });

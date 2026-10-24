@@ -278,6 +278,7 @@ class App {
     this.catalog = catalog;
     this.types = new Map(catalog.entityTypes.map((t) => [t.id, t]));
     this.map.sidcOf = (id) => this.types.get(id)?.sidc;
+    this.map.jammerRange = (id) => this.types.get(id)?.jammer?.range;
     if (BASE) {
       const pill = $('#session-name');
       pill.textContent = `session ${decodeURIComponent(BASE.slice(3))}`;
@@ -1645,6 +1646,15 @@ class App {
     el.append(
       h('div', { class: 'section' }, h('h4', { text: 'Current activity' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
       this.whySection(e.id),
+      t?.jammer
+        ? h(
+            'div',
+            { class: 'section row' },
+            h('h4', { text: 'Jamming' }),
+            h('span', { class: 'hint', text: `${t.jammer.radio ? 'radios' : ''}${t.jammer.radio && t.jammer.radar ? ' and ' : ''}${t.jammer.radar ? 'radars' : ''} within ${(t.jammer.range / 1000).toFixed(0)} km` }),
+            h('button', { text: e.jamming === false ? 'Switch on' : 'Switch off', onclick: () => void this.cmd({ cmd: 'setJamming', id: e.id, on: this.entity(e.id)?.jamming === false }).then(() => (this.inspectorFor = null)) }),
+          )
+        : '',
       this.roeSection(e.id),
       this.reactionsSection(e.id, false),
       this.taskSection(e.id, e.domain),
@@ -2247,6 +2257,9 @@ class App {
           e.withdrawn ? 'WITHDRAWING' : '',
           this.pendingOrderText(e.id),
           e.halted ? 'HALTED (contact)' : '',
+          e.jammed?.includes('radio') ? 'RADIO JAMMED' : '',
+          e.jammed?.includes('radar') ? 'RADAR JAMMED' : '',
+          e.jamming === true ? 'JAMMING' : '',
           e.prepared === 'dugIn' ? 'DUG IN' : e.prepared === 'hullDown' ? 'HULL-DOWN' : '',
           e.plan,
           e.task,

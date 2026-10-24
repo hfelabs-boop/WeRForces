@@ -532,6 +532,7 @@ export class MapView {
     this.drawBuildings();
     this.drawNight();
     this.drawViewshed();
+    this.drawJammers();
     this.drawSmoke();
     this.drawGraphics();
     this.drawSelectionOverlays();
@@ -770,6 +771,30 @@ export class MapView {
       }
     }
   }
+
+  /** Reach of active jammers: faint dashed circles. */
+  private drawJammers(): void {
+    if (!this.state) return;
+    const ctx = this.ctx;
+    for (const e of this.state.entities) {
+      if (e.jamming !== true || e.damage === 'destroyed') continue;
+      const range = this.jammerRange(e.typeId);
+      if (!range) continue;
+      const p = this.toScreen(e);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, range * this.scale, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(190,120,255,0.55)';
+      ctx.fillStyle = 'rgba(190,120,255,0.05)';
+      ctx.setLineDash([8, 6]);
+      ctx.lineWidth = 1.5;
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  /** Jammer reach by entity type (set by the app from the catalog). */
+  jammerRange: (typeId: string) => number | undefined = () => undefined;
 
   private drawExplainMarks(): void {
     const ctx = this.ctx;

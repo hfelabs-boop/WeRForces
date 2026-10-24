@@ -507,6 +507,16 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'set_jamming',
+    'Switch a jammer (an electronic warfare entity, e.g. R-330Zh Zhitel, Krasukha-2, Stryker MFEW) on or off. While on, enemy radios within its range are jammed: orders to them arrive a minute late, they do not share contacts within their unit, cannot call for fire and do not hear codewords; radar jammers cut enemy radars\' range.',
+    { id: z.string(), on: z.boolean() },
+    async ({ id, on }) => {
+      const e = await api<{ name: string; jamming?: boolean }>('PATCH', `/api/v1/entities/${encodeURIComponent(id)}`, { jamming: on });
+      return `${e.name}: jamming ${e.jamming ? 'on' : 'off'}`;
+    },
+  );
+
+  tool(
     'set_pattern_of_life',
     'Fill the map with background civilians: cars driving between towns along the roads and people walking about the towns (neutral, force 3). They run from shots and blasts nearby; any killed are logged. Set both to 0 to remove them.',
     { vehicles: z.number().int().min(0).max(300).optional(), pedestrians: z.number().int().min(0).max(300).optional() },

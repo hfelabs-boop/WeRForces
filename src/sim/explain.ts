@@ -51,6 +51,7 @@ function movement(engine: Engine, e: Entity): Finding[] {
   if (e.mobilityKill) add({ code: 'mobilityKill', severity: 'block', text: 'Immobilised (mobility kill): it cannot move again.' });
   const order = engine.pendingOrders.find((o) => o.targetId === e.id || o.targetId === e.unit?.id);
   if (order) add({ code: 'orderPending', severity: 'info', text: `A new order is on its way down the chain of command: it arrives in ${Math.max(0, Math.ceil(order.due - engine.time))} s.` });
+  if (engine.ew.radioJammed(e)) add({ code: 'radioJammed', severity: 'warn', text: 'Radio jammed: orders reach it a minute late, and it cannot share contacts with its unit, call for fire or hear codewords.', fix: "Move it out of the jammer's reach, or destroy the jammer." });
   if (engine.rules.fuel && e.type.endurance && e.domain !== 'air') {
     if (e.fuel <= 0) add({ code: 'outOfFuel', severity: 'block', text: 'Out of fuel.', fix: 'Send it to a supply vehicle (Resupply), or turn the fuel model off in Simulation settings.' });
     else if (e.fuel < 0.2) add({ code: 'lowFuel', severity: 'warn', text: `Fuel low: ${pct(e.fuel)} left.`, fix: 'Resupply it soon.' });
@@ -184,6 +185,13 @@ function sensing(engine: Engine, e: Entity, opts: ExplainOptions): Finding[] {
   const reduced = ranges.some(({ s, range }) => range < s.maxRange * 0.95);
   const why = env.period !== 'day' ? `${env.period === 'night' ? 'night' : 'twilight'}${env.visibility < 20000 ? ` and ${km(env.visibility)} visibility` : ''}` : env.visibility < 20000 ? `${km(env.visibility)} visibility` : env.precipitation !== 'none' ? env.precipitation : '';
   out.push({ code: 'sensors', severity: reduced ? 'warn' : 'info', text: `Sees with: ${list}${reduced && why ? `, cut down by ${why}` : ''}.`, fix: reduced && !sensors.some((s) => s.thermal) ? 'Thermal sights see in the dark: use a vehicle that has them.' : undefined });
+  const radarJam = engine.ew.radarFactor(e);
+  if (radarJam < 1 && sensors.some((s) => s.radar)) out.push({ code: 'radarJammed', severity: 'warn', text: `Radar jammed: it sees ${pct(radarJam)} of its normal range (more as it closes on the jammer).` });
+  if (opts.omniscient) {
+    const by = engine.ew.radioJammedBy(e.unit?.leader ?? e) ?? engine.ew.radioJammedBy(e);
+    const j = by ? engine.entities.get(by) : undefined;
+    if (j) out.push({ code: 'jammer', severity: 'info', text: `Jammed by ${j.name}, ${km(dist2d(e, j))} away (reach ${km(j.type.jammer!.range)}).`, aboutId: j.id, at: { x: Math.round(j.x), y: Math.round(j.y) } });
+  }
   if (engine.rules.suppression && e.suppression > 0.3) out.push({ code: 'suppressedSpotting', severity: 'warn', text: `Suppressed: it spots ${pct(0.5 * e.suppression)} less often.` });
   const known = [...e.contacts.keys()].filter((id) => {
     const t = engine.entities.get(id);

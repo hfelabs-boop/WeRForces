@@ -25,6 +25,7 @@ const SEVERITY: Record<AlertKind, Alert['severity']> = {
   losses: 'warning',
   underFire: 'info',
   contact: 'info',
+  jammed: 'warning',
 };
 
 /** A unit, or an entity that is not in one: what the operator gives orders to. */
@@ -179,6 +180,11 @@ export class Alerts {
       const dry = armed.filter((e) => e.type.weapons.every((w) => (e.ammo.get(w) ?? 0) <= 0)).length;
       if (dry) this.raiseOnce('outOfAmmo', o, o.unit ? `${o.name}: ${dry} of ${o.members.length} out of ammunition` : `${o.name} is out of ammunition`);
       else this.resolve('outOfAmmo', o.id);
+      // Radio jammed: orders arrive late, no contact sharing or calls for fire.
+      const lead = o.unit?.leader ?? o.entity;
+      const by = lead ? engine.ew.radioJammedBy(lead) : undefined;
+      if (by) this.raiseOnce('jammed', o, `${o.name}: radio jammed`);
+      else this.resolve('jammed', o.id);
       // Leader lost.
       if (o.unit) {
         const lead = o.unit.leader;

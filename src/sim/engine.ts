@@ -57,6 +57,7 @@ import { Alerts } from './alerts.js';
 import { TravelCache } from './eta.js';
 import { SyncPlans } from './sync.js';
 import { Life } from './life.js';
+import { Ew, JAMMED_ORDER_DELAY } from './ew.js';
 
 export const DEFAULT_DT = 0.1;
 export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
@@ -154,6 +155,8 @@ export class Engine {
   readonly sync = new SyncPlans(this);
   /** Pattern of life: civilian traffic and pedestrians. */
   readonly life = new Life(this);
+  /** Electronic warfare: who is jammed. */
+  readonly ew = new Ew(this);
 
   private hostilities = new Set<string>(['1-2']);
   private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
@@ -419,14 +422,17 @@ export class Engine {
     // A new order replaces one still on its way.
     this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== targetId);
     const base = this.rules.orderDelay ? ORDER_DELAY[t instanceof Unit ? t.echelon : 'entity'] : 0;
-    if (base <= 0) {
+    // A jammed radio: the order gets through late (by relay or runner).
+    const lead = t instanceof Unit ? t.leader : t;
+    const jam = lead && this.ew.radioJammed(lead) ? JAMMED_ORDER_DELAY : 0;
+    if (base <= 0 && !jam) {
       if (order.plan) this.assignPlan(targetId, order.plan);
       else if (order.task) this.assignTask(targetId, order.task);
       return 0;
     }
-    const delay = Math.round(base * (0.8 + 0.4 * this.rng.next()));
+    const delay = (base > 0 ? Math.round(base * (0.8 + 0.4 * this.rng.next())) : 0) + jam;
     this.pendingOrders.push({ targetId, task: order.task, plan: order.plan, due: Math.round((this.time + delay) * 10) / 10 });
-    this.log('task', `Order to ${t.name}: ${this.describeOrder(order)} (arrives in ${delay} s)`, t.id);
+    this.log('task', `Order to ${t.name}: ${this.describeOrder(order)} (arrives in ${delay} s${jam ? ', radio jammed' : ''})`, t.id);
     return delay;
   }
 
@@ -452,6 +458,8 @@ export class Engine {
 
   radio(from: Entity, text: string, aboutId?: string): void {
     if (from.remote || !from.alive) return;
+    // A jammed radio gets nothing out.
+    if (this.ew.radioJammed(from)) return;
     this.log('radio', text, from.id, aboutId);
   }
 
@@ -1176,6 +1184,7 @@ export class Engine {
       checkCallsForFire(this);
       updateMorale(this);
       updateResupply(this);
+      this.ew.update();
       this.life.update();
       this.alerts.update();
       this.sync.update();
@@ -1203,6 +1212,7 @@ export class Engine {
     this.codewords.clear();
     this.sync.clear();
     this.life.clear();
+    this.ew.clear();
     this.sensorDue.clear();
     this.losMemo.clear();
     this.smoke.clear();
@@ -1365,6 +1375,7 @@ export class Engine {
     if (st.prepared) e.prepared = st.prepared;
     if (st.supplies !== undefined) e.supplies = st.supplies;
     if (st.ambient) this.life.adopt(e);
+    if (st.jamming === false) e.jamming = false;
   }
 
   private authoredState(e: Entity): EntityRecord['state'] {
@@ -1418,6 +1429,7 @@ export class Engine {
         fuel: e.fuel < 1 ? e.fuel : undefined,
         prepared: e.prepared,
         ambient: e.ambient || undefined,
+        jamming: e.type.jammer && !e.jamming ? false : undefined,
         supplies: e.type.supply && e.supplies !== e.type.supply.capacity ? e.supplies : undefined,
       },
     };
@@ -1561,6 +1573,8 @@ export class Engine {
       prepared: e.prepared,
       travel: !e.unit || e.unit.leader === e ? this.travel.get(e) : undefined,
       ambient: e.ambient || undefined,
+      jamming: e.type.jammer ? e.jamming : undefined,
+      jammed: this.ew.status(e),
     };
   }
 

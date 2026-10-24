@@ -167,6 +167,9 @@ export function evaluateCondition(c: Condition, engine: Engine, owner: Taskable)
     }
     case 'codeword': {
       const force = owner.members()[0]?.force;
+      // A jammed radio does not hear it.
+      const ref = owner.reference();
+      if (ref && engine.ew.radioJammed(ref)) return false;
       return force !== undefined && engine.hasCodeword(force, c.codeword);
     }
     case 'all':

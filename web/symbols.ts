@@ -138,6 +138,13 @@ function icon(ctx: CanvasRenderingContext2D, kind: SymbolKind, s: number): void 
       ctx.moveTo(0, -h * 0.3);
       ctx.lineTo(0, h * 0.35);
       break;
+    case 'ew':
+      // A lightning bolt: electronic warfare.
+      ctx.moveTo(-w * 0.7, -h * 0.5);
+      ctx.lineTo(w * 0.1, -h * 0.05);
+      ctx.lineTo(-w * 0.1, h * 0.1);
+      ctx.lineTo(w * 0.7, h * 0.5);
+      break;
     case 'supply':
       // Combat service support, supply: a bar across the lower part of the frame.
       ctx.moveTo(-w * 1.2, h * 0.55);

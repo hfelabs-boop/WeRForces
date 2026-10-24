@@ -39,6 +39,8 @@ export type SymbolKind =
   | 'artillery'
   | 'engineer'
   | 'supply'
+  /** Electronic warfare (jammers). */
+  | 'ew'
   | 'rotary'
   | 'fixed-wing'
   | 'uav'
@@ -157,6 +159,8 @@ export interface EntityTypeDef {
   endurance?: { km?: number; hours?: number };
   /** Supply vehicles: how many full loads (fuel and ammunition) of other vehicles they carry. */
   supply?: { capacity: number };
+  /** Electronic warfare: while switched on, jams enemy radios and/or radars within `range` m. */
+  jammer?: { range: number; radio?: boolean; radar?: boolean };
   /** Reactions that new entities of this type start with (e.g. observers call for fire). */
   reactions?: Reactions;
 }
@@ -425,6 +429,8 @@ export interface EntityState {
   prepared?: 'dugIn' | 'hullDown';
   /** A background civilian (pattern of life), managed by the engine. */
   ambient?: boolean;
+  /** Jammers switched off. */
+  jamming?: false;
 }
 
 export interface UnitRecord {
@@ -643,7 +649,7 @@ export interface Explanation {
   unit?: Finding[];
 }
 
-export type AlertKind = 'taskFailed' | 'idle' | 'broken' | 'outOfFuel' | 'lowFuel' | 'outOfAmmo' | 'leaderLost' | 'losses' | 'underFire' | 'contact';
+export type AlertKind = 'taskFailed' | 'idle' | 'broken' | 'outOfFuel' | 'lowFuel' | 'outOfAmmo' | 'leaderLost' | 'losses' | 'underFire' | 'contact' | 'jammed';
 
 /** Something that needs the operator's attention: a unit idle, broken, out of fuel... */
 export interface Alert {
@@ -715,6 +721,10 @@ export interface EntitySnapshot {
   travel?: Travel;
   /** A background civilian (pattern of life). */
   ambient?: boolean;
+  /** Jammers: switched on. */
+  jamming?: boolean;
+  /** What enemy jamming denies it now. */
+  jammed?: ('radio' | 'radar')[];
 }
 
 /** Estimate for a move: distance left on the planned path, and simulation time of arrival. */
@@ -863,6 +873,8 @@ export type Command =
   | { cmd: 'setRoe'; targetId: string; roe: Roe }
   /** Acknowledge an alert, or all of them (players: their own force's). */
   | { cmd: 'ackAlert'; id?: string; all?: boolean }
+  /** Switch a jammer on or off. */
+  | { cmd: 'setJamming'; id: string; on: boolean }
   /** Background civilians to keep on the map (0 for none). */
   | { cmd: 'setPatternOfLife'; vehicles?: number; pedestrians?: number }
   /** Replace a force's synchronization matrix (an empty list of phases removes it). */

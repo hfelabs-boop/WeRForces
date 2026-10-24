@@ -21,6 +21,9 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | `ru-ural` | Ural-4320 — Russian cargo truck | 83 / 50 km/h | soft | — | Unaided eye | 1.1.222.7.1.0.0 |
 | `ru-ural-supply` | Ural-4320 supply truck — Russian supply truck: fuel and ammunition for 10 vehicles. Halt beside it to resupply. | 83 / 50 km/h | soft | — | Unaided eye | 1.1.222.7.1.0.0 |
 | `us-hemtt` | M977 HEMTT supply truck — US heavy expanded-mobility tactical truck with fuel and ammunition for 10 vehicles. Halt beside it to resupply. | 90 / 54 km/h | soft | — | Unaided eye | 1.1.225.7.3.0.0 |
+| `ru-r330zh` | R-330Zh Zhitel jammer — Russian radio jamming vehicle: while on, enemy radios within 15 km are jammed (orders delayed, no contact sharing, no calls for fire, codewords not heard) | 79 / 50 km/h | soft | — | Unaided eye | 1.1.222.7.40.0.0 |
+| `ru-krasukha` | 1L269 Krasukha-2 radar jammer — Russian radar jamming system: while on, enemy radars within 25 km lose range (they burn through only close in) | 72 / 43 km/h | soft | — | Unaided eye | 1.1.222.7.41.0.0 |
+| `us-mfew` | M1133 Stryker EW (MFEW) — US electronic warfare Stryker: while on, enemy radios within 10 km are jammed | 97 / 58 km/h | light | — | Unaided eye | 1.1.225.2.40.0.0 |
 | `ru-sa8` | 9K33 Osa (SA-8) — Russian mobile short-range SAM system | 79 / 43 km/h | light | 9K33 Osa SAM | Search/track radar<br>Unaided eye | 1.1.222.28.1.0.0 |
 | `us-m109a7` | M109A7 Paladin — US 155mm self-propelled howitzer | 61 / 36 km/h | light | 155mm M284 howitzer (M795 HE)<br>12.7mm heavy machine gun (burst) | Unaided eye | 1.1.225.4.1.7.0 |
 | `ru-2s19` | 2S19 Msta-S — Russian 152mm self-propelled howitzer | 59 / 36 km/h | light | 152mm 2A64 howitzer (OF-45 HE)<br>12.7mm heavy machine gun (burst) | Unaided eye | 1.1.222.4.1.3.0 |
