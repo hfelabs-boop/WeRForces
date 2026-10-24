@@ -144,6 +144,9 @@ What appears depends on what is selected and what you right-click:
 | --- | --- | --- |
 | Entity or unit | Empty map | **Move here**, **Move here by a covered route**, **Overwatch here**, **Defend here**, **Screen here**, **Orbit here (2 km)** (aircraft), **Fire mission here (3 rounds)** and **Smoke screen here (2 rounds)** (artillery and mortars), **Move here and dismount** (carriers with passengers), **Add "move here" to plan**, **Stop** |
 | Entity or unit | An area | **Search *area***, **Ambush *area* from here**, plus the empty-map items |
+| Drones (entity or unit) | An area | **Loiter over *area* and attack**; a unit of drones also **Swarm search *area***, **Swarm search *area* and attack**, **Swarm attack in *area*** |
+| Drones | Empty map | **Loiter here and attack (1 km)**, plus the empty-map items |
+| One-way attack drones | A hostile entity | **Strike *name* (one-way attack)**; a unit of drones also **Swarm attack *name*** (spread over a hostile unit's members) |
 | Engineers | A minefield or obstacle | **Breach a lane through *name***, **Move here** |
 | Entity or unit | A hostile entity or unit | **Attack *name***, **Fire mission on *name*** (artillery and mortars), **Follow *name***, **Stop** |
 | Entity or unit | A friendly supply vehicle | **Resupply from *name***, **Follow *name***, **Stop** |
@@ -248,6 +251,14 @@ scale up close. The 3D code is downloaded the first time you open the view.
 - **Emission control**: **Radio silence** and, for radars, **Radar off** (see
   [Concepts](concepts.md#emission-control)), and what it radiates now
   (*Radiating: radar, radio*), which is what enemy direction finders can hear.
+- **Datalink** (unmanned systems): whether its control link is up (*UP to US
+  Raven Team Operator*, *via 2 relays*) or lost and why (*LOST — jammed, 12 s*),
+  the **Operator** it is flown from (or *any of its side*), what it does on
+  **Lost link** (hold, return to its operator, carry on, land) and its
+  **Autonomy** (remote, supervised, autonomous); see
+  [Concepts](concepts.md#unmanned-systems-and-swarms). The activity line reads
+  *DATALINK LOST*. One-way attack drones get **Strike…** among the tasks, and
+  drones **Loiter…** (round a point, attacking what they find).
 - **Center**, **Viewshed** (see [below](#viewshed)), **Drive** (see
   [below](#drive-mode)) and **Delete**.
 
@@ -257,7 +268,8 @@ A passenger's activity reads *MOUNTED in …*.
 
 The same as an entity (with its own **Why?** and travel estimate, and
 **Emission control** for all its members and subordinate units, with
-**Jamming** when it has jammers), plus **Strength** (alive/total), **Morale**,
+**Jamming** when it has jammers, and **Datalink** for a unit of drones: how
+many are linked, and the settings for all of them), plus **Strength** (alive/total), **Morale**,
 **Leader**, a **Formation** picker (column, line, wedge, vee, echelonRight), a
 **Superior** picker (chain of command), **Subordinates**, and a **Members** list
 (★ = leader).
@@ -423,7 +435,9 @@ Team MECH hold fire
   *patrol route*, *follow route route* (*in reverse*), *fire* (*N rounds*) *on
   place*, *smoke place*, *orbit place* (*radius 3 km*), *mount carrier*,
   *dismount*, *resupply* (*from X*), *breach minefield*, *wait 2 min*, *stop*,
-  *hold fire*, *return fire*, *fire at will*.
+  *hold fire*, *return fire*, *fire at will*; for drones *strike target*,
+  *loiter over area or place* (*radius 1 km*, *and attack*), *swarm search
+  area* (*and attack*), *swarm attack area or target*.
 - **Places**: a town, a graphic, an object, coordinates *9800 12300*, or *2 km
   north of Brenham*.
 
@@ -453,7 +467,8 @@ orders. Each button has a key, **1** to **9** then **0**:
 
 Buttons the selection can't use are greyed out. **⚙** chooses up to ten
 buttons and their order from the full list (which adds *Follow*, *Screen*,
-*Orbit*, *Return fire*, *Resupply* and *Dismount*). **⇅** moves the bar to
+*Orbit*, *Strike* and *Loiter* for drones, *Return fire*, *Resupply* and
+*Dismount*). **⇅** moves the bar to
 the top of the map (and back), for when it covers units near the bottom edge.
 Both choices are kept in this browser.
 
@@ -658,7 +673,10 @@ scenario:
    infantry or combined arms), **Size** (platoon, or a company of three
    platoons and an HQ) and **support**: artillery (mortars with a platoon,
    howitzers with a company), scouts, engineers (a defence lays a minefield;
-   an attack brings sappers), supply, attack helicopters, air defence.
+   an attack brings sappers), supply, attack helicopters, air defence, drones
+   (a recon UAV team that circles the objective and spots for the guns, and
+   loitering munitions hunting over it, or in front of a defence, each with
+   its operators on high ground).
 3. **Time** (dawn, day, dusk or night), **Weather** (clear, haze, fog, rain),
    **Distance** between the sides (automatic: 3 km, or 5 km with a company),
    **Terrain** (the current one or a new generated one), **Civilians**, and a
