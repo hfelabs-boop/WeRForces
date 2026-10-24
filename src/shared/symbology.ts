@@ -18,6 +18,9 @@ const FUNCTION: Record<SymbolKind, string> = {
   rotary: 'MHA---',
   'fixed-wing': 'MFF---',
   uav: 'MFQ---',
+  // 2525C has no unmanned ground vehicle: drawn as ground-vehicle equipment.
+  ugv: 'EV----',
+  legged: 'EV----',
   ship: 'CLDD--',
   boat: 'CP----',
   generic: '------',

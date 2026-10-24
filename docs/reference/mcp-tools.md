@@ -47,7 +47,7 @@ Why an entity or unit is or is not moving, shooting or seeing the enemy: blocker
 
 ## `give_order`
 
-Give an order in plain words, the way a commander would say it: "<who> <verb> <where/what> [modifiers]". Who: unit or entity names (join several with "and"). Verbs: move to (covered, fast, slowly, at N km/h), attack, follow, defend/overwatch/screen <place> [facing <direction>] [width <m>], ambush <area> [from <place>], search <area>, patrol <route>, follow route <route>, fire [N rounds] on <place>, smoke <place>, orbit <place> [radius N km], mount <carrier>, dismount, resupply [from X], breach <minefield>, wait N min, stop, hold fire, return fire, fire at will. Places: town or graphic names, objects, "x y", or "2 km north of Brenham". Use dryRun to check how it is understood. Prefer this for simple orders; use assign_task for details it cannot express.
+Give an order in plain words, the way a commander would say it: "<who> <verb> <where/what> [modifiers]". Who: unit or entity names (join several with "and"). Verbs: move to (covered, fast, slowly, at N km/h), attack, follow, defend/overwatch/screen <place> [facing <direction>] [width <m>], ambush <area> [from <place>], search <area>, patrol <route>, follow route <route>, fire [N rounds] on <place>, smoke <place>, orbit <place> [radius N km], mount <carrier>, dismount, resupply [from X], breach <minefield>, wait N min, stop, hold fire, return fire, fire at will; drones: strike <target>, loiter over <area|place> [radius N km] [and attack], swarm search <area> [and attack], swarm attack <area|target>. Places: town or graphic names, objects, "x y", or "2 km north of Brenham". Use dryRun to check how it is understood. Prefer this for simple orders; use assign_task for details it cannot express.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -209,12 +209,12 @@ Delete an entity, a unit (with its members) or a graphic.
 
 ## `assign_task`
 
-Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm (helicopters land beside it). Tactical tasks: overwatch/defend/screen need `to` (the position) and take `facing` (degrees) and `width` (units deploy in a line); ambush also needs `graphicId` (the kill zone area) and opens fire only when an enemy enters it; screen falls back before an enemy gets within reach of its direct fire (at least 1.5 km) or as soon as it comes under fire; search needs `graphicId` (an area) and sweeps it. Holding still, infantry dig in and vehicles go hull-down. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
+Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm (helicopters land beside it). Tactical tasks: overwatch/defend/screen need `to` (the position) and take `facing` (degrees) and `width` (units deploy in a line); ambush also needs `graphicId` (the kill zone area) and opens fire only when an enemy enters it; screen falls back before an enemy gets within reach of its direct fire (at least 1.5 km) or as soon as it comes under fire; search needs `graphicId` (an area) and sweeps it. Holding still, infantry dig in and vehicles go hull-down. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf). Unmanned systems: strike (one-way attack drones: FPV, loitering munitions) needs `targetEntityId` and flies into it; loiter takes `graphicId` (an area it sweeps again and again) or `to` and `radius` (a point it circles), with `attack` to strike the first suitable enemy found and `prefer` (what to go for, best first: armored, light, soft, lifeform, artillery, air-defense…, "any"); swarmSearch (a unit of drones) needs `graphicId` and shares the area out, with `attack` each strikes a different target; swarmAttack (a unit of drones) takes `targetIds` or `graphicId` (an area) and spreads its members over distinct targets.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `targetId` | string | yes | entity (E..) or unit (U..) id |
-| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` \| `"mount"` \| `"dismount"` \| `"breach"` \| `"resupply"` \| `"overwatch"` \| `"defend"` \| `"screen"` \| `"ambush"` \| `"search"` | yes |  |
+| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` \| `"mount"` \| `"dismount"` \| `"breach"` \| `"resupply"` \| `"overwatch"` \| `"defend"` \| `"screen"` \| `"ambush"` \| `"search"` \| `"strike"` \| `"loiter"` \| `"swarmSearch"` \| `"swarmAttack"` | yes |  |
 | `to` | {x, y, lat, lon, town} |  | Location as {x,y}, {lat,lon} or {town} |
 | `routeId` | string |  |  |
 | `targetEntityId` | string |  |  |
@@ -222,7 +222,10 @@ Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMiss
 | `radius` | number |  | orbit radius in m (default 2000), or fire mission sheaf radius (default 0) |
 | `rounds` | integer (1–100) |  | fire mission rounds per tube (default 3) |
 | `smoke` | boolean |  | fire mission: smoke rounds instead of high explosive |
-| `graphicId` | string |  | breach: the minefield or obstacle; ambush: the kill zone area; search: the area |
+| `graphicId` | string |  | breach: the minefield or obstacle; ambush: the kill zone area; search, loiter, swarmSearch, swarmAttack: the area |
+| `attack` | boolean |  | loiter, swarmSearch: attack suitable enemies found |
+| `prefer` | array of string |  | loiter, swarmSearch, swarmAttack: what to go for, best first (armour classes, symbols, type ids, "any") |
+| `targetIds` | array of string |  | swarmAttack: the targets to spread over |
 | `facing` | number (0–360) |  | overwatch/defend/screen/ambush: direction to face, degrees from north |
 | `width` | number |  | defend/screen/ambush: frontage in m for a unit |
 | `speedKmh` | number |  |  |
@@ -327,6 +330,17 @@ Switch a jammer (an electronic warfare entity, e.g. R-330Zh Zhitel, Krasukha-2, 
 | --- | --- | --- | --- |
 | `id` | string | yes |  |
 | `on` | boolean | yes |  |
+
+## `set_drone_control`
+
+Unmanned systems (an entity, or every drone of a unit): assign the operator it is flown from (`controllerId`, a drone operator team or control station of its force; null: any of its force's), what it does when its datalink is lost (`lostLink`: hover, return to its operator, continue its task, land; null: its type's) and how much it does without a link (`autonomy`: remote, supervised, autonomous; null: its type's). An entity's `link` shows whether its datalink is up and why not (jammed, out of range, no line of sight, no operator, fibre run out).
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | yes | entity (E..) or unit (U..) id |
+| `controllerId` | string/null |  |  |
+| `lostLink` | `"hover"` \| `"return"` \| `"continue"` \| `"land"` or null |  |  |
+| `autonomy` | `"remote"` \| `"supervised"` \| `"autonomous"` or null |  |  |
 
 ## `set_emcon` _(idempotent)_
 

@@ -26,6 +26,7 @@ const SEVERITY: Record<AlertKind, Alert['severity']> = {
   underFire: 'info',
   contact: 'info',
   jammed: 'warning',
+  linkLost: 'warning',
   gnssDenied: 'warning',
   apsSpent: 'warning',
 };
@@ -191,6 +192,10 @@ export class Alerts {
       const by = lead ? engine.ew.radioJammedBy(lead) : undefined;
       if (by) this.raiseOnce('jammed', o, `${o.name}: radio jammed`);
       else this.resolve('jammed', o.id);
+      // Unmanned systems that lost their datalink.
+      const unlinked = o.members.filter((e) => e.uxs && !e.uxs.up).length;
+      if (unlinked) this.raiseOnce('linkLost', o, o.unit && o.members.length > 1 ? `${o.name}: ${unlinked} of ${o.members.length} lost their datalink` : `${o.name}: datalink lost`);
+      else this.resolve('linkLost', o.id);
       // GNSS jammed: navigating by inertial (a spoofed navigator does not know, so no alert).
       const lost = o.members.filter((e) => e.alive && e.nav && !e.nav.spoofedBy).length;
       if (lost) this.raiseOnce('gnssDenied', o, o.unit ? `${o.name}: ${lost} of ${o.members.length} without GNSS` : `${o.name}: GNSS jammed, navigating by inertial`);
@@ -204,7 +209,8 @@ export class Alerts {
         const lead = o.unit.leader;
         if (m.leaderId && lead && lead.id !== m.leaderId) {
           const old = engine.entities.get(m.leaderId);
-          if (!old || !old.alive || old.mobilityKill) this.raise('leaderLost', o.id, o.force, `${o.name} lost its leader${old ? ` (${old.name})` : ''}; ${lead.name} takes command`);
+          // (A one-way drone that has delivered its warhead is not a loss.)
+          if ((!old || !old.alive || old.mobilityKill) && !old?.uxs?.expended) this.raise('leaderLost', o.id, o.force, `${o.name} lost its leader${old ? ` (${old.name})` : ''}; ${lead.name} takes command`);
         }
         m.leaderId = lead?.id;
       }

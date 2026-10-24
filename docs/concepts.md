@@ -52,6 +52,10 @@ WorldCover) and **buildings** (from OpenStreetMap), described below.
 | Surface vessel | only on water (at sea level, or a lake's level) | – | – | – | – |
 | Aircraft | unaffected | | | | |
 
+Legged robots (robot dogs, `mobility: "legged"`) are ground vehicles that move
+by the dismounted rules (steep slopes, forest, among buildings) at their own
+speed and off-road factor.
+
 **Land cover** (imported terrain) slows movement off roads: shrub × 0.8 for
 vehicles (× 0.85 on foot), built-up × 0.7 (× 0.9), wetland × 0.35 (× 0.6), snow
 × 0.6 (× 0.5). WorldCover tree cover also counts as forest, and permanent water
@@ -237,6 +241,10 @@ plan. **Stop** clears both.
 | **Search** *area* | Sweeps the area in back-and-forth tracks spaced to the searcher's sensor range (or `spacing`), then reports how many enemies it found | Last track done |
 | **Breach** *minefield or obstacle* | Engineers only: go to the nearest edge and work there for the type's breach time (slower under fire), then open a 30 m lane | Lane open |
 | **Resupply** | Drives to the nearest friendly supply vehicle with stock (or the one given), halts within 36 m of it, and waits until full. A helicopter flies there, sets down beside it, and goes back up to its height when full. Fixed-wing aircraft and boats can't | Full (fails when there is no supply vehicle with stock) |
+| **Strike** *entity* | One-way attack drones: fly into the target and detonate the warhead ([Unmanned systems](#unmanned-systems-and-swarms)). *Attack* does the same for them | Warhead delivered (or the target is gone) |
+| **Loiter** *area or point* | Unmanned: sweep the area again and again (or circle the point); with `attack`, go for the first suitable enemy found, by `prefer` | `duration` elapsed, the drone spent; otherwise never |
+| **Swarm search** *area* | A unit of drones shares the area out and sweeps it; with `attack`, each strikes a different target | Every member done |
+| **Swarm attack** *targets or area* | A unit of drones spreads over the targets, one each before any gets two | No target left (with an area: never) |
 | **Direct control** (`manual`) | A person drives it: throttle 0–1 of top speed, turn −1 to 1, and a target it engages first whatever its ROE ([Drive mode](user-guide.md#drive-mode)). A turn lasts 1.5 s unless it is sent again. Driving a unit's leader drops the unit's orders | Another order is given |
 
 **Prepared positions.** An entity holding still on *Overwatch*, *Defend*,
@@ -398,6 +406,13 @@ detected when all of these hold:
    | Target already tracked | at least 0.95 |
 
    The result is capped at 0.99.
+
+**Small targets.** What the eye and thermal sights resolve scales with the
+target's size, so a type with a `size` under 3 m is seen only that much closer:
+the sensor's range is multiplied by size ÷ 3 m. A 0.4 m quadcopter is seen by
+binoculars (3 km) from 400 m, by the unaided eye from 200 m; a 0.3 m FPV drone
+from 150 m. Types without a size are seen at full range. (Radars use the radar
+cross-section instead.)
 
 A contact is dropped if it is not seen again for 15 s. The first time an entity
 detects a hostile, the event log shows *X detected Y*.
@@ -689,7 +704,7 @@ Closing on the jammer burns through. The inspector shows *RADAR JAMMED*.
 **Datalink jamming** cuts a radio-linked unmanned system's control link
 (`unmanned.link: "rf"`; fibre-optic and autonomous ones cannot be jammed, and
 `antiJam` makes the jammer come closer). What a drone does without its link is
-up to the unmanned-systems model. The inspector shows *DATALINK JAMMED*.
+set out in [Unmanned systems](#unmanned-systems-and-swarms). The inspector shows *DATALINK JAMMED*.
 
 ### Satellite navigation (GNSS)
 
@@ -831,6 +846,129 @@ the type's `pkFactor` (0.35–0.4).
 Both act on the shot and leave the armour and ballistic models alone: a
 missile that gets through is adjudicated as before. Plain M1A2, T-72B3, AH-64D
 and Mi-24V have neither, so existing scenarios play out as they did.
+## Unmanned systems and swarms
+
+**Unmanned systems** are entity types with `unmanned` set (see the
+[catalog](reference/catalog.md#unmanned-systems)): small recon quadcopters, FPV
+one-way attack drones on a radio link or a fibre-optic cable, loitering
+munitions (Switchblade 300 / 600, Lancet-3), small fixed-wing UAVs (Raven,
+Orlan-10), a swarm drone, the MQ-9, armed and logistics UGVs (THeMIS, Uran-9,
+S-MET) and robot dogs. Small drones have the armour class `drone`, which
+counter-drone weapons are rated against. **Ground control stations** are types
+with `groundControl` (its `range`): the drone operator teams (`us-uas-operator`,
+`ru-uas-operator`, 50 km) and the control station vehicles (`us-uas-gcs`,
+`ru-uas-gcs`). Datalinks end at them, and they radiate on the datalink (enemy
+direction finders can find them). The drone templates (`us-uas-team`,
+`ru-fpv-team`, `us-drone-swarm`, …) place an operator team 60 m behind the
+drones, outside the unit, and assign the drones to it.
+
+**The datalink.** Once a simulated second every unmanned system works out its
+link:
+
+| Link | Up when |
+| --- | --- |
+| `rf` (radio) | its operator (or a relay) is within its `linkRange` (and the station's `groundControl.range`) with line of sight (a crest, more than 150 m of forest or a block of buildings cuts it; smoke does not), and no enemy datalink jammer reaches it |
+| `rf` with `satcom` (MQ-9) | no enemy datalink jammer reaches it: the ground station is far behind the lines |
+| `fiber` | its operator is alive and within the cable's length. Jamming cannot touch it; once it flies past the end of the cable, the fibre breaks and the link is gone for good |
+| `autonomous` | always: it needs no link |
+
+Its operator is the one it is assigned to (templates assign it; inspector
+**Datalink**, `PATCH /api/v1/entities/{id}` with `controllerId`, MCP
+`set_drone_control`), or, if none is assigned, any ground control station of its force,
+or the leader of its unit if that is not a drone (a squad leader working its
+robot dog). If the assigned operator is killed, the link is lost. A fibre-optic
+drone is tied to the operator nearest to it within the cable's length.
+
+**Mesh relay.** Drones whose type has `relay` (the swarm drone, the Orlan-10)
+pass on other own drones' links: a drone is linked when there is a chain of
+radio hops, each within both ends' range and in line of sight, from an operator
+through relaying drones to it. A jammed drone does not relay.
+
+**Jamming.** A jammer with the `datalink` band cuts radio links within its
+reach, less an anti-jam share: with `antiJam` 0.5 the jammer must be within half
+its reach (frequency hopping, directional antennas). See [Electronic
+warfare](#electronic-warfare).
+
+**Without a link** a system does what its **autonomy** allows, and falls back
+on its **lost-link behaviour** (both from the type; override them per drone in
+the inspector or with `lostLink` / `autonomy`):
+
+| Autonomy | Without a link |
+| --- | --- |
+| `remote` (FPV, quadcopters, UGVs) | it is flown or driven by a person, so its task waits and its lost-link behaviour takes over; it sends no picture (it spots nothing) and fires at nothing |
+| `supervised` (loitering munitions, Raven, MQ-9, S-MET, recon robot dog) | it carries on with its task, and finishes an attack on a target it was given, but starts no new attack and fires at nothing else; with nothing to do, its lost-link behaviour takes over |
+| `autonomous` (swarm drone) | it carries on: searches, finds and attacks targets by itself; its lost-link behaviour only when it has nothing to do |
+
+| Lost-link behaviour | What it does |
+| --- | --- |
+| `hover` | holds where it is (fixed wing: circles there; ground: stops) |
+| `return` | goes back to its operator (where it last had a link to it), then holds there |
+| `land` | comes down where it is (fixed wing: returns instead; ground: stops) |
+| `continue` | carries on with its task, blind (with nothing to do, holds) |
+
+When the link comes back, a landed drone takes off again and the task carries
+on. A remotely piloted drone therefore cannot be flown out of radio range: at
+the edge it loses the link, turns back, regains it and is stopped there.
+Orders sent to a system without a link wait until it is back (*Order to … (waits
+for its datalink)*); what it sees is not shared with its unit; a drone spotting
+for artillery cannot call for fire. The event log notes *datalink lost (jammed
+by …)* and *datalink back* (once per unit), the [alerts](#explanations-and-alerts)
+list *datalink lost*, the inspector shows the link and **Why?** says why it is
+down and what to do. Snapshots have `link`: `mode`, `up`, `reason` (`jammed`,
+`range`, `terrain`, `noController`, `controllerLost`, `tether`), `controllerId`,
+`operatorId` (the one it is assigned to), `hops`, `lostFor`, `autonomy` and
+`lostLink`. Satellite navigation denial is the [navigation
+model's](#satellite-navigation-gnss): a drone's moves, searches and loiters are
+flown that far off. Unmanned units have no morale.
+
+**One-way attack.** FPV drones, loitering munitions and the swarm drone carry a
+**warhead** (`unmanned.warhead`), not a gun: *Strike* (or *Attack*) flies at the
+target at top speed, leading it, and dives in from its `terminalRange` (FPV
+120 m, Switchblade 600 400 m, Lancet 500 m) with line of sight. The warhead is
+then a guided shot from where the drone is, through the usual weapon path: the
+hit, the armour of the face it strikes (loitering munitions and the swarm
+drone's warheads attack the top, an FPV the face it comes in on) and the
+damage. Active protection (Trophy, Arena) fires at it as at a missile, but
+only systems that cover the roof stop a top attack. The drone is spent: it
+leaves the map (`expended` in snapshots), is not counted as a loss, and is
+credited with the kill. Tanks fire no smoke grenades at drones. A remotely piloted drone needs its link until it dives.
+
+**Loiter and search.** *Loiter* (`loiter`) keeps a drone over an area,
+sweeping it again and again (or circling a point at `radius`), for `duration`
+s or until its battery or fuel runs out. With `attack`, it goes for the first
+suitable enemy its side has seen in the area in the last 5 s: one its warhead
+(or weapons) can hurt, of the kinds in `prefer` in order (armour classes
+`armored`, `light`, `soft`, `lifeform`; symbols such as `artillery` or
+`air-defense`; type ids; `any` for anything else), the one fewest friends are
+going for, then the nearest. Targets further down the list are only taken once
+it has swept the whole area (or circled for 5 minutes) without finding a
+better one. Armed drones (MQ-9) attack with their weapons instead.
+
+**Drones spotting for artillery.** A recon drone with the `callForFire`
+reaction (Raven and Orlan-10 have it) calls for fire on what it sees through its
+operator: the call needs its link up and the operator's radio free, and goes
+out as the operator's (*US Raven Team Operator (US Raven Team Lead): fire
+mission, …*).
+
+**Swarms.** A unit of drones carries out these tasks together (and *Loiter*,
+when given to a unit, the same way):
+
+| Task | What the members do |
+| --- | --- |
+| *Swarm search* (`swarmSearch`) | share the area out: the sweep is divided into at least one track line per member, and each sweeps its own share (members in order across the area, so their tracks do not cross). With `attack`, a member that sees a suitable target no other friend is going for strikes it; the rest search on. The unit reports what it found when the last member is done |
+| *Swarm attack* (`swarmAttack`) | spread over the targets (those in `targetIds`, or the enemies the unit knows of in `areaId`, preferred kinds first): every target gets one member, the nearest free one, before any gets two. When a member's target goes down before it gets there, it takes the best remaining one fewest friends are going for. With an area and nothing to attack yet, they wait over it |
+| *Loiter* | each member loiters, starting at a different point of the sweep |
+
+Any task given to the unit retasks them all at once. While moving, a unit's
+drones also keep apart (flocking): a drone closer than about 60 % of the unit's
+spacing to another turns away from it, keeping its distance to where it is
+heading. Only autonomous drones carry on attacking without their link; the
+swarm drone's mesh relay keeps far members linked through near ones.
+
+**Ground robots.** UGVs and robot dogs take the usual ground tasks: *Patrol*,
+*Overwatch*, *Follow* (a robot dog or the S-MET following a squad), *Defend*,
+*Search*. The S-MET and the RU logistics UGV carry half a vehicle load of
+supplies, which they hand out like supply vehicles.
 
 ## Pattern of life
 
@@ -1161,7 +1299,7 @@ finding has a `severity`:
 | Severity | Meaning | Examples |
 | --- | --- | --- |
 | `block` | Stops the activity | destroyed, immobilised, out of fuel, pinned, halted on contact, broken, hold fire, out of range, no line of sight (and what blocks it, where) |
-| `warn` | Hampers it | low fuel, stuck, return-fire ROE, suppressed, radio or radar jammed, radio silence, radar off, GNSS denied (*navigating by inertial for 90 s, error ~120 m*), active protection spent, sensors cut by darkness or weather, no task |
+| `warn` | Hampers it | low fuel, stuck, return-fire ROE, suppressed, radio or radar jammed, radio silence, radar off, GNSS denied (*navigating by inertial for 90 s, error ~120 m*), active protection spent, datalink lost (a supervised or autonomous drone carrying on), sensors cut by darkness or weather, no task |
 | `info` | Explains it | waiting for a plan condition, keeping formation, holding a position, slowed by forest, reloading, engaging, what it radiates, active protection and decoys left, emitters located by direction finding |
 
 Most come with a `fix` (*Set ROE to "fire at will"*), and those about a place
@@ -1175,7 +1313,7 @@ run: the random generator is not touched.
 **Alerts** are the attention queue: idle after its orders (10 s with nothing to
 do), task failed, broken, out of fuel or low on fuel, out of ammunition,
 leader lost, losses, under fire or first contact after a quiet minute, radio
-jammed, GNSS denied, and active protection spent. Each is about a unit or a loose entity, with a severity
+jammed, GNSS denied, active protection spent, and datalink lost (unmanned systems). Each is about a unit or a loose entity, with a severity
 (critical, warning, info), the time it was last raised and a count. An alert
 about a lasting condition (broken, fuel, ammunition, jammed) closes by itself
 when the condition clears. Acknowledged while the condition lasts, it is not

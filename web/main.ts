@@ -194,7 +194,11 @@ class App {
                 ? this.domainOf(id) !== 'air' && this.domainOf(id) !== 'surface'
                 : what === 'carrier'
                   ? this.isCarrier(id)
-                  : this.canBreach(id),
+                  : what === 'drone'
+                    ? this.isDrone(id)
+                    : what === 'oneWay'
+                      ? this.isOneWay(id)
+                      : this.canBreach(id),
       toast: (m, info) => this.toast(m, info),
       nameOf: (id) => this.entity(id)?.name ?? this.unit(id)?.name ?? id,
     });
@@ -329,6 +333,8 @@ class App {
   }
 
   private onState(s: SimState): void {
+    // Spent one-way drones are gone from the battlefield.
+    if (s.entities.some((e) => e.expended)) s = { ...s, entities: s.entities.filter((e) => !e.expended) };
     this.liveState = s;
     if (this.aar.active) return;
     this.state = s;
@@ -465,6 +471,16 @@ class App {
       const t = this.types.get(this.entity(m)?.typeId ?? '');
       return !!t?.weapons.some((w) => this.catalog?.weapons.find((x) => x.id === w)?.indirect);
     });
+  }
+
+  /** Unmanned systems: the entity, or a unit with unmanned members. */
+  private isDrone(id: string): boolean {
+    return this.memberTypes(id).some((t) => t.unmanned);
+  }
+
+  /** One-way attack drones (FPV, loitering munitions) among the entity or unit. */
+  private isOneWay(id: string): boolean {
+    return this.memberTypes(id).some((t) => t.unmanned?.warhead);
   }
 
   /** Entity types of the entity, or of every member of the unit. */
@@ -1612,6 +1628,12 @@ class App {
       } else if (hitEntity && hit) {
         const selForce = this.entity(sel)?.force ?? this.unit(sel)?.force;
         if (hitEntity.force !== selForce && hitEntity.damage !== 'destroyed') add(`Attack ${hitEntity.name}`, () => this.task(sel, { type: 'attack', targetId: hitEntity.id }));
+        if (hitEntity.force !== selForce && hitEntity.damage !== 'destroyed' && this.isOneWay(sel)) add(`Strike ${hitEntity.name} (one-way attack)`, () => this.task(sel, { type: 'strike', targetId: hitEntity.id }));
+        if (hitEntity.force !== selForce && hitEntity.damage !== 'destroyed' && this.unit(sel) && this.isDrone(sel)) {
+          // A whole unit hit: spread the swarm over its members.
+          const targets = this.unit(hit)?.memberIds.filter((m) => this.entity(m) && this.entity(m)!.damage !== 'destroyed') ?? [hitEntity.id];
+          add(`Swarm attack ${this.unit(hit)?.name ?? hitEntity.name}`, () => this.task(sel, { type: 'swarmAttack', targetIds: targets }));
+        }
         if (hitEntity.force !== selForce && this.hasIndirect(sel)) add(`Fire mission on ${hitEntity.name}`, () => this.task(sel, { type: 'fireMission', target: { x: Math.round(hitEntity.x), y: Math.round(hitEntity.y) }, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
         add(`Follow ${hitEntity.name}`, () => this.task(sel, { type: 'follow', targetId: hitEntity.id }));
         if (hitEntity.force === selForce && hitEntity.supplies !== undefined && hitEntity.id !== sel) add(`Resupply from ${hitEntity.name}`, () => this.task(sel, { type: 'resupply', supplierId: hitEntity.id }));
@@ -1630,6 +1652,14 @@ class App {
       } else {
         if (hitGraphic?.kind === 'area') {
           add(`Search ${hitGraphic.name}`, () => this.task(sel, { type: 'search', areaId: hitGraphic.id }));
+          if (this.isDrone(sel) && this.domainOf(sel) === 'air') {
+            add(`Loiter over ${hitGraphic.name} and attack`, () => this.task(sel, { type: 'loiter', areaId: hitGraphic.id, attack: true }));
+            if (this.unit(sel)) {
+              add(`Swarm search ${hitGraphic.name}`, () => this.task(sel, { type: 'swarmSearch', areaId: hitGraphic.id }));
+              add(`Swarm search ${hitGraphic.name} and attack`, () => this.task(sel, { type: 'swarmSearch', areaId: hitGraphic.id, attack: true }));
+              add(`Swarm attack in ${hitGraphic.name}`, () => this.task(sel, { type: 'swarmAttack', areaId: hitGraphic.id }));
+            }
+          }
           const here = this.entity(sel) ?? this.entity(this.unit(sel)?.leaderId);
           if (here && this.domainOf(sel) !== 'air') add(`Ambush ${hitGraphic.name} from here`, () => this.task(sel, { type: 'ambush', position: { x: Math.round(here.x), y: Math.round(here.y) }, killZoneId: hitGraphic.id }));
         }
@@ -1649,6 +1679,7 @@ class App {
         if (this.hasIndirect(sel)) add('Fire mission here (3 rounds)', () => this.task(sel, { type: 'fireMission', target: world, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
         if (this.hasSmoke(sel)) add('Smoke screen here (2 rounds)', () => this.task(sel, { type: 'fireMission', target: world, rounds: 2, radius: this.unit(sel) ? 60 : 0, smoke: true }));
         if (this.domainOf(sel) === 'air') add('Orbit here (2 km)', () => this.task(sel, { type: 'orbit', center: world, radius: 2000 }));
+        if (this.domainOf(sel) === 'air' && this.isDrone(sel)) add('Loiter here and attack (1 km)', () => this.task(sel, { type: 'loiter', center: { x: Math.round(world.x), y: Math.round(world.y) }, radius: 1000, attack: true }));
         add('Add "move here" to plan', () => this.addPlanStep(sel, { kind: 'task', task: { type: 'moveTo', target: world } }));
       }
       add('Stop', () => this.cmd({ cmd: 'stop', targetId: sel }));
@@ -1791,6 +1822,7 @@ class App {
             h('button', { text: e.jamming === false ? 'Switch on' : 'Switch off', onclick: () => void this.cmd({ cmd: 'setJamming', id: e.id, on: this.entity(e.id)?.jamming === false }).then(() => (this.inspectorFor = null)) }),
           )
         : '',
+      this.datalinkSection(e.id),
       this.emconSection(e.id, [e.id]),
       this.roeSection(e.id),
       this.reactionsSection(e.id, false),
@@ -1940,6 +1972,7 @@ class App {
         : []),
       h('div', { class: 'section' }, h('h4', { text: 'Current activity' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
       this.whySection(u.id),
+      this.datalinkSection(u.id),
       u.aggregate ? '' : this.emconSection(u.id, u.memberIds),
       this.roeSection(u.id),
       this.reactionsSection(u.id, true),
@@ -2317,6 +2350,32 @@ class App {
     );
   }
 
+  /** Unmanned systems: the datalink, the operator they are flown from, lost-link behaviour and autonomy. */
+  private datalinkSection(id: string): HTMLElement | string {
+    if (!this.isDrone(id)) return '';
+    const lead = this.entity(id) ?? this.entity(this.unit(id)?.leaderId);
+    const ops = (this.state?.entities ?? []).filter((x) => x.force === lead?.force && x.damage !== 'destroyed' && this.types.get(x.typeId)?.groundControl);
+    const set = (change: Record<string, string | null>) => void this.cmd({ cmd: 'setUnmanned', id, ...change } as Command);
+    const choose = (key: string, options: [string, string][], onPick: (v: string) => void) =>
+      h('select', { 'data-bind-value': key, onchange: (ev: Event) => onPick((ev.target as HTMLSelectElement).value) }, options.map(([v, text]) => h('option', { value: v, text })));
+    return h(
+      'div',
+      { class: 'section' },
+      h('h4', { text: 'Datalink' }),
+      h('div', { class: 'status-line', 'data-bind': 'link' }),
+      h(
+        'div',
+        { class: 'kv' },
+        'Operator',
+        choose('operator', [['', 'any of its side'], ...ops.map((o) => [o.id, o.name] as [string, string])], (v) => set({ controllerId: v || null })),
+        'Lost link',
+        choose('lostLink', [['hover', 'hold (hover or circle)'], ['return', 'return to its operator'], ['continue', 'carry on with its task'], ['land', 'land']], (v) => set({ lostLink: v })),
+        'Autonomy',
+        choose('autonomy', [['remote', 'remote (piloted)'], ['supervised', 'supervised'], ['autonomous', 'autonomous']], (v) => set({ autonomy: v })),
+      ),
+    );
+  }
+
   /**
    * Emission control: radio silence, radars off and jammers on or off, for an entity or a
    * unit (members and subordinates). Shown for what the members have.
@@ -2393,6 +2452,10 @@ class App {
         domain === 'air'
           ? h('button', { text: 'Orbit…', onclick: () => this.map.setMode({ kind: 'pickPoint', label: 'Click the orbit centre', onPick: (p) => this.task(id, { type: 'orbit', center: p, radius: 2000 }) }) })
           : null,
+        this.isOneWay(id) ? h('button', { text: 'Strike…', title: 'Fly into an enemy and detonate', onclick: () => this.map.setMode({ kind: 'pickEntity', label: 'Click the target', onPick: (t) => this.task(id, { type: 'strike', targetId: this.unit(t)?.leaderId ?? t }) }) }) : null,
+        this.isDrone(id) && domain === 'air'
+          ? h('button', { text: 'Loiter…', title: 'Loiter round a point (1 km) and attack what it finds', onclick: () => this.map.setMode({ kind: 'pickPoint', label: 'Click the centre', onPick: (p) => this.task(id, { type: 'loiter', center: p, radius: 1000, attack: true }) }) })
+          : null,
         h('button', { text: 'Stop', onclick: () => this.cmd({ cmd: 'stop', targetId: id }) }),
       ),
       h('div', { class: 'row' }, route, h('button', { text: 'Follow', onclick: routeAction('followRoute') }), h('button', { text: 'Patrol', onclick: routeAction('patrol') })),
@@ -2447,9 +2510,35 @@ class App {
       if (wd && document.activeElement !== wd) wd.value = String(r?.withdrawBelow ?? 0);
       if (cf && document.activeElement !== cf) cf.value = r?.callForFire ? 'yes' : 'no';
     };
+    // Unmanned systems: the datalink line and the control settings.
+    const syncLink = (members: EntitySnapshot[]) => {
+      const drones = members.filter((m) => m.link && m.damage !== 'destroyed');
+      if (!drones.length) return;
+      const up = drones.filter((m) => m.link!.up);
+      const one = drones[0].link!;
+      const name = (oid?: string) => (oid ? (this.entity(oid)?.name ?? oid) : '');
+      const why: Record<string, string> = { jammed: 'jammed', range: 'out of range', terrain: 'no line of sight', noController: 'no operator', controllerLost: 'operator lost', tether: 'fibre ran out' };
+      const text =
+        drones.length > 1
+          ? `${up.length}/${drones.length} linked${up.length < drones.length ? ` — ${drones.length - up.length} LOST (${why[drones.find((m) => !m.link!.up)!.link!.reason ?? ''] ?? 'no link'})` : ''}`
+          : one.mode === 'autonomous'
+            ? 'autonomous (no link needed)'
+            : one.up
+              ? `UP${one.controllerId ? ` to ${name(one.controllerId)}` : ' (satellite)'}${(one.hops ?? 1) > 1 ? ` via ${one.hops! - 1} relay${one.hops! > 2 ? 's' : ''}` : ''}${one.mode === 'fiber' ? ' (fibre)' : ''}`
+              : `LOST — ${why[one.reason ?? ''] ?? 'no link'}${one.lostFor !== undefined ? `, ${Math.round(one.lostFor)} s` : ''}`;
+      set('link', text, up.length < drones.length ? 'status-line damage-mobility' : 'status-line');
+      const pick = (key: string, v: string) => {
+        const sel = el.querySelector<HTMLSelectElement>(`[data-bind-value="${key}"]`);
+        if (sel && document.activeElement !== sel && sel.value !== v) sel.value = v;
+      };
+      pick('operator', one.operatorId ?? '');
+      pick('lostLink', one.lostLink);
+      pick('autonomy', one.autonomy);
+    };
     const e = this.entity(id);
     const u = this.unit(id);
     if (e) {
+      syncLink([e]);
       set('grid', fmtGrid(e.x, e.y));
       if (this.frame) {
         const g = this.frame.toGeodetic(e);
@@ -2469,6 +2558,7 @@ class App {
           this.pendingOrderText(e.id),
           e.halted ? 'HALTED (contact)' : '',
           e.jammed?.includes('radio') ? 'RADIO JAMMED' : '',
+          e.link && !e.link.up && !e.jammed?.includes('datalink') ? 'DATALINK LOST' : '',
           e.jammed?.includes('radar') ? 'RADAR JAMMED' : '',
           e.jamming === true ? 'JAMMING' : '',
           e.emcon?.radioSilence ? 'RADIO SILENCE' : '',
@@ -2544,6 +2634,7 @@ class App {
       const lead = this.entity(u.leaderId);
       set('grid', fmtGrid(u.x, u.y));
       const members = u.memberIds.map((m) => this.entity(m)).filter((m): m is EntitySnapshot => !!m);
+      syncLink(members);
       const alive = members.filter((m) => m.damage !== 'destroyed');
       set('strength', `${alive.length}/${members.length}`);
       set('leader', lead?.name ?? '—');
@@ -2559,6 +2650,7 @@ class App {
           u.withdrawn ? 'WITHDRAWING' : '',
           this.pendingOrderText(u.id),
           lead?.halted ? 'HALTED (contact)' : '',
+          alive.some((m) => m.link && !m.link.up) ? `DATALINK LOST ${alive.filter((m) => m.link && !m.link.up).length}/${alive.length}` : '',
           u.plan,
           u.plan && u.task && u.plan.endsWith(u.task) ? '' : u.task,
           this.travelText(u.travel),

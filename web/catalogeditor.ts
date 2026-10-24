@@ -10,7 +10,7 @@ const TITLE: Record<Section, string> = { entityTypes: 'Entity types', weapons: '
 
 const DOMAINS = ['ground', 'lifeform', 'air', 'surface'];
 const ARMOR = ['lifeform', 'soft', 'light', 'armored', 'air', 'ship', 'drone'];
-const SYMBOLS = ['armor', 'mech', 'infantry', 'recon', 'wheeled', 'air-defense', 'artillery', 'engineer', 'supply', 'ew', 'rotary', 'fixed-wing', 'uav', 'ship', 'boat', 'generic'];
+const SYMBOLS = ['armor', 'mech', 'infantry', 'recon', 'wheeled', 'air-defense', 'artillery', 'engineer', 'supply', 'ew', 'rotary', 'fixed-wing', 'uav', 'ugv', 'legged', 'ship', 'boat', 'generic'];
 
 interface Field {
   key: string;

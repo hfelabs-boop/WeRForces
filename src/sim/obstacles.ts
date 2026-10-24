@@ -177,7 +177,7 @@ export class Obstacles {
   afterMove(e: Entity, prev: Vec2): void {
     const g = this.crossing(prev, e);
     if (g) {
-      if (e.domain === 'lifeform') {
+      if (e.moveDomain === 'lifeform') {
         // Climbing through takes time.
         e.x = prev.x + (e.x - prev.x) * 0.3;
         e.y = prev.y + (e.y - prev.y) * 0.3;

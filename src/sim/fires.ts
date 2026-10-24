@@ -75,8 +75,12 @@ export function checkCallsForFire(engine: Engine): void {
   for (const obs of engine.entities.values()) {
     if (!obs.reactions.callForFire || !obs.alive || obs.remote || obs.embarkedIn) continue;
     if (engine.time < obs.callForFireAt) continue;
+    // A drone calls through its datalink and its operator's radio.
+    if (obs.uxs && !engine.unmanned.linked(obs)) continue;
+    const op = obs.uxs ? engine.unmanned.controllerOf(obs) : undefined;
+    const caller = op ?? obs;
     // A jammed observer cannot get a call for fire through.
-    if (engine.ew.radioJammed(obs)) continue;
+    if (engine.ew.radioJammed(caller)) continue;
     for (const c of obs.contacts.values()) {
       if (engine.time - c.lastSeen > 2) continue;
       const t = engine.entities.get(c.id);
@@ -90,7 +94,7 @@ export function checkCallsForFire(engine: Engine): void {
       });
       if (!fu) continue;
       const spec: TaskSpec = { type: 'fireMission', target: { x: Math.round(p.x), y: Math.round(p.y) }, rounds: DEFAULT_MISSION_ROUNDS, radius: fu.tubes > 1 ? BATTERY_SHEAF : 0 };
-      engine.radio(obs, `${obs.name}: fire mission, ${t.type.name} at ${spec.target.x} ${spec.target.y}, ${DEFAULT_MISSION_ROUNDS} rounds, over`, t.id);
+      engine.radio(caller, `${op ? `${op.name} (${obs.name})` : obs.name}: fire mission, ${t.type.name} at ${spec.target.x} ${spec.target.y}, ${DEFAULT_MISSION_ROUNDS} rounds, over`, t.id);
       engine.log('task', `${obs.name} called for fire on ${t.name}: ${fu.name} firing ${DEFAULT_MISSION_ROUNDS} round${DEFAULT_MISSION_ROUNDS > 1 ? 's' : ''}${fu.tubes > 1 ? ` x ${fu.tubes} tubes` : ''}`, obs.id, t.id);
       engine.assignTask(fu.id, spec);
       obs.callForFireAt = engine.time + CALL_FOR_FIRE_INTERVAL;

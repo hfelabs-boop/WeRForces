@@ -7,9 +7,10 @@ import type { Explanation, Finding, Vec2, WeaponDef } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import { groundFactor, sensorRange } from './environment.js';
-import { radarRange } from './sensors.js';
+import { radarRange, sizeFactor } from './sensors.js';
 import { emissions } from './emcon.js';
 import { AmbushTask, FormationTask, WaitTask } from './tasks.js';
+import { autonomyOf, fallbackText, reasonText, warheadOf } from './unmanned.js';
 import type { Unit } from './units.js';
 
 export interface ExplainOptions {
@@ -41,6 +42,39 @@ export function sightBlocker(engine: Engine, from: Entity, to: Entity, radar = f
   return null;
 }
 
+const LINK_FIX: Record<string, string> = {
+  jammed: "Move it (or the drones relaying for it) out of the jammer's reach, or destroy the jammer.",
+  range: 'Move its operator closer, or put a relaying drone between them.',
+  terrain: 'Move its operator to higher ground, or put a relaying drone overhead.',
+  noController: 'Place a drone operator team, or give it an operator (inspector: Datalink).',
+  controllerLost: 'Hand it to another operator (inspector: Datalink).',
+  tether: 'A fibre-optic drone cannot fly beyond its cable: it is lost to its operator.',
+};
+
+/** Unmanned systems: the state of the control datalink. */
+function linkFindings(engine: Engine, e: Entity): Finding[] {
+  const st = e.uxs;
+  if (!st || st.expended) return [];
+  const u = e.type.unmanned!;
+  if (u.link === 'autonomous') return [{ code: 'autonomous', severity: 'info', text: 'Autonomous: it needs no datalink.' }];
+  if (st.up) {
+    const op = st.rootId ? engine.entities.get(st.rootId) : undefined;
+    const relayed = (st.hops ?? 1) > 1 ? ` through ${st.hops! - 1} relaying drone${st.hops! > 2 ? 's' : ''}` : '';
+    const text = u.satcom ? 'Datalink up (satellite).' : `Datalink up${u.link === 'fiber' ? ' (fibre-optic)' : ''}${op ? ` to ${op.name}` : ''}${relayed}.`;
+    return [{ code: 'datalink', severity: 'info', text, aboutId: op?.id }];
+  }
+  const blocking = autonomyOf(e) === 'remote' || !(e.task && e.task.status === 'running');
+  return [
+    {
+      code: 'linkLost',
+      severity: blocking ? 'block' : 'warn',
+      text: `Datalink lost (${reasonText(engine, st)}): it ${fallbackText(e)}. Orders sent to it wait until the link is back.`,
+      fix: LINK_FIX[st.reason ?? 'noController'],
+      aboutId: st.jammerId ?? st.controllerId,
+    },
+  ];
+}
+
 function movement(engine: Engine, e: Entity, opts: ExplainOptions): Finding[] {
   const out: Finding[] = [];
   const add = (f: Finding) => out.push(f);
@@ -53,6 +87,7 @@ function movement(engine: Engine, e: Entity, opts: ExplainOptions): Finding[] {
   if (e.mobilityKill) add({ code: 'mobilityKill', severity: 'block', text: 'Immobilised (mobility kill): it cannot move again.' });
   const order = engine.pendingOrders.find((o) => o.targetId === e.id || o.targetId === e.unit?.id);
   if (order) add({ code: 'orderPending', severity: 'info', text: `A new order is on its way down the chain of command: it arrives in ${Math.max(0, Math.ceil(order.due - engine.time))} s.` });
+  for (const f of linkFindings(engine, e)) add(f);
   if (engine.ew.radioSilent(e)) add({ code: 'radioSilence', severity: 'warn', text: 'Radio silence (emission control): enemy direction finders cannot find it by its radio, but orders reach it a minute late, and it cannot share contacts with its unit, call for fire or hear codewords.', fix: 'Lift radio silence (Emission control) when it needs to talk.' });
   else if (engine.ew.radioJammed(e)) add({ code: 'radioJammed', severity: 'warn', text: 'Radio jammed: orders reach it a minute late, and it cannot share contacts with its unit, call for fire or hear codewords.', fix: "Move it out of the jammer's reach, or destroy the jammer." });
   if (e.nav) {
@@ -64,6 +99,7 @@ function movement(engine: Engine, e: Entity, opts: ExplainOptions): Finding[] {
       add({ code: 'gnssSpoofed', severity: 'warn', text: `GNSS spoofed by ${s?.name ?? e.nav.spoofedBy}: it believes it is ${km(err)} from where it is, and does not know.`, aboutId: e.nav.spoofedBy, at: s ? { x: Math.round(s.x), y: Math.round(s.y) } : undefined });
     }
   }
+
   if (engine.rules.fuel && e.type.endurance && e.domain !== 'air') {
     if (e.fuel <= 0) add({ code: 'outOfFuel', severity: 'block', text: 'Out of fuel.', fix: 'Send it to a supply vehicle (Resupply), or turn the fuel model off in Simulation settings.' });
     else if (e.fuel < 0.2) add({ code: 'lowFuel', severity: 'warn', text: `Fuel low: ${pct(e.fuel)} left.`, fix: 'Resupply it soon.' });
@@ -153,6 +189,16 @@ function fire(engine: Engine, e: Entity, opts: ExplainOptions): Finding[] {
   if (e.embarkedIn) return [{ code: 'embarked', severity: 'block', text: 'Passengers do not fire while mounted.', fix: 'Dismount them.' }];
   const direct = e.type.weapons.map((id) => engine.catalog.weapon(id)).filter((w) => !w.indirect);
   const indirect = e.type.weapons.map((id) => engine.catalog.weapon(id)).filter((w) => w.indirect);
+  if (e.uxs && !e.uxs.up) {
+    const a = autonomyOf(e);
+    if (a === 'remote' && (direct.length || warheadOf(engine, e))) add({ code: 'noLinkFire', severity: 'block', text: 'No datalink: its operator cannot aim or fire it.', fix: LINK_FIX[e.uxs.reason ?? 'noController'] });
+    else if (a === 'supervised') add({ code: 'linkSupervised', severity: 'warn', text: 'No datalink: it attacks only the target it was given, nothing new.' });
+  }
+  const wh = warheadOf(engine, e);
+  if (wh && !direct.length) {
+    out.push({ code: 'oneWay', severity: 'info', text: `One-way attack drone: it attacks by flying into its target with its ${wh.name}. Give it Strike (attack), Loiter and attack, or a swarm attack.` });
+    return out;
+  }
   if (!direct.length) {
     if (indirect.length) return [{ code: 'indirectOnly', severity: 'info', text: `It only has indirect fire (${indirect.map((w) => w.name).join(', ')}): it shoots on fire missions, not at what it sees.`, fix: 'Give it a Fire mission, or an observer that calls for fire.' }];
     return [{ code: 'unarmed', severity: 'info', text: 'Unarmed.' }];
@@ -208,6 +254,10 @@ function sensing(engine: Engine, e: Entity, opts: ExplainOptions): Finding[] {
   const out: Finding[] = [];
   if (e.destroyed || e.remote) return out;
   if (e.embarkedIn) return [{ code: 'embarked', severity: 'info', text: 'Passengers do not look out; the carrier\'s crew does.' }];
+  if (e.uxs && !e.uxs.up) {
+    if (autonomyOf(e) === 'remote') return [{ code: 'noLinkPicture', severity: 'block', text: 'No datalink: its camera picture does not reach its operator, so it spots nothing.', fix: LINK_FIX[e.uxs.reason ?? 'noController'] }];
+    out.push({ code: 'noLinkShare', severity: 'warn', text: 'No datalink: what it sees stays with it, not shared with its side.' });
+  }
   const sensors = e.type.sensors.map((id) => engine.catalog.sensors.get(id)!).filter(Boolean);
   if (!sensors.length) return [{ code: 'noSensors', severity: 'warn', text: 'It has no sensors: it only knows what its unit reports.' }];
   const env = engine.env;
@@ -248,14 +298,15 @@ function sensing(engine: Engine, e: Entity, opts: ExplainOptions): Finding[] {
     .slice(0, 3);
   for (const { t, d } of unseen) {
     // Radars see big targets further than small ones.
-    const usable = ranges.filter(({ s }) => s.detects.includes(t.domain)).map((r) => (r.s.radar && r.s.refRange ? { ...r, range: radarRange(engine, r.s, t.type) } : r));
+    // Small things (drones) are seen closer in.
+    const usable = ranges.filter(({ s }) => s.detects.includes(t.domain)).map((r) => (r.s.radar && r.s.refRange ? { ...r, range: radarRange(engine, r.s, t.type) } : r.s.radar ? r : { ...r, range: r.range * sizeFactor(t.type) }));
     if (!usable.length) {
       out.push({ code: 'cannotDetectDomain', severity: 'info', text: `${t.name} (${km(d)}) is not detected: none of its sensors can see ${t.domain === 'air' ? 'aircraft' : t.domain}.`, aboutId: t.id });
       continue;
     }
     const best = usable.reduce((a, b) => (b.range > a.range ? b : a));
     if (d > best.range) {
-      const small = best.s.radar && best.s.refRange && best.range < best.s.maxRange ? ` for a radar return that size (${engine.models.radar.rcs(t.type)} m²)` : '';
+      const small = best.s.radar && best.s.refRange && best.range < best.s.maxRange ? ` for a radar return that size (${engine.models.radar.rcs(t.type)} m²)` : !best.s.radar && sizeFactor(t.type) < 1 ? ` for something ${t.type.size} m across` : '';
       out.push({ code: 'beyondSensorRange', severity: 'info', text: `${t.name} is ${km(d)} away, beyond what it can see (${km(best.range)}${small}).`, aboutId: t.id });
       continue;
     }

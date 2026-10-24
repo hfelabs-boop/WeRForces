@@ -19,6 +19,7 @@ src/sim           The simulation engine; no I/O, usable as a library
   postOverlay.ts    route cost multipliers per post (minefields, obstacles, threats), stored in blocks
   pathfinding.ts    grid A* and polyline simplification
   catalog.ts        default entity types, weapons, sensors, unit templates
+  catalogUnmanned.ts  unmanned systems in the default catalog (drones, UGVs, robot dogs, operators)
   entity.ts         Entity state
   movement.ts       kinematics per domain
   tasks.ts          Task classes (move, route, patrol, wait, follow, attack, orbit, formation,
@@ -43,6 +44,8 @@ src/sim           The simulation engine; no I/O, usable as a library
   navigation.ts     GNSS navigators and GNSS-guided munitions under jamming and spoofing
   emcon.ts          what entities radiate, direction finding (DF contacts), anti-radiation missiles
   protection.ts     active protection systems and flares/chaff on the shot flow
+  unmanned.ts       unmanned systems: datalinks (range, line of sight, mesh relay, jamming, fibre), lost-link behaviour, flocking, one-way attack
+  unmannedTasks.ts  strike, loiter, swarm search and swarm attack tasks
   life.ts           pattern of life: background civilian cars and pedestrians
   explain.ts        "Why?" explanations for entities and units (read-only)
   alerts.ts         the attention queue (read-only)
@@ -103,7 +106,10 @@ docs              this documentation (served at /docs)
    point, a speed, whether to stop there). An entity halted by its on-contact
    reaction, or pinned down by suppression, stops instead, keeping its task.
    A GNSS navigator that has lost its fix runs its task from where it thinks
-   it is, and the steer point is shifted back by the navigation error.
+   it is, and the steer point is shifted back by the navigation error. An
+   unmanned system without its datalink is steered by its lost-link behaviour
+   instead (its task waits), as far as its autonomy requires; then the drones
+   of each unit steer apart a little (flocking).
 6. **Movement:** `stepMovement` turns `steer` into heading, speed and position
    changes, and applies terrain and weather effects. Vehicles out of fuel stay
    put. Ground movement is checked against obstacles and minefields (mine
@@ -114,7 +120,8 @@ docs              this documentation (served at /docs)
    order a full scan would visit them, so results do not depend on the grid.
 8. **Once per second:** the light and weather are updated, smoke drifts and
    expires, observers request fire missions, unit morale is updated, supply
-   vehicles resupply, jamming is worked out, GNSS navigators lose or regain
+   vehicles resupply, jamming is worked out, unmanned systems' datalinks are
+   worked out (mesh relay included), GNSS navigators lose or regain
    their fix, direction finders take bearings (and call for fire on good
    fixes), anti-radiation missiles home on their emitters, the pattern of life tops up and
    moves its civilians, alerts are checked, synchronization-matrix
@@ -278,6 +285,7 @@ npm run docs:gen      # regenerate docs/reference/catalog.md and mcp-tools.md
 | `viewshed.test.ts` | viewshed grids |
 | `life.test.ts` | pattern of life: civilians kept topped up, fleeing |
 | `ew.test.ts` | radio, radar, datalink and GNSS jamming |
+| `unmanned.test.ts` | datalink loss by range and jamming with each lost-link behaviour, fibre, mesh relay, satellite link, one-way attack through the armour model and active protection, loiter and attack, swarm search and attack, flocking, legged mobility, small-drone detection, calls for fire through the operator, save/load mid-flight, REST, typed orders, MCP, fog of war, quick battle |
 | `countermeasures.test.ts` | GNSS denial and spoofing, GNSS-guided munitions, counter-UAS jammers, guns and interceptors, emission control, direction finding and triangulation, DF calls for fire, active protection, decoys, anti-radiation missiles, save/load, fog of war, REST and MCP |
 | `fidelity.test.ts` | armour by aspect, ballistics of unguided rounds, the radar range equation, swapping models |
 | `drive.test.ts` | direct control |

@@ -69,7 +69,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | --- | --- | --- |
 | GET | `/entities` | `?force=1\|blue&domain=air&unit=U1&alive=true&remote=false` |
 | POST | `/entities` | `{"typeId", "force", "position", "heading"?, "name"?, "altitude"?}` |
-| GET / PATCH / DELETE | `/entities/{id}` | PATCH: `{"name"?, "roe"?, "reactions"?, "position"?, "heading"?, "jamming"?, "emcon"?}` (`jamming`: switch a jammer on or off; `emcon`: [emission control](#emission-control-and-direction-finding)) |
+| GET / PATCH / DELETE | `/entities/{id}` | PATCH: `{"name"?, "roe"?, "reactions"?, "position"?, "heading"?, "jamming"?, "emcon"?, "controllerId"?, "lostLink"?, "autonomy"?}` (`jamming`: switch a jammer on or off; `emcon`: [emission control](#emission-control-and-direction-finding); the last three: [unmanned systems](#unmanned-systems)) |
 | POST | `/entities/{id}/task` | a [task](#tasks) |
 | POST | `/entities/{id}/plan` | a [plan](#plans) |
 | POST | `/entities/{id}/stop` | |
@@ -80,7 +80,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | POST | `/entities/{id}/drive` | direct control: `{"throttle"?: 0..1, "turn"?: -1..1, "targetId"?: "E12" or null}`. The first call replaces its task and plan with a `manual` task; a turn is let go after 1.5 s without another call; any other order ends it. Returns the entity |
 | GET | `/units` | `?force=` |
 | POST | `/units` | `{"templateId", "force", "position", "heading"?, "name"?}` or `{"entityIds": [...], "name"?, "formation"?}` |
-| GET / PATCH / DELETE | `/units/{id}` | PATCH: `{"name"?, "formation"?, "roe"?, "reactions"?, "superiorId"?, "emcon"?}` (`superiorId`: put under another unit, `null` for none; `emcon`: for its members and subordinate units). DELETE removes the members too; its subordinates become independent |
+| GET / PATCH / DELETE | `/units/{id}` | PATCH: `{"name"?, "formation"?, "roe"?, "reactions"?, "superiorId"?, "emcon"?, "controllerId"?, "lostLink"?, "autonomy"?}` (`superiorId`: put under another unit, `null` for none; `emcon`: for its members and subordinate units; the last three: for its unmanned members). DELETE removes the members too; its subordinates become independent |
 | POST | `/units/{id}/task` · `/plan` · `/stop` · `/embark` · `/disembark` | as for entities. A unit embarking into a carrier unit shares out the seats |
 | POST | `/units/{id}/aggregate` · `/units/{id}/disaggregate` | Simulate the unit and the units under it as aggregates ([aggregate level](../concepts.md#aggregate-level)), or split them back into their entities. 400 with the reason when it cannot be done (aircraft, mounted or immobilised members, a task an aggregate cannot do, already aggregated). Returns the unit |
 | GET / POST | `/graphics` | POST `{"kind": "route\|area\|phaseLine\|point\|minefield\|obstacle", "points": [...], "name"?, "force"?, "density"?}` (`density`: minefields, strikes per 100 m) |
@@ -97,7 +97,9 @@ they apply: `emcon` (`{"radioSilence": true, "radarOff": true}`), `emitting`
 (`{"left": 6, "charges": 8}`, active protection), `decoys` (`{"left": 10,
 "salvos": 12}`, flare and chaff salvos), and while satellite navigation is
 lost `gnss` (`denied`, or `spoofed` for exercise control only) with `navError`
-(m). Background civilians carry `ambient: true`.
+(m). Unmanned systems carry `link` (see [Unmanned systems](#unmanned-systems)),
+and a one-way attack drone that has delivered its warhead `expended: true`.
+Background civilians carry `ambient: true`.
 
 An aggregated unit carries `aggregate`: `alive` and `total` members,
 `strength` per entity type (`alive`, `effective`: less losses still being
@@ -129,6 +131,25 @@ Fire on one with a fire mission at `x`, `y` (radius about `major / 2`). See
 [Concepts](../concepts.md#direction-finding). The full state (`/simulation`
 over WebSocket) carries them as `dfContacts`.
 
+### Unmanned systems
+
+| Method | Path | Body |
+| --- | --- | --- |
+| PATCH | `/entities/{id}` · `/units/{id}` | `{"controllerId"?: "E7" \| null, "lostLink"?: "hover\|return\|continue\|land" \| null, "autonomy"?: "remote\|supervised\|autonomous" \| null}`: the ground control station it is flown from (`null`: any of its force's) and overrides of its type's lost-link behaviour and autonomy (`null`: the type's). On a unit: every unmanned member. Players: their own force, and their own operators |
+
+An unmanned system's `link`:
+
+```json
+{"mode":"rf","up":false,"reason":"jammed","controllerId":"E7","operatorId":"E7","lostFor":12.4,"autonomy":"remote","lostLink":"return"}
+```
+
+`mode` is `rf`, `fiber` or `autonomous`; `reason` one of `jammed`, `range`,
+`terrain` (no line of sight), `noController`, `controllerLost`, `tether` (a
+fibre-optic cable run out); while up, `controllerId` is the station at the far
+end and `hops` the radio hops to it (more than 1: relayed through other drones).
+Orders to a system without its link wait for it. See
+[Concepts](../concepts.md#unmanned-systems-and-swarms).
+
 ### Tasks
 
 ```json
@@ -152,7 +173,17 @@ over WebSocket) carries them as `dfContacts`.
 {"type": "screen", "position": {"x": 6000, "y": 9000}, "facing": 90, "breakContact": 2000, "fallback": {"x": 3000, "y": 9000}}
 {"type": "search", "areaId": "G3", "spacing": 600}
 {"type": "manual"}
+{"type": "strike", "targetId": "E12"}
+{"type": "loiter", "areaId": "G3", "attack": true, "prefer": ["armored", "artillery", "any"]}
+{"type": "loiter", "center": {"x": 8000, "y": 8000}, "radius": 1000, "duration": 1200}
+{"type": "swarmSearch", "areaId": "G3", "attack": true}
+{"type": "swarmAttack", "targetIds": ["E12", "E13", "E14"]}
+{"type": "swarmAttack", "areaId": "G3", "prefer": ["armored"]}
 ```
+
+`strike`: one-way attack drones fly into the target. `loiter`, `swarmSearch`
+and `swarmAttack` are for drones; on a unit, `loiter` and the swarm tasks
+share the area or the targets out among its members.
 
 `manual` is direct control; steer it with `POST /entities/{id}/drive`.
 

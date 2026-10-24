@@ -91,7 +91,7 @@ class PathFollower {
 
   plan(e: Entity, engine: Engine, goal: Vec2): boolean {
     this.goal = { ...goal };
-    const route = engine.planRoute(e, goal, e.domain, e.type.offroadFactor, e.force, this.covered);
+    const route = engine.planRoute(e, goal, e.moveDomain, e.type.offroadFactor, e.force, this.covered);
     this.obstacles = engine.obstacles.version;
     if (!route) return false;
     this.waypoints = route;
@@ -316,21 +316,31 @@ export function bestWeaponAgainst(engine: Engine, shooter: Entity, target: Entit
 export class AttackTask extends Task {
   private path = new PathFollower();
   private replanIn = 0;
+  /** A one-way attack drone attacks by striking: flying into the target. */
+  private strike: Task | null = null;
 
   constructor(readonly targetId: string) {
     super({ type: 'attack', targetId });
   }
 
   protected override start({ entity }: TaskContext): void {
-    entity.attackTargetId = this.targetId;
+    if (entity.type.unmanned?.warhead) this.strike = createTask({ type: 'strike', targetId: this.targetId });
+    else entity.attackTargetId = this.targetId;
   }
 
   override cancel(entity: Entity): void {
     super.cancel(entity);
+    this.strike?.cancel(entity);
     if (entity.attackTargetId === this.targetId) entity.attackTargetId = undefined;
   }
 
-  protected tick({ engine, entity, dt }: TaskContext): TaskStatus {
+  protected tick(ctx: TaskContext): TaskStatus {
+    if (this.strike) {
+      const status = this.strike.update(ctx);
+      this.message = this.strike.message;
+      return status;
+    }
+    const { engine, entity, dt } = ctx;
     // A target inside an aggregated unit is closed on where the aggregate is.
     const target = engine.findEntity(this.targetId);
     if (!target || target.destroyed) {
@@ -743,6 +753,14 @@ export class ResupplyTask extends Task {
   }
 }
 
+/** Task classes defined in other modules (unmanned systems), by task type. */
+const MORE_TASKS = new Map<TaskSpec['type'], (spec: TaskSpec) => Task>();
+
+/** Let another module supply the class for a task type. */
+export function registerTask(type: TaskSpec['type'], make: (spec: TaskSpec) => Task): void {
+  MORE_TASKS.set(type, make);
+}
+
 export function createTask(spec: TaskSpec): Task {
   switch (spec.type) {
     case 'moveTo':
@@ -783,6 +801,14 @@ export function createTask(spec: TaskSpec): Task {
       return new SearchTask(spec);
     case 'manual':
       return new ManualTask(spec);
+    case 'strike':
+    case 'loiter':
+    case 'swarmSearch':
+    case 'swarmAttack': {
+      const make = MORE_TASKS.get(spec.type);
+      if (!make) throw new Error(`no task for ${spec.type}`);
+      return make(spec);
+    }
   }
 }
 
@@ -1095,7 +1121,7 @@ export class SearchTask extends Task {
     let reach = 300;
     for (const sid of entity.type.sensors) reach = Math.max(reach, sensorRange(engine.catalog.sensors.get(sid)!, engine.env));
     const spacing = this.s.spacing ?? Math.max(100, Math.min(1500, reach));
-    this.tracks = sweepTracks(area.points, spacing).filter((p) => engine.terrain.mobilityFactor(p.x, p.y, entity.domain, entity.type.offroadFactor) > 0 || entity.domain === 'air');
+    this.tracks = sweepTracks(area.points, spacing).filter((p) => engine.terrain.mobilityFactor(p.x, p.y, entity.moveDomain, entity.type.offroadFactor) > 0 || entity.domain === 'air');
     // Start from whichever end is nearer.
     if (this.tracks.length && dist2d(entity, this.tracks.at(-1)!) < dist2d(entity, this.tracks[0])) this.tracks.reverse();
     this.index = Math.min(this.s.startIndex ?? 0, this.tracks.length);

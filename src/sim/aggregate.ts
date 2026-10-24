@@ -493,7 +493,7 @@ export class Aggregation {
     const weather = groundFactor(this.engine.env);
     let v = Infinity;
     for (const m of a.alive()) {
-      const mob = t.mobilityFactor(a.x, a.y, m.domain, m.type.offroadFactor * weather);
+      const mob = t.mobilityFactor(a.x, a.y, m.moveDomain, m.type.offroadFactor * weather);
       v = Math.min(v, m.cruiseSpeed, m.type.maxSpeed * Math.max(mob, 0.1));
     }
     const cap = spec && 'speed' in spec && spec.speed ? spec.speed : Infinity;

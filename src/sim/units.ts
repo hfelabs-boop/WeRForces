@@ -8,6 +8,7 @@ import type { Entity } from './entity.js';
 import type { PlanExecutor, Taskable } from './plans.js';
 import { createTask, FormationTask, indirectWeaponFor, ManualTask, type Task, type TaskStatus } from './tasks.js';
 import { needsSupply } from './supply.js';
+import { isSwarmTask, startSwarm } from './unmannedTasks.js';
 
 /** Body-frame offset (x = right, y = forward) for follower k (1-based) in a formation. */
 export function formationOffset(formation: Formation, k: number, spacing: number): Vec2 {
@@ -29,7 +30,7 @@ export function formationOffset(formation: Formation, k: number, spacing: number
 
 /** Unit tasks that every member executes itself, rather than the leader with the rest in formation. */
 export function perMemberTask(spec: TaskSpec): boolean {
-  return spec.type === 'attack' || spec.type === 'fireMission' || spec.type === 'mount' || spec.type === 'dismount' || spec.type === 'resupply' || DEPLOYED.has(spec.type);
+  return spec.type === 'attack' || spec.type === 'strike' || isSwarmTask(spec) || spec.type === 'fireMission' || spec.type === 'mount' || spec.type === 'dismount' || spec.type === 'resupply' || DEPLOYED.has(spec.type);
 }
 
 /** Tasks for which a unit's members deploy in a line across the facing direction. */
@@ -171,8 +172,13 @@ export class Unit implements Taskable {
     this.taskSpec = spec;
     const leader = this.leader;
     if (!leader) return;
-    if (spec.type === 'attack') {
+    if (spec.type === 'attack' || spec.type === 'strike') {
       for (const m of this.alive()) engine.setEntityTask(m, createTask(spec));
+      return;
+    }
+    if (isSwarmTask(spec)) {
+      // Drones share the area out, or spread over the targets.
+      startSwarm(engine, this, spec);
       return;
     }
     if (spec.type === 'fireMission') {
@@ -261,7 +267,7 @@ export class Unit implements Taskable {
     const next = mobile[0] ?? this.alive()[0];
     if (!next || next === old) return;
     this.leader = next;
-    engine.log('info', `${this.name}: ${old?.name ?? 'leader'} ${old?.alive ? 'immobilised' : 'lost'}, ${next.name} takes command`, this.id);
+    engine.log('info', `${this.name}: ${old?.name ?? 'leader'} ${old?.alive ? 'immobilised' : old?.uxs?.expended ? 'spent' : 'lost'}, ${next.name} takes command`, this.id);
     // Attacks, fire missions and mounting are done by every member: they simply carry on.
     if (this.taskSpec && perMemberTask(this.taskSpec) && this.taskStatus() === 'running') return;
     const running = !!this.taskSpec && !perMemberTask(this.taskSpec) && this.leaderTask?.status === 'running' ? this.leaderTask : null;

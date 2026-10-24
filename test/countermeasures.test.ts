@@ -45,7 +45,8 @@ const QUAD: EntityTypeDef = {
   sensors: ['eye'],
   weapons: [],
   crew: 0,
-  unmanned: { link: 'rf' },
+  // Flown from an operator up to 20 km away; without its link it carries on with its task.
+  unmanned: { link: 'rf', linkRange: 20000, lostLink: 'continue' },
   gnss: true,
 };
 
@@ -76,6 +77,8 @@ describe('GNSS denial and spoofing', () => {
     const run = (jam: boolean) => {
       const eng = engine();
       const quad = eng.createEntity({ typeId: 'test-quad', force: 1, x: 2000, y: 3000 });
+      // Its operator, within radio range of the whole flight.
+      eng.createEntity({ typeId: 'us-uas-operator', force: 1, x: 4500, y: 2900 });
       const pole = eng.createEntity({ typeId: 'ru-pole21', force: 2, x: 15000, y: 15000 });
       pole.jamming = jam;
       eng.runFor(1.05);
@@ -119,6 +122,7 @@ describe('GNSS denial and spoofing', () => {
   it('a spoofer walks a navigator off toward itself, and only the spoofer\'s side is told', () => {
     const eng = engine();
     const quad = eng.createEntity({ typeId: 'test-quad', force: 1, x: 6000, y: 6000 });
+    eng.createEntity({ typeId: 'us-uas-operator', force: 1, x: 6000, y: 5900 });
     const spoofer = eng.createEntity({ typeId: 'ru-shipovnik', force: 2, x: 12000, y: 6000 });
     eng.runFor(1.05);
     expect(quad.nav?.spoofedBy).toBe(spoofer.id);
