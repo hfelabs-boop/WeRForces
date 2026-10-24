@@ -312,7 +312,7 @@ export class AttackTask extends Task {
     }
     const d = dist2d(entity, target);
     const standoff = weapon.maxRange * 0.8;
-    const los = engine.terrain.lineOfSight(entity.eye, { x: target.x, y: target.y, z: target.z + 1.5 });
+    const los = engine.losCached(entity, target);
     if (d <= standoff && d >= weapon.minRange && los) {
       // In a firing position: hold (fixed wing keeps flying past and comes around).
       if ((entity.type.minSpeed ?? 0) > 0) entity.steer = { x: target.x, y: target.y, speed: entity.cruiseSpeed, arrive: false };

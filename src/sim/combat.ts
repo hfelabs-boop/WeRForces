@@ -48,7 +48,7 @@ function canEngage(engine: Engine, shooter: Entity, target: Entity, w: WeaponDef
   if (!w.targets.includes(target.domain)) return false;
   if (range < w.minRange || range > w.maxRange) return false;
   if ((w.pk[target.type.armor] ?? 0) < 0.02) return false;
-  return engine.terrain.lineOfSight(shooter.eye, { x: target.x, y: target.y, z: target.z + 1.5 });
+  return engine.losCached(shooter, target);
 }
 
 /** Choose and fire at most one weapon this tick, honouring ROE and explicit attack targets. */
@@ -242,7 +242,7 @@ export function resolveImpact(engine: Engine, shot: Shot): Detonation {
   }
   // Wire/command-guided missiles need the launcher to keep guiding them to impact.
   if (shot.weapon.commandGuided) {
-    const guiding = shooter && shooter.alive && !shooter.firepowerKill && engine.terrain.lineOfSight(shooter.eye, { x: target.x, y: target.y, z: target.z + 1.5 });
+    const guiding = shooter && shooter.alive && !shooter.firepowerKill && engine.losCached(shooter, target);
     if (!guiding) return { shot, location: scatter(engine, target.position), hit: false, outcome: 'miss', guidanceLost: true };
   }
   // Guided munitions track the target; ballistic rounds land at the launch aim point.

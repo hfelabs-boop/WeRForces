@@ -21,6 +21,10 @@ export const DEFAULT_TERRAIN: TerrainSpec = {
 const CANOPY_HEIGHT = 15;
 /** Metres of forest a sight line can pass through before it is blocked. */
 const FOREST_SEE_THROUGH = 150;
+/** Line-of-sight samples checked against the coarse obstacle grid at a time. */
+const LOS_CHUNK = 8;
+/** Posts per side of a coarse obstacle-height block. */
+const LOS_BLOCK = 4;
 const TOWN_NAMES = [
   'Alderford',
   'Brenham',
@@ -80,6 +84,8 @@ export class Terrain extends TerrainGrid {
   readonly roads: Vec2[][];
   readonly towns: Town[];
   private readonly roadMask: Uint8Array;
+  /** Coarse obstacle heights for fast line of sight, computed on first use. */
+  private tops: { cols: number; max: Float32Array } | null = null;
   /** A* node costs per domain and off-road factor, computed on first use. */
   private readonly costGrids = new Map<string, Float32Array>();
 
@@ -307,16 +313,82 @@ export class Terrain extends TerrainGrid {
     const n = Math.ceil(d / (this.spec.cellSize / 2));
     const stepLen = d / n;
     let underCanopy = 0;
+    const tops = this.obstacleTops();
+    const cs = this.spec.cellSize;
+    const cols = this.cols;
+    const maxF = this.cols - 1.0001;
+    const h = this.heights;
     for (let k = 1; k < n; k++) {
+      // Skip a stretch of samples whose sight line passes above everything below it:
+      // neither terrain nor canopy can touch it, so the result is exactly the same.
+      if ((k - 1) % LOS_CHUNK === 0) {
+        const k1 = Math.min(n - 1, k + LOS_CHUNK - 1);
+        if (this.clearAbove(a, b, k / n, k1 / n, tops)) {
+          k = k1;
+          continue;
+        }
+      }
       const t = k / n;
       const x = a.x + (b.x - a.x) * t;
       const y = a.y + (b.y - a.y) * t;
       const z = a.z + (b.z - a.z) * t;
-      const ground = this.surfaceHeight(x, y);
+      // Inlined surfaceHeight(x, y): the same arithmetic as TerrainGrid.elevation.
+      const fx = Math.min(Math.max(x / cs, 0), maxF);
+      const fy = Math.min(Math.max(y / cs, 0), maxF);
+      const ix = Math.floor(fx);
+      const iy = Math.floor(fy);
+      const tx = fx - ix;
+      const i = iy * cols + ix;
+      const h0 = h[i] + (h[i + 1] - h[i]) * tx;
+      const h1 = h[i + cols] + (h[i + cols + 1] - h[i + cols]) * tx;
+      const ground = Math.max(0, h0 + (h1 - h0) * (fy - iy));
       if (ground > z) return false;
       if (ground + CANOPY_HEIGHT > z && this.isForest(x, y)) {
         underCanopy += stepLen;
         if (underCanopy > FOREST_SEE_THROUGH) return false;
+      }
+    }
+    return true;
+  }
+
+  /** Highest terrain-or-canopy top per block of LOS_BLOCK x LOS_BLOCK posts (blocks share their edge posts). */
+  private obstacleTops(): { cols: number; max: Float32Array } {
+    if (this.tops) return this.tops;
+    const bc = Math.ceil((this.cols - 1) / LOS_BLOCK) + 1;
+    const max = new Float32Array(bc * bc).fill(-Infinity);
+    for (let r = 0; r < this.rows; r++) {
+      for (let c = 0; c < this.cols; c++) {
+        const i = r * this.cols + c;
+        const top = Math.max(0, this.heights[i]) + (this.forest[i] ? CANOPY_HEIGHT : 0);
+        // A post on a block edge belongs to the blocks on both sides.
+        for (const br of r % LOS_BLOCK === 0 && r > 0 ? [r / LOS_BLOCK - 1, r / LOS_BLOCK] : [Math.floor(r / LOS_BLOCK)]) {
+          for (const bcol of c % LOS_BLOCK === 0 && c > 0 ? [c / LOS_BLOCK - 1, c / LOS_BLOCK] : [Math.floor(c / LOS_BLOCK)]) {
+            const j = br * bc + bcol;
+            if (top > max[j]) max[j] = top;
+          }
+        }
+      }
+    }
+    this.tops = { cols: bc, max };
+    return this.tops;
+  }
+
+  /** True when the sight line between fractions t0..t1 of a-b is above every obstacle beneath it. */
+  private clearAbove(a: Vec3, b: Vec3, t0: number, t1: number, tops: { cols: number; max: Float32Array }): boolean {
+    const cs = this.spec.cellSize;
+    const xa = a.x + (b.x - a.x) * t0;
+    const xb = a.x + (b.x - a.x) * t1;
+    const ya = a.y + (b.y - a.y) * t0;
+    const yb = a.y + (b.y - a.y) * t1;
+    const zMin = Math.min(a.z + (b.z - a.z) * t0, a.z + (b.z - a.z) * t1);
+    // Posts that can influence samples in this stretch (bilinear corners and nearest post).
+    const c0 = Math.max(0, Math.floor(Math.min(xa, xb) / cs));
+    const c1 = Math.min(this.cols - 1, Math.ceil(Math.max(xa, xb) / cs));
+    const r0 = Math.max(0, Math.floor(Math.min(ya, yb) / cs));
+    const r1 = Math.min(this.rows - 1, Math.ceil(Math.max(ya, yb) / cs));
+    for (let br = Math.floor(r0 / LOS_BLOCK); br <= Math.floor(r1 / LOS_BLOCK); br++) {
+      for (let bcol = Math.floor(c0 / LOS_BLOCK); bcol <= Math.floor(c1 / LOS_BLOCK); bcol++) {
+        if (tops.max[br * tops.cols + bcol] >= zMin) return false;
       }
     }
     return true;

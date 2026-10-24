@@ -123,6 +123,7 @@ export class Engine {
   readonly listeners: EngineListeners = { event: [], fire: [], detonation: [], removed: [], reset: [], step: [] };
 
   private hostilities = new Set<string>(['1-2']);
+  private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
   private shots: Shot[] = [];
   private events: SimEvent[] = [];
   private eventSeq = 0;
@@ -635,6 +636,20 @@ export class Engine {
     for (const fn of this.listeners.fire) fn(shot);
   }
 
+  /**
+   * Line of sight from an entity's eyes to a target's centre of mass, reusing the last
+   * answer while neither has moved (the result is the same; only the work is saved).
+   */
+  losCached(from: Entity, to: Entity): boolean {
+    const key = `${from.id}>${to.id}`;
+    const c = this.losMemo.get(key);
+    if (c && c.ax === from.x && c.ay === from.y && c.az === from.z && c.bx === to.x && c.by === to.y && c.bz === to.z && c.v === this.terrainVersion) return c.visible;
+    const visible = this.terrain.lineOfSight(from.eye, { x: to.x, y: to.y, z: to.z + 1.5 });
+    if (this.losMemo.size > 200_000) this.losMemo.clear();
+    this.losMemo.set(key, { ax: from.x, ay: from.y, az: from.z, bx: to.x, by: to.y, bz: to.z, v: this.terrainVersion, visible });
+    return visible;
+  }
+
   /** Munitions currently in flight. */
   get shotsInFlight(): readonly Shot[] {
     return this.shots;
@@ -855,6 +870,7 @@ export class Engine {
     this.graphics.clear();
     this.shots = [];
     this.sensorDue.clear();
+    this.losMemo.clear();
     this.counters = { E: 0, U: 0, G: 0 };
     this.disCounter = 0;
     this.time = 0;
