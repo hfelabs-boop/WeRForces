@@ -172,5 +172,10 @@ describe('fire missions', () => {
     expect(r.error).toMatch(/no artillery or mortars/);
     const guns = engine.createUnitFromTemplate('us-paladin-platoon', 1, 500, 800);
     expect(executeCommand(runner, { cmd: 'assignTask', targetId: guns.id, task: { type: 'fireMission', target: { x: 2000, y: 2000 } } }).ok).toBe(true);
+    // A superior whose subordinates have the guns passes the mission down.
+    const coy = engine.createUnitFromTemplate('us-tank-company', 1, 1500, 500);
+    const mortars = engine.createUnitFromTemplate('us-mortar-section', 1, 1500, 900);
+    engine.setSuperior(mortars.id, coy.id);
+    expect(executeCommand(runner, { cmd: 'assignTask', targetId: coy.id, task: { type: 'fireMission', target: { x: 2000, y: 2000 } } }).ok).toBe(true);
   });
 });

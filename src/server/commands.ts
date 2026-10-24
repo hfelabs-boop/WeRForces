@@ -301,7 +301,11 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         const task = validateTask(c.task);
         if (task.type === 'fireMission') {
           // Refuse up front rather than fail later in the event log.
-          const members = engine.units.get(targetId)?.memberList ?? [engine.entities.get(targetId)].filter((e) => !!e);
+          // A unit's order passes down to its subordinates: their guns count too.
+          const unit = engine.units.get(targetId);
+          const units = unit ? [unit] : [];
+          for (let i = 0; i < units.length; i++) units.push(...engine.subordinatesOf(units[i]).filter((s) => !units.includes(s)));
+          const members = unit ? units.flatMap((u) => u.memberList) : [engine.entities.get(targetId)].filter((e) => !!e);
           const tubes = members.filter((m) => m.alive && m.type.weapons.some((w) => engine.catalog.weapon(w).indirect && (!task.weaponId || w === task.weaponId)));
           if (members.length && !tubes.length) throw new ValidationError(`${engine.nameOf(targetId)} has no ${task.weaponId ? `weapon ${task.weaponId}` : 'artillery or mortars'} for a fire mission`);
         }
