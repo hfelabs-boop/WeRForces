@@ -1,6 +1,6 @@
 # HLA (IEEE 1516e) bridge
 
-WeRForces speaks [DIS](../reference/dis.md) natively. To join an **HLA 1516e
+WeRForces speaks [DIS](reference/dis.md) natively. To join an **HLA 1516e
 (HLA Evolved)** federation it uses a separate **bridge federate**, written in
 Java against the standard IEEE 1516e API (`hla.rti1516e.*`). The bridge:
 
@@ -19,8 +19,8 @@ Apache-2.0 RTI, running as a real RTI process. Nothing in the bridge is
 specific to OHLA except how it turns `--rti-host`/`--rti-port` into a connect
 string (see [Other RTIs](#other-rtis)).
 
-Source: [`hla/`](../../hla/fetch-ohla.sh) (scripts), `hla/src/` (bridge),
-[`hla/fom/werforces-rpr.xml`](../../hla/fom/werforces-rpr.xml) (FOM module).
+Source: [`hla/`](../hla/fetch-ohla.sh) (scripts), `hla/src/` (bridge),
+[`hla/fom/werforces-rpr.xml`](../hla/fom/werforces-rpr.xml) (FOM module).
 
 ## Requirements
 
@@ -135,7 +135,7 @@ which are the ones it sent itself.
 
 ## FOM subset and mapping
 
-[`hla/fom/werforces-rpr.xml`](../../hla/fom/werforces-rpr.xml) is one IEEE
+[`hla/fom/werforces-rpr.xml`](../hla/fom/werforces-rpr.xml) is one IEEE
 1516-2010 FOM module. It uses RPR FOM 2.0 names, datatypes and encodings:
 big-endian HLA basic types, `RPRunsignedInteger16BE`/`32BE`, fixed records
 with field alignment.
