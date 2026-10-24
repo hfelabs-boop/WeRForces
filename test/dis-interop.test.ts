@@ -13,7 +13,8 @@
 // Skipped (with a warning) when vendor-test/ is missing; WERFORCES_INTEROP=1 makes that a failure.
 
 import { describe, expect, it } from 'vitest';
-import { ecefToGeodetic, enuToEcefVector, geodeticToEcef } from '../src/dis/geodesy.js';
+import { DisGateway } from '../src/dis/gateway.js';
+import { ecefToGeodetic, enuToEcefVector, geodeticToEcef, LocalFrame } from '../src/dis/geodesy.js';
 import {
   type DataPdu,
   type DatumRecords,
@@ -25,6 +26,7 @@ import {
   decodeCreateEntity,
   decodeData,
   decodeDataQuery,
+  decodeHeader,
   decodeDesignator,
   decodeDetonation,
   decodeElectromagneticEmission,
@@ -98,6 +100,9 @@ import {
   type VariableParameter,
 } from '../src/dis/pdu.js';
 import type { DisEntityType, Vec3 } from '../src/shared/types.js';
+import { Engine } from '../src/sim/engine.js';
+import { Terrain } from '../src/sim/terrain.js';
+import { memoryNetwork } from './interop/memory-network.js';
 import { chunkBytes, type DisNamespace, loadOpenDis, type OpenDisObject, theirDecode, theirDecodeWithLength, theirEncode, theirNew, toChunks } from './interop/open-dis.js';
 
 const od = loadOpenDis();
@@ -1021,3 +1026,292 @@ describe.skipIf(!od.lib)(`DIS 7 cross-check against open-dis ${od.lib?.version ?
 });
 
 
+// ------------------------------------------------------------ the gateway, end to end
+
+describe.skipIf(!od.lib)('DIS gateway traffic cross-checked with open-dis', () => {
+  const dis7 = od.lib?.dis7 as DisNamespace;
+  const dis6 = od.lib?.dis6 as DisNamespace;
+  const terrain = Terrain.generate({ size: 6000, seed: 7, towns: 2 });
+  const frame = new LocalFrame(terrain.spec.origin.lat, terrain.spec.origin.lon);
+
+  /** The open-dis class that decodes each PDU type, and whether it reads every octet (Signal and the datum PDUs skip padding). */
+  const ORACLE: Record<number, { ns: () => DisNamespace; cls: string; exact: boolean }> = {
+    [PDU_ENTITY_STATE]: { ns: () => dis7, cls: 'EntityStatePdu', exact: true },
+    [PDU_FIRE]: { ns: () => dis7, cls: 'FirePdu', exact: true },
+    [PDU_DETONATION]: { ns: () => dis7, cls: 'DetonationPdu', exact: true },
+    [PDU_START_RESUME]: { ns: () => dis7, cls: 'StartResumePdu', exact: true },
+    [PDU_STOP_FREEZE]: { ns: () => dis7, cls: 'StopFreezePdu', exact: true },
+    [PDU_ACKNOWLEDGE]: { ns: () => dis7, cls: 'AcknowledgePdu', exact: true },
+    [PDU_ACTION_RESPONSE]: { ns: () => dis7, cls: 'ActionResponsePdu', exact: true },
+    [PDU_DATA]: { ns: () => dis7, cls: 'DataPdu', exact: false },
+    [PDU_COMMENT]: { ns: () => dis7, cls: 'CommentPdu', exact: false },
+    [PDU_TRANSMITTER]: { ns: () => dis7, cls: 'TransmitterPdu', exact: true },
+    [PDU_SIGNAL]: { ns: () => dis6, cls: 'SignalPdu', exact: false },
+    [PDU_RECEIVER]: { ns: () => dis6, cls: 'ReceiverPdu', exact: true },
+    [PDU_ELECTROMAGNETIC_EMISSION]: { ns: () => dis6, cls: 'ElectronicEmissionsPdu', exact: true },
+  };
+
+  /** Decode one PDU the gateway sent with open-dis and check its header. */
+  function oracle(buf: Uint8Array): { type: number; pdu: OpenDisObject } {
+    const type = buf[2];
+    const o = ORACLE[type];
+    expect(o, `oracle for PDU type ${type}`).toBeDefined();
+    const { pdu, consumed } = theirDecodeWithLength(o.ns(), o.cls, buf);
+    if (o.exact) expect(consumed, `PDU type ${type} consumed`).toBe(buf.byteLength);
+    else expect(buf.byteLength - consumed, `PDU type ${type} padding`).toBeLessThan(8);
+    expect(pdu.protocolVersion).toBe(7);
+    expect(pdu.exerciseID).toBe(1);
+    expect(pdu.length ?? pdu.pduLength).toBe(buf.byteLength);
+    const status = o.ns() === dis7 ? pdu.pduStatus : (pdu.padding >> 8) & 0xff;
+    const radio = type === PDU_TRANSMITTER || type === PDU_SIGNAL || type === PDU_RECEIVER;
+    expect(status, `PDU type ${type} status`).toBe(radio ? 0b0010_0110 : 0b0000_0110);
+    expect(pdu.timestamp & 1, 'relative timestamp').toBe(0);
+    return { type, pdu };
+  }
+
+  it('every PDU the gateway sends decodes with open-dis to the simulated state', () => {
+    const net = memoryNetwork();
+    const engine = new Engine({ terrain, seed: 3 });
+    engine.newScenario('A', terrain.spec);
+    const gateway = new DisGateway(engine, net.make(), { site: 1, application: 1, announceRunState: true });
+    const radioTexts: string[] = [];
+    engine.on('event', (ev) => ev.kind === 'radio' && radioTexts.push(ev.text));
+    const shots = new Map<number, { shooterId: string; from: Vec3 }>();
+    engine.on('fire', (s) => shots.set(s.eventNumber, { shooterId: s.shooterId, from: { ...s.from } }));
+    const t = terrain.towns[0];
+    const platoon = engine.createUnitFromTemplate('us-tank-platoon', 1, t.x, t.y);
+    const f16 = engine.createEntity({ typeId: 'us-f16', force: 1, x: t.x + 100, y: t.y, name: 'Viper 1' });
+    const jammer = engine.createEntity({ typeId: 'ru-krasukha', force: 2, x: t.x + 300, y: t.y, name: 'Krasukha' });
+    const target = engine.createEntity({ typeId: 'ru-t72b3', force: 2, x: t.x + 250, y: t.y + 50 });
+    gateway.update(true, 1);
+    const firstBatch = net.sent.length; // entity states sent before anything moves
+    const at = new Map([...engine.entities.values()].map((e) => [e.disNumber, frame.toEcef(e.position)]));
+    gateway.update(false, 1); // Stop/Freeze
+    gateway.update(true, 1); // Start/Resume
+    engine.radio(platoon.leader!, 'contact, T-72 at 2000 3000');
+    gateway.sendComment('Bookmark: first contact');
+    const shooter = platoon.leader!;
+    engine.launch({ eventNumber: 7, shooterId: shooter.id, targetId: target.id, weapon: engine.catalog.weapon('gun-120mm'), from: shooter.position, to: target.position, fireTime: engine.time, impactTime: engine.time, range: 250 });
+    engine.step(0.1);
+    const manager = net.make();
+    const ex1 = { ...header(), exerciseId: 1 };
+    manager.send(encodeDataQuery({ header: ex1, originatingId: { site: 50, application: 1, entity: 0 }, receivingId: { site: 1, application: 1, entity: f16.disNumber }, requestId: 1, timeInterval: 0, fixedIds: [11200, 33000], variableIds: [11000, 31200, 13000] }));
+    manager.send(encodeActionRequest({ header: ex1, originatingId: { site: 50, application: 1, entity: 0 }, receivingId: { site: 1, application: 1, entity: 0 }, requestId: 2, actionId: 1, fixed: [], variable: [] }));
+
+    // Everything but the manager's own two requests.
+    const ours = net.sent.filter((b) => decodeHeader(b)!.pduType !== PDU_DATA_QUERY && decodeHeader(b)!.pduType !== PDU_ACTION_REQUEST);
+    const seen = new Set<number>();
+    for (const [i, buf] of ours.entries()) {
+      const { type, pdu } = oracle(buf);
+      seen.add(type);
+      if (type === PDU_ENTITY_STATE) {
+        const e = [...engine.entities.values()].find((x) => x.disNumber === pdu.entityID.entityID)!;
+        expect(id7(pdu.entityID)).toEqual({ site: 1, application: 1, entity: e.disNumber });
+        expect(pdu.marking.getMarking()).toBe(e.name.slice(0, 11));
+        expect(type7(pdu.entityType)).toEqual(e.type.dis);
+        expect(pdu.forceId).toBe(e.force);
+        if (i < firstBatch) expect(vec(pdu.entityLocation)).toEqual(at.get(e.disNumber));
+      } else if (type === PDU_TRANSMITTER) {
+        const e = [...engine.entities.values()].find((x) => x.disNumber === pdu.radioReferenceID.entityID)!;
+        expect(gateway.hasRadio(e) || !e.alive).toBe(true);
+        expect(u64(pdu.frequency)).toBe(BigInt(gateway.config.radioNets[e.force]));
+      } else if (type === PDU_SIGNAL) {
+        expect(radioTexts).toContain(new TextDecoder().decode(chunkBytes(pdu.data)));
+      } else if (type === PDU_FIRE) {
+        const shot = shots.get(pdu.eventID.eventNumber)!;
+        expect(event7(pdu.eventID)).toEqual({ site: 1, application: 1, entity: pdu.eventID.eventNumber });
+        expect(pdu.firingEntityID.entityID).toBe(engine.entities.get(shot.shooterId)!.disNumber);
+        expect(vec(pdu.locationInWorldCoordinates)).toEqual(frame.toEcef(shot.from));
+      } else if (type === PDU_ELECTROMAGNETIC_EMISSION) {
+        const who = pdu.emittingEntityID.entity;
+        expect([f16.disNumber, jammer.disNumber]).toContain(who);
+        expect(pdu.systems[0].emitterSystem.function).toBe(who === f16.disNumber ? 4 : 42);
+        expect(pdu.systems[0].beamDataRecords[0].beamDataLength).toBe(13);
+      } else if (type === PDU_DATA) {
+        expect(pdu.requestID).toBe(1);
+        // open-dis does not skip variable datum padding, so only the last datum (the marking) is not a whole number of 64-bit words.
+        expect([pdu.numberOfFixedDatumRecords, pdu.numberOfVariableDatumRecords]).toEqual([2, 3]);
+        expect(pdu.variableDatums.map((d: OpenDisObject) => d.variableDatumLength)).toEqual([64, 192, 96]);
+        expect(new TextDecoder().decode(chunkBytes(pdu.variableDatums[2].variableDatumData))).toBe('\u0001Viper 1\0\0\0\0');
+        expect(id7(pdu.originatingEntityID)).toEqual({ site: 1, application: 1, entity: f16.disNumber });
+      } else if (type === PDU_ACTION_RESPONSE) {
+        expect([pdu.requestID, pdu.requestStatus]).toEqual([2, 5]);
+      } else if (type === PDU_COMMENT) {
+        expect(new TextDecoder().decode(chunkBytes(pdu.variableDatums[0].variableDatumData))).toBe('Bookmark: first contact');
+      }
+    }
+    expect(radioTexts).toContain('contact, T-72 at 2000 3000');
+    expect(shots.has(7)).toBe(true);
+    expect([...seen].sort((x, y) => x - y)).toEqual([PDU_ENTITY_STATE, PDU_FIRE, PDU_DETONATION, PDU_STOP_FREEZE, PDU_START_RESUME, PDU_ACTION_RESPONSE, PDU_DATA, PDU_COMMENT, PDU_ELECTROMAGNETIC_EMISSION, PDU_TRANSMITTER, PDU_SIGNAL, PDU_RECEIVER].sort((x, y) => x - y));
+  });
+
+  it('PDUs built with open-dis drive the gateway', () => {
+    const net = memoryNetwork();
+    const engine = new Engine({ terrain });
+    engine.newScenario('B', terrain.spec);
+    const gateway = new DisGateway(engine, net.make(), { site: 2, application: 1 });
+    let running = false;
+    gateway.control = { setRunning: (r) => (running = r) };
+    const log: string[] = [];
+    engine.on('event', (ev) => log.push(ev.text));
+    const t = terrain.towns[0];
+    const local = engine.createEntity({ typeId: 'us-m1a2', force: 1, x: t.x, y: t.y, name: 'Blue 1' });
+    const localId = { site: 2, application: 1, entity: local.disNumber };
+    const peer = net.make();
+    const sendTheirs = (ns: DisNamespace, pdu: OpenDisObject, length: number) => peer.send(theirEncode(ns, pdu, length));
+    const h = { ...header(), exerciseId: 1, timestamp: disTimestamp() };
+    const H = { ...h, status: (LVC_CONSTRUCTIVE << STATUS_LVC_SHIFT) | (RAI_ATTACHED << STATUS_RAI_SHIFT) };
+    const remote: EntityId = { site: 9, application: 9, entity: 4 };
+    const manager: EntityId = { site: 9, application: 9, entity: 0 };
+
+    // Entity State: a remote entity appears where open-dis put it.
+    const where = frame.toEcef({ x: t.x + 400, y: t.y + 100, z: terrain.elevation(t.x + 400, t.y + 100) });
+    const es = theirNew(dis7, 'EntityStatePdu');
+    setHeader7(es, h);
+    setId7(es.entityID, remote);
+    es.forceId = 2;
+    setType(es.entityType, engine.catalog.type('ru-t72b3').dis);
+    setVec(es.entityLocation, where);
+    es.deadReckoningParameters.deadReckoningAlgorithm = 1;
+    es.marking.characterSet = 1;
+    es.marking.setMarking('RED LEAD');
+    sendTheirs(dis7, es, 144);
+    const r = engine.entities.get('R9-9-4')!;
+    expect(r).toBeDefined();
+    expect(r.name).toBe('RED LEAD');
+    expect(r.type.id).toBe('ru-t72b3');
+    expect(r.force).toBe(2);
+    expect(r.x).toBeCloseTo(t.x + 400, 2);
+    expect(r.y).toBeCloseTo(t.y + 100, 2);
+
+    // Entity State Update: it moves, and is damaged.
+    const esu = theirNew(dis7, 'EntityStateUpdatePdu');
+    setHeader7(esu, h);
+    setId7(esu.entityID, remote);
+    setVec(esu.entityLocation, frame.toEcef({ x: t.x + 300, y: t.y + 100, z: terrain.elevation(t.x + 300, t.y + 100) }));
+    esu.entityAppearance = (3 << 3) | (1 << 1);
+    sendTheirs(dis7, esu, 72);
+    expect(r.x).toBeCloseTo(t.x + 300, 2);
+    expect(r.destroyed).toBe(true);
+    expect(r.mobilityKill).toBe(true);
+
+    // Collision and Designator against the local entity are logged.
+    const col = theirNew(dis7, 'CollisionPdu');
+    setHeader7(col, h);
+    setId7(col.issuingEntityID, remote);
+    setId7(col.collidingEntityID, localId);
+    sendTheirs(dis7, col, 60);
+    expect(log).toContain('RED LEAD collided with Blue 1 (DIS)');
+    const des = theirNew(dis6, 'DesignatorPdu');
+    setHeader6(des, h);
+    setId6(des.designatingEntityID, remote);
+    setId6(des.designatedEntityID, localId);
+    des.designatorCode = 1511;
+    des.designatorPower = 50;
+    sendTheirs(dis6, des, 88);
+    expect(log).toContain('RED LEAD is lasing Blue 1 (DIS designator, code 1511)');
+
+    // Fire is logged; a Comment too.
+    const fire = theirNew(dis7, 'FirePdu');
+    setHeader7(fire, h);
+    setId7(fire.firingEntityID, remote);
+    setId7(fire.targetEntityID, localId);
+    setVec(fire.locationInWorldCoordinates, where);
+    sendTheirs(dis7, fire, 96);
+    expect(log).toContain('RED LEAD fired at Blue 1 (DIS)');
+    expect(local.underFireUntil).toBeGreaterThan(engine.time);
+    const comment = theirNew(dis7, 'CommentPdu');
+    setHeader7(comment, h);
+    setId7(comment.originatingEntityID, manager);
+    setId7(comment.receivingEntityID, { site: 0xffff, application: 0xffff, entity: 0xffff });
+    comment.numberOfVariableDatumRecords = 1;
+    comment.variableDatums = [theirVariableDatum(dis7, 0, new TextEncoder().encode('Phase 2'))];
+    sendTheirs(dis7, comment, 24 + 8 + 8 + 7);
+    expect(log).toContain('DIS comment from 9:9: Phase 2');
+
+    // Radio: a Transmitter is tracked, a Signal with text becomes a radio event.
+    const tx = theirNew(dis7, 'TransmitterPdu');
+    setHeader7(tx, H);
+    setId7(tx.radioReferenceID, remote);
+    tx.radioNumber = 1;
+    tx.transmitState = 1;
+    tx.frequency = '32000000';
+    sendTheirs(dis7, tx, 104);
+    expect(gateway.status().remoteRadios).toBe(1);
+    const sig = theirNew(dis6, 'SignalPdu');
+    setHeader6(sig, H);
+    setId6(sig.entityId, remote);
+    sig.radioId = 1;
+    sig.encodingScheme = (1 << 14) | 1;
+    const words = new TextEncoder().encode('moving to phase line');
+    sig.data = toChunks(dis6, words);
+    sig.dataLength = words.length * 8;
+    sig.samples = words.length; // open-dis' DIS 6 Signal writes `samples` octets
+    sendTheirs(dis6, sig, 32 + words.length);
+    expect(log).toContain('RED LEAD (DIS radio): moving to phase line');
+
+    // Simulation management: Start/Resume runs the clock and is acknowledged (decoded by open-dis).
+    const sr = theirNew(dis7, 'StartResumePdu');
+    setHeader7(sr, h);
+    setId7(sr.originatingEntityID, manager);
+    setId7(sr.receivingEntityID, { site: 0xffff, application: 0xffff, entity: 0xffff });
+    sr.requestID = 31;
+    sendTheirs(dis7, sr, 44);
+    expect(running).toBe(true);
+    const ack = theirDecode(dis7, 'AcknowledgePdu', net.sent.at(-1)!);
+    expect([ack.acknowledgeFlag, ack.responseFlag, ack.requestID]).toEqual([3, 1, 31]);
+    expect(id7(ack.receivingEntityID)).toEqual(manager);
+
+    // Data Query (open-dis DIS 6 layout: datum ids) about the local entity: a Data PDU open-dis reads back.
+    const dq = theirNew(dis6, 'DataQueryPdu');
+    setHeader6(dq, h);
+    setId6(dq.originatingEntityID, manager);
+    setId6(dq.receivingEntityID, localId);
+    dq.requestID = 32;
+    const ids = [11200, 31200, 13000]; // the marking last: open-dis does not skip variable datum padding
+    dq.fixedDatums = ids.map((id) => Object.assign(theirNew(dis6, 'UnsignedIntegerWrapper'), { wrapper: id }));
+    dq.numberOfFixedDatumRecords = ids.length;
+    sendTheirs(dis6, dq, 40 + 4 * ids.length);
+    const data = theirDecode(dis7, 'DataPdu', net.sent.at(-1)!);
+    expect(data.pduType).toBe(PDU_DATA);
+    expect(data.requestID).toBe(32);
+    expect(id7(data.receivingEntityID)).toEqual(manager);
+    expect(data.fixedDatums.map((d: OpenDisObject) => [d.fixedDatumID, d.fixedDatumValue])).toEqual([[11200, 1]]);
+    const [position, marking] = data.variableDatums.map((d: OpenDisObject) => chunkBytes(d.variableDatumData));
+    expect(new TextDecoder().decode(marking.subarray(1)).replace(/\0+$/, '')).toBe('Blue 1');
+    const dv = new DataView(position.buffer);
+    expect([dv.getFloat64(0), dv.getFloat64(8), dv.getFloat64(16)]).toEqual(Object.values(frame.toEcef(local.position)));
+
+    // Action Request: rejected; Remove Entity: removed and acknowledged; both read back by open-dis.
+    const ar = theirNew(dis7, 'ActionRequestPdu');
+    setHeader7(ar, h);
+    setId7(ar.originatingEntityID, manager);
+    setId7(ar.receivingEntityID, localId);
+    ar.requestID = 33;
+    ar.actionID = 4;
+    sendTheirs(dis7, ar, 40);
+    const res = theirDecode(dis7, 'ActionResponsePdu', net.sent.at(-1)!);
+    expect([res.requestID, res.requestStatus]).toEqual([33, 5]);
+    const rm = theirNew(dis7, 'RemoveEntityPdu');
+    setHeader7(rm, h);
+    setId7(rm.originatingEntityID, manager);
+    setId7(rm.receivingEntityID, localId);
+    rm.requestID = 34;
+    sendTheirs(dis7, rm, 28);
+    expect(engine.entities.has(local.id)).toBe(false);
+    const ack2 = theirDecode(dis7, 'AcknowledgePdu', net.sent.at(-1)!);
+    expect([ack2.acknowledgeFlag, ack2.responseFlag, ack2.requestID]).toEqual([2, 1, 34]);
+
+    // EE and IFF (open-dis DIS 6 classes) are decoded and counted.
+    const before = gateway.status().pdusReceived;
+    const ee = theirNew(dis6, 'ElectronicEmissionsPdu');
+    setHeader6(ee, h);
+    setId6(ee.emittingEntityID, remote);
+    sendTheirs(dis6, ee, 28);
+    const iff = theirNew(dis6, 'IffAtcNavAidsLayer1Pdu');
+    setHeader6(iff, h);
+    setId6(iff.emittingEntityId, remote);
+    sendTheirs(dis6, iff, 60);
+    expect(gateway.status().pdusReceived).toBe(before + 2);
+  });
+});
