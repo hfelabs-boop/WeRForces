@@ -66,6 +66,7 @@ const PLAYER_ROUTES: [string, RegExp][] = [
   ['POST', /^\/api\/v1\/codewords\/?$/],
   ['POST', /^\/api\/v1\/alerts\/([^/]+\/)?acknowledge\/?$/],
   ['POST', /^\/api\/v1\/(entities|units)\/[^/]+\/(task|plan|stop|embark|disembark)\/?$/],
+  ['POST', /^\/api\/v1\/units\/[^/]+\/(aggregate|disaggregate)\/?$/],
   ['POST', /^\/api\/v1\/(graphics|terrain\/line-of-sight|terrain\/route|terrain\/viewshed)\/?$/],
   ['PATCH', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
   ['DELETE', /^\/api\/v1\/graphics\/[^/]+\/?$/],
@@ -136,6 +137,11 @@ export class ApiV1 {
 
   unitView(u: UnitSnapshot) {
     return { ...u, ...this.geo(u) };
+  }
+
+  /** A unit's members as entities. Members inside an aggregate are not listed: see its `aggregate`. */
+  private membersOf(u: UnitSnapshot) {
+    return u.memberIds.filter((id) => this.engine.entities.has(id)).map((id) => this.entityView(this.entity(id)));
   }
 
   private state(): SimState {
@@ -274,6 +280,11 @@ export class ApiV1 {
     r.put(`${P}/simulation/rules`, (req) => {
       this.run({ cmd: 'setRules', rules: obj(req.body) as never });
       return { json: this.engine.rules };
+    });
+    r.get(`${P}/simulation/aggregation`, () => ({ json: this.engine.aggregates.policy }));
+    r.put(`${P}/simulation/aggregation`, (req) => {
+      this.run({ cmd: 'setAggregation', policy: obj(req.body) as never });
+      return { json: this.engine.aggregates.policy };
     });
     r.get(`${P}/simulation/pattern-of-life`, () => ({ json: this.engine.life.settings }));
     r.put(`${P}/simulation/pattern-of-life`, (req) => {
@@ -590,12 +601,20 @@ export class ApiV1 {
         });
       }
       const u = this.unit(res.id!);
-      return { status: 201, json: { ...this.unitView(u), members: u.memberIds.map((id) => this.entityView(this.entity(id))) } };
+      return { status: 201, json: { ...this.unitView(u), members: this.membersOf(u) } };
     });
     r.get(`${P}/units/{id}`, (req) => {
       const u = this.unit(req.params.id);
-      return { json: { ...this.unitView(u), members: u.memberIds.map((id) => this.entityView(this.entity(id))) } };
+      return { json: { ...this.unitView(u), members: this.membersOf(u) } };
     });
+    for (const verb of ['aggregate', 'disaggregate'] as const) {
+      r.post(`${P}/units/{id}/${verb}`, (req) => {
+        this.unit(req.params.id);
+        this.run({ cmd: verb, unitId: req.params.id });
+        const u = this.unit(req.params.id);
+        return { json: { ...this.unitView(u), members: this.membersOf(u) } };
+      });
+    }
     r.patch(`${P}/units/{id}`, (req) => {
       const id = req.params.id;
       this.unit(id);

@@ -2,6 +2,7 @@
 
 import { rotateOffset } from '../shared/math.js';
 import type { ForceId, Formation, MoraleState, Plan, PlanStatement, Reactions, TaskSpec, UnitTemplate, Vec2 } from '../shared/types.js';
+import type { Aggregate } from './aggregate.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import type { PlanExecutor, Taskable } from './plans.js';
@@ -124,6 +125,10 @@ export class Unit implements Taskable {
   leader: Entity | undefined;
   /** The task instance currently executing the unit task on the leader. */
   leaderTask: Task | null = null;
+  /** Set while the unit is simulated as one aggregate object (its members are hidden). */
+  aggregate: Aggregate | null = null;
+  /** Split up automatically: aggregate again once the enemy has been far away for a while. */
+  reaggregate: { quietSince?: number } | null = null;
 
   constructor(
     readonly id: string,
@@ -161,6 +166,8 @@ export class Unit implements Taskable {
   }
 
   startTask(engine: Engine, spec: TaskSpec): void {
+    // An aggregate carries out the order itself, or splits up first.
+    if (this.aggregate && engine.aggregates.startTask(this, spec)) return;
     this.taskSpec = spec;
     const leader = this.leader;
     if (!leader) return;
@@ -209,7 +216,7 @@ export class Unit implements Taskable {
   /** (Re)assign formation-keeping to every follower that is not doing something else. */
   formUp(engine: Engine): void {
     const leader = this.leader;
-    if (!leader) return;
+    if (!leader || this.aggregate) return;
     for (const f of this.followers()) {
       // Someone driving it by hand keeps it.
       if (f.task instanceof ManualTask && f.task.status === 'running') continue;
@@ -221,6 +228,7 @@ export class Unit implements Taskable {
 
   taskStatus(): TaskStatus | 'none' {
     if (!this.taskSpec) return 'none';
+    if (this.aggregate) return this.aggregate.activeTask()?.status ?? 'done';
     // No one left to carry it out.
     if (!this.alive().length) return 'failed';
     if (perMemberTask(this.taskSpec)) {
@@ -245,6 +253,8 @@ export class Unit implements Taskable {
 
   /** Called every tick: replaces a destroyed or immobilised leader and keeps the unit tasked. */
   update(engine: Engine): void {
+    // An aggregate's leader is replaced as it takes losses (see aggregate.ts).
+    if (this.aggregate) return;
     const mobile = this.alive().filter((m) => !m.mobilityKill);
     const old = this.leader;
     if (old && old.alive && (!old.mobilityKill || mobile.length === 0)) return;

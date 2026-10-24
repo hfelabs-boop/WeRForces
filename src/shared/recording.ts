@@ -8,6 +8,8 @@ import type { DamageState, Domain, EntitySnapshot, ForceId, SimEvent, SymbolKind
 export const FRAME_STRIDE = 8;
 const DAMAGE: DamageState[] = ['none', 'mobility', 'firepower', 'destroyed'];
 const FLAG_EMBARKED = 4;
+/** A member inside an aggregated unit (recorded at the aggregate's position). */
+const FLAG_AGGREGATED = 8;
 
 export interface RecordedEntity {
   id: string;
@@ -55,8 +57,8 @@ export interface Recording {
   bookmarks: Bookmark[];
 }
 
-export function encodeFlags(damage: DamageState, embarked: boolean): number {
-  return DAMAGE.indexOf(damage) | (embarked ? FLAG_EMBARKED : 0);
+export function encodeFlags(damage: DamageState, embarked: boolean, aggregated = false): number {
+  return DAMAGE.indexOf(damage) | (embarked ? FLAG_EMBARKED : 0) | (aggregated ? FLAG_AGGREGATED : 0);
 }
 
 /** Index of the last frame at or before time t (-1 if t is before the first frame). */
@@ -101,6 +103,8 @@ export function stateAt(rec: Recording, t: number, surface: (x: number, y: numbe
   const k = b ? Math.min(1, Math.max(0, (t - a.t) / (b.t - a.t))) : 0;
   const nextRows = b ? rows(b) : new Map<number, number>();
   const entities: EntitySnapshot[] = [];
+  // Members inside aggregated units: they make up their unit's aggregate, not entities of their own.
+  const hidden = new Map<string, EntitySnapshot>();
   for (let r = 0; r < a.d.length; r += FRAME_STRIDE) {
     const d = a.d;
     const info = rec.entities[d[r]];
@@ -119,7 +123,7 @@ export function stateAt(rec: Recording, t: number, surface: (x: number, y: numbe
     }
     const flags = d[r + 6];
     const carrier = d[r + 7] >= 0 ? rec.entities[d[r + 7]]?.id : undefined;
-    entities.push({
+    const snap: EntitySnapshot = {
       id: info.id,
       name: info.name,
       typeId: info.typeId,
@@ -140,7 +144,9 @@ export function stateAt(rec: Recording, t: number, surface: (x: number, y: numbe
       ammo: [],
       contacts: [],
       embarkedIn: flags & FLAG_EMBARKED ? carrier : undefined,
-    });
+    };
+    if (flags & FLAG_AGGREGATED) hidden.set(info.id, snap);
+    else entities.push(snap);
   }
   const byId = new Map(entities.map((e) => [e.id, e]));
   for (const e of entities) {
@@ -150,6 +156,31 @@ export function stateAt(rec: Recording, t: number, surface: (x: number, y: numbe
   }
   const units: UnitSnapshot[] = [];
   for (const u of rec.units) {
+    const inside = u.memberIds.map((m) => hidden.get(m)).filter((m): m is EntitySnapshot => !!m);
+    if (inside.length) {
+      // An aggregate: one symbol with its strength (its wrecks are entities).
+      const all = u.memberIds.map((m) => hidden.get(m) ?? byId.get(m)).filter((m): m is EntitySnapshot => !!m);
+      const groups = new Map<string, { typeId: string; name: string; alive: number; total: number }>();
+      for (const m of all) {
+        const g = groups.get(m.typeId) ?? { typeId: m.typeId, name: m.typeId, alive: 0, total: 0 };
+        g.total++;
+        if (m.damage !== 'destroyed') g.alive++;
+        groups.set(m.typeId, g);
+      }
+      const lead = inside[0];
+      units.push({
+        id: u.id,
+        name: u.name,
+        force: u.force,
+        echelon: u.echelon,
+        formation: 'column',
+        memberIds: u.memberIds,
+        x: lead.x,
+        y: lead.y,
+        aggregate: { alive: inside.length, total: u.memberIds.length, strength: [...groups.values()], heading: lead.heading, speed: lead.speed, posture: lead.speed > 0.5 ? 'moving' : 'halted', typeId: lead.typeId, domain: lead.domain, symbol: lead.symbol },
+      });
+      continue;
+    }
     const members = u.memberIds.map((m) => byId.get(m)).filter((m): m is EntitySnapshot => !!m);
     if (members.length === 0) continue;
     const alive = members.filter((m) => m.damage !== 'destroyed');

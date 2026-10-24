@@ -135,6 +135,7 @@ export function evaluateCondition(c: Condition, engine: Engine, owner: Taskable)
       return !!area && !!ref && area.points.length >= 3 && pointInPolygon(ref, area.points);
     }
     case 'enemyDetected':
+      if (engine.aggregates.detectsEnemy(owner.id)) return true;
       return owner.members().some((m) => [...m.contacts.keys()].some((id) => {
         const other = engine.entities.get(id);
         return !!other && other.alive && engine.isHostile(m.force, other.force);
@@ -142,7 +143,7 @@ export function evaluateCondition(c: Condition, engine: Engine, owner: Taskable)
     case 'underFire':
       return owner.members().some((m) => m.underFireUntil > engine.time);
     case 'entityDestroyed': {
-      const e = engine.entities.get(c.entityId);
+      const e = engine.findEntity(c.entityId);
       return !e || e.destroyed;
     }
     case 'enemyInArea': {
@@ -152,7 +153,7 @@ export function evaluateCondition(c: Condition, engine: Engine, owner: Taskable)
       for (const e of engine.entities.values()) {
         if (e.alive && !e.embarkedIn && engine.isHostile(force, e.force) && pointInPolygon(e, area.points)) return true;
       }
-      return false;
+      return engine.aggregates.enemyIn(force, (p) => pointInPolygon(p, area.points));
     }
     case 'strengthBelow': {
       const members = owner.members();

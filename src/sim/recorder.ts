@@ -109,7 +109,10 @@ export class Recorder {
   /** Record a frame of every entity now. */
   sample(): void {
     const eng = this.engine;
-    const list = [...eng.entities.values()];
+    // Members inside aggregated units are recorded too (where the aggregate is), so strength stays whole.
+    const hidden = eng.aggregates.hiddenMembers();
+    const list = [...eng.entities.values(), ...hidden];
+    const inside = new Set(hidden);
     const d = new Float32Array(list.length * FRAME_STRIDE);
     list.forEach((e, k) => {
       let i = this.index.get(e.id);
@@ -127,7 +130,7 @@ export class Recorder {
       d[o + 3] = e.z;
       d[o + 4] = e.heading;
       d[o + 5] = e.speed;
-      d[o + 6] = encodeFlags(e.damage, !!e.embarkedIn);
+      d[o + 6] = encodeFlags(e.damage, !!e.embarkedIn, inside.has(e));
       d[o + 7] = e.embarkedIn ? (this.index.get(e.embarkedIn) ?? -1) : -1;
     });
     // Embarked entities may refer to carriers indexed later in this frame.

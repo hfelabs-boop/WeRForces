@@ -4,7 +4,7 @@
 
 import type { Engine } from '../sim/engine.js';
 import type { Contact } from '../sim/entity.js';
-import type { Command, Condition, EntitySnapshot, ForceId, PlanStatement, Role, SimEvent, SimState, TaskSpec } from '../shared/types.js';
+import type { Command, Condition, EntitySnapshot, ForceId, PlanStatement, Role, SimEvent, SimState, TaskSpec, UnitSnapshot } from '../shared/types.js';
 
 export const CONTROLLER: Role = { kind: 'controller' };
 
@@ -52,6 +52,40 @@ function contactView(engine: Engine, real: EntitySnapshot, c: Contact): EntitySn
   };
 }
 
+/**
+ * Another force's aggregated unit as a contact: where it was last seen, its echelon and
+ * the types and numbers seen, nothing of its orders, ammunition or fuel.
+ */
+function aggregateContactView(engine: Engine, real: UnitSnapshot, force: ForceId): UnitSnapshot | null {
+  const unit = engine.units.get(real.id);
+  const seen = unit && real.aggregate ? engine.aggregates.seenBy(unit, force) : undefined;
+  if (!seen || !real.aggregate) return null;
+  const age = Math.max(0, engine.time - seen.lastSeen);
+  const a = real.aggregate;
+  return {
+    id: real.id,
+    name: `enemy ${real.echelon} (${real.id})`,
+    force: real.force,
+    echelon: real.echelon,
+    formation: real.formation,
+    memberIds: [],
+    x: seen.x,
+    y: seen.y,
+    aggregate: {
+      alive: a.alive,
+      total: a.alive,
+      strength: a.strength.filter((g) => g.alive > 0).map((g) => ({ typeId: g.typeId, name: g.name, alive: g.alive, total: g.alive })),
+      heading: a.heading,
+      speed: age < 2 ? a.speed : 0,
+      posture: a.posture,
+      typeId: a.typeId,
+      domain: a.domain,
+      symbol: a.symbol,
+      contactAge: Math.round(age * 10) / 10,
+    },
+  };
+}
+
 /** The state a player of `force` is allowed to see. */
 export function filterState(engine: Engine, s: SimState, force: ForceId): SimState {
   const seen = contactsOf(engine, force);
@@ -66,7 +100,8 @@ export function filterState(engine: Engine, s: SimState, force: ForceId): SimSta
   return {
     ...s,
     entities,
-    units: s.units.filter((u) => u.force === force),
+    // Other forces' aggregated units appear as contacts once this force has seen them.
+    units: s.units.flatMap((u) => (u.force === force ? [u] : u.aggregate ? (aggregateContactView(engine, u, force) ?? []) : [])),
     // Obstacles can be seen; an enemy minefield only once this force knows about it.
     graphics: s.graphics.filter((g) => g.force === force || g.force === 0 || g.kind === 'obstacle' || (g.kind === 'minefield' && (g.knownBy ?? []).includes(force))),
     // Orders, plan timings and alerts only for this force's own units and entities.
@@ -78,7 +113,7 @@ export function filterState(engine: Engine, s: SimState, force: ForceId): SimSta
 }
 
 function forceOf(engine: Engine, id: string): ForceId | undefined {
-  return engine.entities.get(id)?.force ?? engine.units.get(id)?.force;
+  return engine.findEntity(id)?.force ?? engine.units.get(id)?.force;
 }
 
 /** Kinds of another force's events a player notices when they are aimed at its own. */
@@ -86,7 +121,7 @@ const PERCEIVED = new Set<SimEvent['kind']>(['fire', 'detonation', 'damaged', 'd
 
 /** How a player refers to another force's entity: by type and id, not its real name. */
 function contactName(engine: Engine, id: string): string | undefined {
-  const e = engine.entities.get(id);
+  const e = engine.findEntity(id);
   return e ? `${e.type.name} (${id})` : undefined;
 }
 
@@ -95,7 +130,8 @@ function contactName(engine: Engine, id: string): string | undefined {
  * announcements. Other forces' entities are named as contacts, not by their real names.
  */
 export function filterEvents(engine: Engine, events: SimEvent[], force: ForceId): SimEvent[] {
-  const forceOf = (id?: string) => (id ? (engine.entities.get(id)?.force ?? engine.units.get(id)?.force) : undefined);
+  // Members inside aggregated units count too (their losses are reported while hidden).
+  const forceOf = (id?: string) => (id ? (engine.findEntity(id)?.force ?? engine.units.get(id)?.force) : undefined);
   const out: SimEvent[] = [];
   for (const ev of events) {
     // Another force's doings show only when they land on this force: being shot at,
@@ -105,11 +141,13 @@ export function filterEvents(engine: Engine, events: SimEvent[], force: ForceId)
     let text = ev.text;
     for (const id of [ev.entityId, ev.targetId]) {
       if (!id || forceOf(id) === force) continue;
-      const e = engine.entities.get(id);
+      const e = engine.findEntity(id);
       const alias = contactName(engine, id);
       if (e && alias) text = text.split(e.name).join(alias);
       // Nor the name of its unit.
       if (e?.unit && text.includes(e.unit.name)) text = text.split(e.unit.name).join(`enemy unit (${e.unit.id})`);
+      const u = engine.units.get(id);
+      if (u && text.includes(u.name)) text = text.split(u.name).join(`enemy unit (${u.id})`);
     }
     out.push(text === ev.text ? ev : { ...ev, text });
   }
@@ -144,6 +182,8 @@ const PLAYER_COMMANDS = new Set<Command['cmd']>([
   'setJamming',
   'drive',
   'batch',
+  'aggregate',
+  'disaggregate',
 ]);
 
 /**
@@ -157,7 +197,7 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
   if (!PLAYER_COMMANDS.has(c.cmd)) throw new ForbiddenError(`players cannot ${String(c.cmd ?? 'do that')}; ask exercise control`);
   const ownObject = (id: unknown, what: string) => {
     const s = String(id);
-    const f = engine.entities.get(s)?.force ?? engine.units.get(s)?.force ?? engine.graphics.get(s)?.force;
+    const f = engine.findEntity(s)?.force ?? engine.units.get(s)?.force ?? engine.graphics.get(s)?.force;
     if (f === undefined) return; // unknown ids fail later with the usual error
     if (f !== force) throw new ForbiddenError(`${what} ${s} is not under your command`);
   };
@@ -165,6 +205,9 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
     const s = String(id);
     if (engine.entities.has(s) && !canSee(engine, role, s)) throw new ForbiddenError(`unknown entity ${s}`);
     if (engine.units.has(s) && engine.units.get(s)!.force !== force) throw new ForbiddenError(`unknown unit ${s}`);
+    // A member of another force's aggregate: only once the aggregate has been seen.
+    const holder = engine.aggregates.holding(s);
+    if (holder && holder.force !== force && !engine.aggregates.seenBy(holder.unit, force)) throw new ForbiddenError(`unknown entity ${s}`);
   };
   const graphicOk = (id: unknown) => {
     const g = engine.graphics.get(String(id));
@@ -209,6 +252,8 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
       ownObject(c.targetId, 'object');
       return;
     case 'setFormation':
+    case 'aggregate':
+    case 'disaggregate':
       ownObject(c.unitId, 'unit');
       return;
     case 'drive':

@@ -1,6 +1,6 @@
 // Remote-control command dispatcher shared by the REST and WebSocket APIs.
 
-import type { Command, CommandResult, Condition, Environment, ForceId, Formation, Phase, PhaseOrder, PhaseTrigger, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
+import type { AggregationPolicy, Command, CommandResult, Condition, Environment, ForceId, Formation, Phase, PhaseOrder, PhaseTrigger, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
 import { FORCE_NAMES } from '../shared/types.js';
 import type { Engine } from '../sim/engine.js';
 import { MAX_AMBIENT } from '../sim/life.js';
@@ -438,6 +438,32 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
       case 'assignPlan':
         engine.issueOrder(str(c.targetId, 'targetId'), { plan: validatePlan(c.plan) });
         return;
+      case 'aggregate':
+      case 'disaggregate': {
+        const u = engine.units.get(str(c.unitId, 'unitId'));
+        if (!u) throw new ValidationError(`unknown unit ${String(c.unitId)}`);
+        // The order goes to the unit and every unit under it.
+        const tree = [u];
+        for (let i = 0; i < tree.length; i++) tree.push(...engine.subordinatesOf(tree[i]).filter((x) => !tree.includes(x)));
+        if (c.cmd === 'aggregate') {
+          const todo = tree.filter((x) => !x.aggregate && x.alive().length);
+          if (!todo.length) throw new ValidationError(`${u.name} is aggregated already`);
+          // All or nothing.
+          for (const x of todo) {
+            const why = engine.aggregates.refusal(x);
+            if (why) throw new ValidationError(why);
+          }
+          for (const x of todo) engine.aggregates.aggregate(x);
+        } else {
+          const todo = tree.filter((x) => x.aggregate || x.reaggregate);
+          if (!todo.length) throw new ValidationError(`${u.name} is not aggregated`);
+          for (const x of todo) engine.aggregates.disaggregate(x, 'on command');
+        }
+        return;
+      }
+      case 'setAggregation':
+        engine.aggregates.setPolicy(validateAggregation(c.policy));
+        return;
       case 'setSuperior':
         engine.setSuperior(str(c.unitId, 'unitId'), c.superiorId === null || c.superiorId === undefined ? null : str(c.superiorId, 'superiorId'));
         return;
@@ -597,6 +623,31 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         throw new ValidationError(`unknown command ${String((c as { cmd?: unknown }).cmd)}`);
     }
   });
+}
+
+/** Aggregation policy: switches and distances (m) / delay (s), each optional. */
+export function validateAggregation(v: unknown): AggregationPolicy {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new ValidationError('policy must be an object');
+  const p = v as Record<string, unknown>;
+  const out: AggregationPolicy = {};
+  for (const k of Object.keys(p)) {
+    if (!['autoDisaggregate', 'autoReaggregate', 'disaggregateRange', 'reaggregateRange', 'reaggregateDelay'].includes(k)) throw new ValidationError(`unknown aggregation setting ${k}`);
+  }
+  for (const k of ['autoDisaggregate', 'autoReaggregate'] as const) {
+    if (p[k] === undefined) continue;
+    if (typeof p[k] !== 'boolean') throw new ValidationError(`${k} must be true or false`);
+    out[k] = p[k] as boolean;
+  }
+  const n = (k: 'disaggregateRange' | 'reaggregateRange' | 'reaggregateDelay', min: number, max: number) => {
+    if (p[k] === undefined) return;
+    const x = num(p[k], k);
+    if (x < min || x > max) throw new ValidationError(`${k} must be from ${min} to ${max}`);
+    out[k] = x;
+  };
+  n('disaggregateRange', 100, 50000);
+  n('reaggregateRange', 100, 100000);
+  n('reaggregateDelay', 0, 86400);
+  return out;
 }
 
 const PRECIPITATION = new Set(['none', 'rain', 'heavyRain', 'snow']);
