@@ -176,7 +176,14 @@ class App {
     this.bindLog();
     this.bindViews();
     setInterval(() => this.refreshPath(), 1000);
-    void this.api.ensureAuth().then(() => this.api.connect());
+    void this.api.ensureAuth().then(() => {
+      if (this.api.user) {
+        const u = $('#user-name');
+        u.textContent = `${this.api.user.name} · sign out`;
+        u.classList.remove('hidden');
+      }
+      this.api.connect();
+    });
   }
 
   // ------------------------------------------------------------ server messages

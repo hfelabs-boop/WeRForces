@@ -14,6 +14,7 @@ import { IntegrationHub, type IntegrationOptions } from '../integrations/hub.js'
 import { parsePlayer } from './fog.js';
 import { datasetLoader } from '../terrain/store.js';
 import { SimRunner } from './runner.js';
+import { type OidcOptions, parseRole, parseRoleRule } from './oidc.js';
 import { SimServer } from './server.js';
 
 const HELP = `WeRForces - computer generated forces simulator
@@ -39,6 +40,14 @@ Options:
       --player <force:key>    Player key for a force (blue, red, neutral): fog of war, own force only; repeatable.
                               Requires --api-key, which stays the exercise-control (full view) key
       --cors <origin>         Allow cross-origin browser access from an origin ('*' for any); repeatable
+      --oidc-issuer <url>     Sign in with OpenID Connect (Keycloak, Entra ID, Okta, Auth0, Google...)
+      --oidc-client-id <id>   OIDC client id (redirect URI: <public url>/auth/callback)
+      --oidc-client-secret <s> Confidential clients (or env WERFORCES_OIDC_CLIENT_SECRET); public clients use PKCE only
+      --oidc-public-url <url> This server's public URL, e.g. https://sim.example.org (default: from the Host header)
+      --oidc-scope <scope>    Extra scope to request, e.g. groups; repeatable
+      --oidc-role <rule>      claim=value:role, e.g. groups=sim-control:controller or groups=red-cell:red; repeatable,
+                              first match wins (roles: controller, blue, red, neutral)
+      --oidc-default-role <r> Role for signed-in users no rule matches (default: refuse them)
       --cot <url>             Stream Cursor-on-Target to TAK: udp://239.2.3.1:6969 or tcp://host:8087
       --cot-interval <s>      Seconds between CoT position reports (default 2)
       --webhook <url>         POST simulation events to a URL (Slack/Discord URLs get chat formatting); repeatable
@@ -111,6 +120,13 @@ async function main(): Promise<void> {
       'record-interval': { type: 'string', default: '1' },
       terrains: { type: 'string' },
       player: { type: 'string', multiple: true },
+      'oidc-issuer': { type: 'string' },
+      'oidc-client-id': { type: 'string' },
+      'oidc-client-secret': { type: 'string' },
+      'oidc-public-url': { type: 'string' },
+      'oidc-scope': { type: 'string', multiple: true },
+      'oidc-role': { type: 'string', multiple: true },
+      'oidc-default-role': { type: 'string' },
       webhook: { type: 'string', multiple: true },
       headless: { type: 'boolean', default: false },
       duration: { type: 'string' },
@@ -195,7 +211,23 @@ async function main(): Promise<void> {
     if (players.length && !values['api-key']) throw new Error('--player needs --api-key (the exercise-control key)');
     if (new Set(players.map((p) => p.key)).size !== players.length || players.some((p) => p.key === values['api-key'])) throw new Error('player keys must be unique and differ from --api-key');
     for (const p of players) console.log(`Player key for ${['Other', 'Blue', 'Red', 'Neutral'][p.force]}: fog of war on`);
+    let oidc: OidcOptions | undefined;
+    if (values['oidc-issuer']) {
+      if (!values['oidc-client-id']) throw new Error('--oidc-issuer needs --oidc-client-id');
+      oidc = {
+        issuer: values['oidc-issuer'],
+        clientId: values['oidc-client-id'],
+        clientSecret: values['oidc-client-secret'] ?? process.env.WERFORCES_OIDC_CLIENT_SECRET,
+        publicUrl: values['oidc-public-url'],
+        scopes: values['oidc-scope'],
+        roles: (values['oidc-role'] ?? []).map(parseRoleRule),
+        defaultRole: values['oidc-default-role'] ? parseRole(values['oidc-default-role']) : undefined,
+      };
+      if (!oidc.roles.length && !oidc.defaultRole) throw new Error('--oidc-issuer needs --oidc-role rules or --oidc-default-role');
+      console.log(`OpenID Connect sign-in: ${oidc.issuer} (${oidc.roles.length} role rule${oidc.roles.length === 1 ? '' : 's'})`);
+    }
     const server = new SimServer(runner, {
+      oidc,
       players,
       port: Number(values.port),
       host: values.host!,

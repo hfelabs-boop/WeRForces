@@ -18,6 +18,7 @@ import { executeCommand } from './commands.js';
 import { DocsSite } from './docs.js';
 import { CONTROLLER, checkCommand, filterEvents, filterState, ForbiddenError } from './fog.js';
 import { docsPage } from './openapi.js';
+import { Oidc, OidcError, type OidcOptions } from './oidc.js';
 import { HttpError, type RouteResponse } from './router.js';
 import { SimRunner } from './runner.js';
 
@@ -55,6 +56,8 @@ export interface ServerOptions {
   /** Repository blob URL used for doc links to files outside docs/. */
   repoBlobUrl?: string;
   integrations?: IntegrationOptions;
+  /** OpenID Connect sign-in for browsers (roles from the ID token's claims). */
+  oidc?: OidcOptions;
 }
 
 class BodyError extends Error {}
@@ -299,12 +302,14 @@ export class SimServer {
   /** Batch jobs, shared by all sessions. */
   readonly batch = new BatchManager();
   readonly sessions = new Map<string, Session>();
+  readonly oidc: Oidc | null;
   private docs: DocsSite | null;
 
   constructor(
     readonly runner: SimRunner,
     readonly opts: ServerOptions,
   ) {
+    this.oidc = opts.oidc ? new Oidc(opts.oidc) : null;
     this.sessions.set('main', new Session('main', runner, this, opts.integrations));
     this.docs = opts.docsDir ? new DocsSite(opts.docsDir, opts.repoBlobUrl) : null;
     this.http = http.createServer((req, res) => {
@@ -404,6 +409,45 @@ export class SimServer {
     this.sessions.delete(id);
   }
 
+  /** /auth/*: OpenID Connect sign-in, sign-out, and who is signed in. */
+  private async handleAuth(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
+    const o = this.oidc;
+    const p = url.pathname;
+    const host = req.headers.host ?? 'localhost';
+    const https = req.headers['x-forwarded-proto'] === 'https' || (this.opts.oidc?.publicUrl ?? '').startsWith('https:');
+    const baseUrl = `${https ? 'https' : 'http'}://${host}`;
+    if (p === '/auth/config' || p === '/auth/me') {
+      const user = o?.user(req.headers.cookie);
+      return this.send(res, { status: 200, json: { oidc: !!o, user: user ? { name: user.name, email: user.email, role: user.role } : null } });
+    }
+    if (!o) return this.send(res, { status: 404, json: { error: { status: 404, message: 'sign-in is not configured (--oidc-issuer)' } } });
+    try {
+      if (p === '/auth/login') {
+        res.writeHead(302, { Location: await o.loginUrl(baseUrl, url.searchParams.get('return') ?? '/'), 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
+      if (p === '/auth/callback') {
+        const { sessionId, returnTo } = await o.callback(url.searchParams);
+        res.writeHead(302, { Location: returnTo, 'Set-Cookie': o.cookie(sessionId, https), 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
+      if (p === '/auth/logout') {
+        const end = o.logout(req.headers.cookie);
+        const back = `${baseUrl}/`;
+        const location = end ? `${end}${end.includes('?') ? '&' : '?'}${new URLSearchParams({ client_id: this.opts.oidc!.clientId, post_logout_redirect_uri: back })}` : '/';
+        res.writeHead(302, { Location: location, 'Set-Cookie': o.clearCookie(https), 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
+    } catch (err) {
+      const msg = err instanceof OidcError ? err.message : `sign-in failed: ${(err as Error).message}`;
+      return this.send(res, { status: 401, text: `${msg}\n\nGo back to WeRForces and try again.`, contentType: 'text/plain; charset=utf-8' });
+    }
+    return this.send(res, { status: 404, json: { error: { status: 404, message: 'unknown endpoint' } } });
+  }
+
   /** /api/v1/sessions: list, create and delete sessions (exercise control only). */
   private async handleSessions(p: string, method: string, body: unknown, role: Role): Promise<RouteResponse & { status: number }> {
     try {
@@ -453,7 +497,7 @@ export class SimServer {
   /** The caller's role from its key: the API key is exercise control, a player key one force. */
   roleFor(req: http.IncomingMessage, url: URL): Role | null {
     const players = this.opts.players ?? [];
-    if (!this.opts.apiKey && players.length === 0) return CONTROLLER;
+    if (!this.opts.apiKey && players.length === 0 && !this.oidc) return CONTROLLER;
     const auth = req.headers.authorization;
     const presented =
       (auth?.startsWith('Bearer ') ? auth.slice(7) : undefined) ?? (req.headers['x-api-key'] as string | undefined) ?? url.searchParams.get('api_key') ?? '';
@@ -464,6 +508,9 @@ export class SimServer {
     };
     if (this.opts.apiKey && same(this.opts.apiKey)) return CONTROLLER;
     for (const p of players) if (same(p.key)) return { kind: 'player', force: p.force };
+    // A browser signed in with OpenID Connect.
+    const user = this.oidc?.user(req.headers.cookie);
+    if (user) return user.role;
     return null;
   }
 
@@ -532,6 +579,7 @@ export class SimServer {
       res.end();
       return;
     }
+    if (url.pathname.startsWith('/auth/')) return this.handleAuth(req, res, url);
     const denied = this.allowRequest(req, url);
     if (denied) return this.send(res, denied, corsHeaders);
 

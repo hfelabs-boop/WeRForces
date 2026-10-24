@@ -39,11 +39,23 @@ export class Api {
     return h;
   }
 
-  /** Make sure we hold a valid API key if the server requires one. */
+  /** Who is signed in with OpenID Connect, when the server uses it. */
+  user: { name: string; email?: string } | null = null;
+
+  /** Make sure we may use the API: sign in (OpenID Connect) or hold a valid API key. */
   async ensureAuth(): Promise<void> {
+    const auth = (await fetch('/auth/config')
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)) as { oidc: boolean; user: { name: string; email?: string } | null } | null;
+    this.user = auth?.user ?? null;
     for (;;) {
       const r = await fetch(BASE + '/api/v1', { headers: this.headers() });
       if (r.status !== 401) return;
+      if (auth?.oidc) {
+        // Off to the identity provider; it sends the browser back here.
+        location.href = `/auth/login?return=${encodeURIComponent(location.pathname + location.search)}`;
+        await new Promise(() => undefined);
+      }
       const key = prompt('This WeRForces server requires an API key:');
       if (!key) return;
       this.key = key;
