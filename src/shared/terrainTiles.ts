@@ -13,7 +13,7 @@ import type { Building, TerrainSpec, Town, Vec2 } from './types.js';
 export const TILE_SIZE = 256;
 /** Tile file magic: "WFT1". */
 const MAGIC = 0x31544657;
-const HEADER = 24;
+const HEADER = 28;
 
 export const TILE_LAYERS = { forest: 1, water: 2, landCover: 4, roads: 8, urban: 16 } as const;
 
@@ -130,7 +130,7 @@ export function emptyTile(z: number, x: number, y: number, n: number, layers: Ti
 }
 
 /**
- * Tile file layout (little-endian): "WFT1", u16 posts per side, u16 layer flags, f32 metres
+ * Tile file layout (little-endian): "WFT1", u16 posts per side, u16 layer flags, f64 metres
  * per height unit, u32 bytes of feature JSON, u16 z, x, y and a spare u16; then the heights
  * (Int16 per post), one byte per post for each layer present (forest, water, land cover,
  * roads, urban cover, urban height), and the feature JSON. Files are gzipped on disk.
@@ -148,11 +148,11 @@ export function encodeTile(t: TerrainTile): Uint8Array {
   dv.setUint32(0, MAGIC, true);
   dv.setUint16(4, t.n, true);
   dv.setUint16(6, flags, true);
-  dv.setFloat32(8, scale, true);
-  dv.setUint32(12, features.length, true);
-  dv.setUint16(16, t.z, true);
-  dv.setUint16(18, t.x, true);
-  dv.setUint16(20, t.y, true);
+  dv.setFloat64(8, scale, true);
+  dv.setUint32(16, features.length, true);
+  dv.setUint16(20, t.z, true);
+  dv.setUint16(22, t.x, true);
+  dv.setUint16(24, t.y, true);
   for (let i = 0; i < m; i++) dv.setInt16(HEADER + 2 * i, Math.max(-32768, Math.min(32767, Math.round(t.heights[i] / scale))), true);
   let o = HEADER + m * 2;
   for (const l of layers) {
@@ -168,8 +168,8 @@ export function decodeTile(bytes: Uint8Array): TerrainTile {
   if (bytes.byteLength < HEADER || dv.getUint32(0, true) !== MAGIC) throw new Error('not a WeRForces terrain tile');
   const n = dv.getUint16(4, true);
   const flags = dv.getUint16(6, true);
-  const scale = dv.getFloat32(8, true);
-  const featureBytes = dv.getUint32(12, true);
+  const scale = dv.getFloat64(8, true);
+  const featureBytes = dv.getUint32(16, true);
   const m = n * n;
   const heights = new Float32Array(m);
   for (let i = 0; i < m; i++) heights[i] = dv.getInt16(HEADER + 2 * i, true) * scale;
@@ -186,7 +186,7 @@ export function decodeTile(bytes: Uint8Array): TerrainTile {
   const roads = layer(TILE_LAYERS.roads);
   const urbanCover = layer(TILE_LAYERS.urban);
   const urbanHeight = layer(TILE_LAYERS.urban);
-  const tile: TerrainTile = { z: dv.getUint16(16, true), x: dv.getUint16(18, true), y: dv.getUint16(20, true), n, heights, forest, water, landCover, roads, urbanCover, urbanHeight };
+  const tile: TerrainTile = { z: dv.getUint16(20, true), x: dv.getUint16(22, true), y: dv.getUint16(24, true), n, heights, forest, water, landCover, roads, urbanCover, urbanHeight };
   if (featureBytes) tile.features = JSON.parse(new TextDecoder().decode(bytes.subarray(o, o + featureBytes)));
   return tile;
 }

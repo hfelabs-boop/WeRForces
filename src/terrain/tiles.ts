@@ -20,21 +20,31 @@ export class FileTileSource implements TileSource {
     if (this.manifest.format !== 'werforces-terrain-tiles') throw new Error(`${file} is not a WeRForces tiled terrain manifest`);
   }
 
-  private file(z: number, x: number, y: number): string {
-    return path.join(this.dir, 'tiles', String(z), String(x), `${y}.wft`);
-  }
-
   /** The tile as stored (gzipped), for sending as is; null when there is no such tile. */
   raw(z: number, x: number, y: number): Uint8Array | null {
-    if (![z, x, y].every((v) => Number.isInteger(v) && v >= 0)) return null;
-    const f = this.file(z, x, y);
-    return existsSync(f) ? readFileSync(f) : null;
+    return rawTile(this.dir, z, x, y);
   }
 
   read(z: number, x: number, y: number): TerrainTile | null {
-    const raw = this.raw(z, x, y);
-    return raw ? decodeTile(gunzipSync(raw)) : null;
+    return readTile(this.dir, z, x, y);
   }
+}
+
+function tileFile(dir: string, z: number, x: number, y: number): string {
+  return path.join(dir, 'tiles', String(z), String(x), `${y}.wft`);
+}
+
+/** A tile file's bytes (gzipped), or null. */
+export function rawTile(dir: string, z: number, x: number, y: number): Uint8Array | null {
+  if (![z, x, y].every((v) => Number.isInteger(v) && v >= 0)) return null;
+  const f = tileFile(dir, z, x, y);
+  return existsSync(f) ? readFileSync(f) : null;
+}
+
+/** A tile read from a dataset folder (also while the dataset is being written), or null. */
+export function readTile(dir: string, z: number, x: number, y: number): TerrainTile | null {
+  const raw = rawTile(dir, z, x, y);
+  return raw ? decodeTile(gunzipSync(raw)) : null;
 }
 
 /** Something that makes tiles for a dataset (a generator or an importer). */
@@ -84,7 +94,7 @@ export async function writeTileset(maker: TileMaker, dir: string, progress?: (do
           }
         }
         const gz = gzipSync(encoded, { level: 6 });
-        writeFileSync(path.join(folder, `${y}.wft`), gz);
+        writeFileSync(tileFile(dir, z, x, y), gz);
         bytes += gz.byteLength;
         done++;
         progress?.(done, total);

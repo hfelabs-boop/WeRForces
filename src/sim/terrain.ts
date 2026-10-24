@@ -154,51 +154,7 @@ export class Terrain extends TerrainGrid {
 
   /** Building cover per post: the share of each cell inside footprints (4x4 samples), and their height. */
   private rasterizeBuildings(): void {
-    const cs = this.spec.cellSize;
-    const cols = this.cols;
-    const hits = new Uint16Array(this.heights.length);
-    const hsum = new Float32Array(this.heights.length);
-    const S = 4;
-    for (const b of this.buildings) {
-      const n = b.pts.length / 2;
-      if (n < 3) continue;
-      let x0 = Infinity;
-      let x1 = -Infinity;
-      let y0 = Infinity;
-      let y1 = -Infinity;
-      for (let i = 0; i < n; i++) {
-        x0 = Math.min(x0, b.pts[2 * i]);
-        x1 = Math.max(x1, b.pts[2 * i]);
-        y0 = Math.min(y0, b.pts[2 * i + 1]);
-        y1 = Math.max(y1, b.pts[2 * i + 1]);
-      }
-      const c0 = Math.max(0, Math.round(x0 / cs - 0.5));
-      const c1 = Math.min(cols - 1, Math.round(x1 / cs + 0.5));
-      const r0 = Math.max(0, Math.round(y0 / cs - 0.5));
-      const r1 = Math.min(this.rows - 1, Math.round(y1 / cs + 0.5));
-      for (let r = r0; r <= r1; r++) {
-        for (let c = c0; c <= c1; c++) {
-          let k = 0;
-          for (let sy = 0; sy < S; sy++) {
-            for (let sx = 0; sx < S; sx++) {
-              const px = (c - 0.5 + (sx + 0.5) / S) * cs;
-              const py = (r - 0.5 + (sy + 0.5) / S) * cs;
-              if (px < x0 || px > x1 || py < y0 || py > y1) continue;
-              if (insideFlat(px, py, b.pts)) k++;
-            }
-          }
-          if (!k) continue;
-          const i = r * cols + c;
-          hits[i] += k;
-          hsum[i] += k * b.h;
-        }
-      }
-    }
-    for (let i = 0; i < hits.length; i++) {
-      if (!hits[i]) continue;
-      this.urbanCover![i] = Math.min(100, Math.round((hits[i] / (S * S)) * 100));
-      this.urbanHeight![i] = Math.min(255, Math.round(hsum[i] / hits[i]));
-    }
+    buildingCover(this.buildings, this.cols, this.rows, this.spec.cellSize, 0, 0, this.urbanCover!, this.urbanHeight!);
   }
 
   /** Building cover at a point: fraction of the area (0-1) and mean height (m). */
@@ -705,6 +661,57 @@ export function landMobility(domain: Domain, offroadFactor: number, s: number, r
   if (cover) f *= cover[0];
   if (urban >= URBAN_COVERAGE) f *= 0.4;
   return f * Math.max(0.2, 1 - s * 1.4);
+}
+
+/**
+ * Rasterise building footprints onto a grid of posts (cols x rows, cellSize apart, the first
+ * at ox, oy): per post, the share (0-100) of its cell inside footprints, from 4 x 4 samples,
+ * and the footprints' mean height in metres.
+ */
+export function buildingCover(buildings: Building[], cols: number, rows: number, cs: number, ox: number, oy: number, cover: Uint8Array, height: Uint8Array): void {
+  const hits = new Uint16Array(cols * rows);
+  const hsum = new Float32Array(cols * rows);
+  const S = 4;
+  for (const b of buildings) {
+    const n = b.pts.length / 2;
+    if (n < 3) continue;
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let y0 = Infinity;
+    let y1 = -Infinity;
+    for (let i = 0; i < n; i++) {
+      x0 = Math.min(x0, b.pts[2 * i]);
+      x1 = Math.max(x1, b.pts[2 * i]);
+      y0 = Math.min(y0, b.pts[2 * i + 1]);
+      y1 = Math.max(y1, b.pts[2 * i + 1]);
+    }
+    const c0 = Math.max(0, Math.round((x0 - ox) / cs - 0.5));
+    const c1 = Math.min(cols - 1, Math.round((x1 - ox) / cs + 0.5));
+    const r0 = Math.max(0, Math.round((y0 - oy) / cs - 0.5));
+    const r1 = Math.min(rows - 1, Math.round((y1 - oy) / cs + 0.5));
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        let k = 0;
+        for (let sy = 0; sy < S; sy++) {
+          for (let sx = 0; sx < S; sx++) {
+            const px = ox + (c - 0.5 + (sx + 0.5) / S) * cs;
+            const py = oy + (r - 0.5 + (sy + 0.5) / S) * cs;
+            if (px < x0 || px > x1 || py < y0 || py > y1) continue;
+            if (insideFlat(px, py, b.pts)) k++;
+          }
+        }
+        if (!k) continue;
+        const i = r * cols + c;
+        hits[i] += k;
+        hsum[i] += k * b.h;
+      }
+    }
+  }
+  for (let i = 0; i < hits.length; i++) {
+    if (!hits[i]) continue;
+    cover[i] = Math.min(100, Math.round((hits[i] / (S * S)) * 100));
+    height[i] = Math.min(255, Math.round(hsum[i] / hits[i]));
+  }
 }
 
 /** Point-in-polygon for a flat x,y coordinate array. */

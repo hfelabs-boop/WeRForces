@@ -6,7 +6,8 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { type GeoJsonCollection, importTerrain } from './import.js';
+import { type GeoJsonCollection, type ImportOptions, importTerrain } from './import.js';
+import { importTiledTerrain } from './importTiled.js';
 import { landCoverFromFile, landCoverFromWorldCover, WORLDCOVER_ATTRIBUTION } from './landcover.js';
 import { fetchOverpass, osmXmlToGeoJson } from './osm.js';
 import { SyntheticTiles } from './synthetic.js';
@@ -31,8 +32,9 @@ Usage: werforces-terrain --dem <file.tif> --name <name> [options]
   --name <name>         Dataset name (letters, digits, - and _); scenarios use terrain.dataset = name
   --title <text>        Display title
   --center <lat,lon>    Centre of the extent (default: centre of the DEM)
-  --size <m>            Extent in metres (default: largest square in the DEM, at most 40 km)
-  --cell <m>            Grid spacing in metres (default: about the DEM resolution, at least 20 m)
+  --size <m>            Extent in metres (default: largest square in the DEM, at most 40 km; no limit with --tiled)
+  --cell <m>            Grid spacing in metres (default: about the DEM resolution, at least 20 m;
+                        one file holds at most 1201 x 1201 posts: bigger areas get a coarser grid unless --tiled)
   --attribution <text>  Data source credit stored with the dataset
   --out <dir>           Output folder (default: ./terrains)
   --tiled               Write a tiled dataset (terrains/<name>/: a manifest and tiles loaded on
@@ -96,7 +98,8 @@ async function main(): Promise<void> {
   if (values.osm || values.overpass) credits.push('© OpenStreetMap contributors (ODbL)');
   if (values.worldcover) credits.push(WORLDCOVER_ATTRIBUTION);
   const landBuf = values.landcover ? readFileSync(values.landcover) : null;
-  const dataset = await importTerrain({
+  let saidWorldCover = false;
+  const importOpts: ImportOptions = {
     dem: demBuf.buffer.slice(demBuf.byteOffset, demBuf.byteOffset + demBuf.byteLength),
     features: { type: 'FeatureCollection', features: collections.flatMap((c) => c.features) },
     fetchFeatures: values.overpass
@@ -109,7 +112,8 @@ async function main(): Promise<void> {
       ? (bbox) => landCoverFromFile(landBuf.buffer.slice(landBuf.byteOffset, landBuf.byteOffset + landBuf.byteLength), bbox)
       : values.worldcover
         ? (bbox) => {
-            console.log('Reading ESA WorldCover land cover ...');
+            if (!saidWorldCover) console.log('Reading ESA WorldCover land cover ...');
+            saidWorldCover = true;
             return landCoverFromWorldCover(bbox);
           }
         : undefined,
@@ -124,7 +128,16 @@ async function main(): Promise<void> {
       landCover: values.landcover ? path.basename(values.landcover) : values.worldcover ? 'ESA WorldCover 2021 v200' : undefined,
       attribution: credits.filter(Boolean).join('; ') || undefined,
     },
-  });
+  };
+  if (values.tiled) {
+    const started = Date.now();
+    const dir = path.join(outDir, values.name);
+    console.log(`Importing tiled into ${dir} ...`);
+    const r = await importTiledTerrain({ ...importOpts, dir, progress: progressLine(started) });
+    reportTiles(dir, r, started);
+    return;
+  }
+  const dataset = await importTerrain(importOpts);
   mkdirSync(outDir, { recursive: true });
   const file = path.join(outDir, `${values.name}.json`);
   writeFileSync(file, JSON.stringify(dataset));
