@@ -4,7 +4,7 @@
 // WeRForces' DIS PDU encoding. Test-only: nothing at runtime loads it, and node_modules is
 // not touched. Packages are fetched with `npm pack` and checked against pinned SHA-512s.
 //
-//   node scripts/fetch-open-dis.mjs
+//   npm run interop:fetch      (= node scripts/fetch-open-dis.mjs)
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';

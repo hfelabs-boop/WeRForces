@@ -29,7 +29,8 @@
     "terrain:import": "tsx src/terrain/cli.ts",
     "e2e": "playwright test",
     "golden:update": "tsx scripts/golden-update.ts",
-    "hla:build": "bash hla/fetch-ohla.sh && bash hla/build.sh"
+    "hla:build": "bash hla/fetch-ohla.sh && bash hla/build.sh",
+    "interop:fetch": "node scripts/fetch-open-dis.mjs"
   },
   "engines": {
     "node": ">=20"

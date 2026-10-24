@@ -41,7 +41,7 @@ function loadBuild(file: string, long: unknown): DisNamespace {
 export function loadOpenDis(): { lib: OpenDis; missing?: undefined } | { lib?: undefined; missing: string } {
   const pkg = path.join(VENDOR, 'open-dis', 'package.json');
   const longJs = path.join(VENDOR, 'long', 'dist', 'long.js');
-  if (!existsSync(pkg) || !existsSync(longJs)) return { missing: 'vendor-test/open-dis is missing (run node scripts/fetch-open-dis.mjs)' };
+  if (!existsSync(pkg) || !existsSync(longJs)) return { missing: 'vendor-test/open-dis is missing (run npm run interop:fetch)' };
   const long = createRequire(import.meta.url)(longJs);
   const dir = path.join(VENDOR, 'open-dis', 'dist');
   return {

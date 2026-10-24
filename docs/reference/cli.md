@@ -21,7 +21,8 @@ node dist/server/cli.js [options] # equivalent
 | `--exercise <n>` | `1` | DIS exercise id. Only PDUs with this id are accepted |
 | `--site <n>`, `--application <n>` | `1`, `3001` | This simulation's DIS address. Each federate needs its own pair |
 | `--dis-announce` | off | Act as simulation manager: send Start/Resume and Stop/Freeze PDUs when the clock runs or pauses ([DIS](dis.md#simulation-management)) |
-| `--dis-ignore-siman` | off | Ignore other simulation managers' Start/Resume and Stop/Freeze PDUs. By default WeRForces runs and pauses on them |
+| `--dis-ignore-siman` | off | Ignore other simulation managers' Start/Resume, Stop/Freeze and Remove Entity PDUs (they are acknowledged as *unable to comply*). By default WeRForces runs, pauses and removes entities on them |
+| `--dis-no-emissions` | off | Do not send Electromagnetic Emission PDUs for radars and switched-on jammers ([DIS](dis.md#electromagnetic-emissions)) |
 | `--api-key <key>` | `$WERFORCES_API_KEY` | Require a key on `/api/*`, `/ws` and `/mcp`. Its holder is exercise control: sees and controls everything |
 | `--player <force:key>` | none | A player key for a force (`blue`, `red`, `neutral`): fog of war and orders for that force only ([Concepts](../concepts.md#fog-of-war-and-roles)). Needs `--api-key`; keys must differ. Repeatable |
 | `--cors <origin>` | none | Allow browser access from another origin (`*` for any). Repeatable |

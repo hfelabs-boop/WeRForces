@@ -213,6 +213,8 @@ npm run docs:gen      # regenerate docs/reference/catalog.md and mcp-tools.md
 | --- | --- |
 | `engine.test.ts` | terrain, movement, tasks, units, plans, sensors and combat (on flat test terrain), scenarios |
 | `dis.test.ts` | geodesy, PDU byte layouts, the gateway over an in-memory network |
+| `dis-v7.test.ts` | Electromagnetic Emission for radars and jammers, PDU status, Data Query, Set Data, Action Request, Create/Remove Entity, Entity State Update, Collision, Designator |
+| `dis-interop.test.ts` | every PDU type cross-checked against open-dis, both ways and end to end (skipped unless `npm run interop:fetch` has been run) |
 | `server.test.ts` | command validation, the GUI endpoints, WebSocket |
 | `api.test.ts` | REST v1, security checks, MCP over HTTP and stdio |
 | `integrations.test.ts` | CoT (including real UDP), webhooks (a real HTTP receiver), GeoJSON/KML |
