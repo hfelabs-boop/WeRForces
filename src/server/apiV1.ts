@@ -227,7 +227,9 @@ export class ApiV1 {
     const strength = ([1, 2, 3, 0] as ForceId[])
       .map((f) => {
         const list = s.entities.filter((e) => e.force === f);
-        return { force: f, name: FORCE_NAMES[f], total: list.length, alive: list.filter((e) => e.damage !== 'destroyed').length };
+        // Members inside aggregated units are not entities in the state: count them from the aggregates.
+        const inside = s.units.reduce((n, u) => n + (u.force === f && u.aggregate ? u.aggregate.alive : 0), 0);
+        return { force: f, name: FORCE_NAMES[f], total: list.length + inside, alive: list.filter((e) => e.damage !== 'destroyed').length + inside };
       })
       .filter((x) => x.total > 0);
     const t = this.engine.terrain;

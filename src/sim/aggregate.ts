@@ -439,9 +439,14 @@ export class Aggregation {
     const a = this.list.get(unit.id);
     const t = a?.activeTask();
     if (!a || !t || t.status !== 'running') return undefined;
-    const base = createTask(t.spec).describe(this.engine);
-    if ((t.spec.type === 'defend' || t.spec.type === 'overwatch') && !t.arrived) return `${base} (moving)`;
-    return base;
+    if (t.spec.type === 'followRoute') return `Follow route ${this.engine.graphics.get(t.spec.routeId)?.name ?? t.spec.routeId} (wp ${t.point + 1}/${t.points.length})`;
+    if (t.spec.type === 'attack') {
+      // An attack on a member of a unit is an attack on the unit.
+      const target = this.engine.findEntity(t.spec.targetId);
+      return `Attack ${target?.unit?.name ?? target?.name ?? t.spec.targetId}`;
+    }
+    const base = createTask(t.spec).describe(this.engine).replace(/ \(moving\)$/, '');
+    return (t.spec.type === 'defend' || t.spec.type === 'overwatch') && !t.arrived ? `${base} (moving)` : base;
   }
 
   travel(unit: Unit): Travel | undefined {

@@ -68,6 +68,8 @@ function aggregateContactView(engine: Engine, real: UnitSnapshot, force: ForceId
     force: real.force,
     echelon: real.echelon,
     formation: real.formation,
+    // Its leader's id lets players order an attack on it; nothing else of its members.
+    leaderId: real.leaderId,
     memberIds: [],
     x: seen.x,
     y: seen.y,
