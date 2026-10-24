@@ -82,10 +82,13 @@ choose **Defend here**.
 
 Then give the Red platoons one order together:
 
-1. With the whole map in view, click the RU Tank Platoon and **Shift+click** the
-   RU Mech Platoon. Zoomed out this far, the map draws each platoon as one
+1. Click **RU Tank Platoon** in the **Objects** tab. Then, with the whole map
+   in view, **Shift+click** the RU Mech Platoon's symbol on the map, just east
+   of the tank platoon's. Zoomed out this far, the map draws each platoon as one
    symbol, so a click picks the platoon. (Zoomed in, it picks a single
-   vehicle.)
+   vehicle.) The quick-task bar at the bottom of the map can cover the tank
+   platoon's symbol, which is why you pick that one from the tree; if it covers
+   both, drag the map up a little.
 2. Zoom in on **12.45E 7.4N** until the scale bar reads 200 m, and right-click
    there, on open ground. Zoomed out, that point is under the company's symbol
    and the menu offers to attack it instead.
@@ -149,32 +152,38 @@ in). It loses that cover as soon as it moves.
 
 Most of the line at 6.6N is behind the crest, out of sight of the slope the Red
 platoons climb. Only the 2nd Platoon, at the east end, can see down it. From
-2:10 it and the BMPs spot each other about 4 km apart. The BMPs' Konkurs shots
-set off the tanks' smoke grenades but hit nothing. The killing starts when the
-Red platoons come over the top. With **detections**, **detonations** and
-**radio** unticked, the log reads:
+2:10 it and the BMPs spot each other about 4 km apart. Both sides open fire at
+the limit of their weapons' reach: the BMPs' Konkurs shots set off the tanks'
+smoke grenades but hit nothing, while the tanks, leading the moving vehicles,
+hit them. With **detections**, **detonations** and **radio** unticked, the log
+reads:
 
 ```
-00:08:20 info       US Tank Company 2nd Platoon Lead fired smoke grenades
-00:08:22 destroyed  RU Mech Platoon 3 destroyed by US Tank Company 2nd Platoon 4
-00:08:28 info       US Tank Company 2nd Platoon 4 fired smoke grenades
-00:08:36 destroyed  RU Tank Platoon Lead destroyed by US Tank Company 1st Platoon Lead
-00:08:36 info       RU Tank Platoon: RU Tank Platoon Lead lost, RU Tank Platoon 2 takes command
-00:08:38 destroyed  RU Mech Platoon Lead destroyed by US Tank Company 2nd Platoon 4
-00:08:39 info       RU Mech Platoon: RU Mech Platoon Lead lost, RU Mech Platoon 2 takes command
-00:08:39 info       RU Mech Platoon broke and is falling back
-00:08:52 destroyed  RU Tank Platoon 2 destroyed by US Tank Company 2nd Platoon 3
-00:08:52 info       RU Tank Platoon: RU Tank Platoon 2 lost, RU Tank Platoon 3 takes command
-00:08:53 info       RU Tank Platoon broke and is falling back
-00:09:02 info       RU Mech Platoon rallied
-00:09:12 info       RU Mech Platoon is steady again
-00:09:17 info       RU Tank Platoon rallied
-00:09:27 info       RU Tank Platoon is steady again
+00:02:19 info       US Tank Company 2nd Platoon 4 fired smoke grenades
+00:02:21 info       US Tank Company 2nd Platoon 2 fired smoke grenades
+00:02:24 damaged    RU Mech Platoon 2 suffered a mobility kill
+00:02:29 info       US Tank Company 2nd Platoon Lead fired smoke grenades
+00:02:30 destroyed  RU Mech Platoon 2 destroyed by US Tank Company 2nd Platoon Lead
+...
+00:03:17 damaged    RU Tank Platoon 2 suffered a mobility kill
+00:03:23 destroyed  RU Tank Platoon 2 destroyed by US Tank Company 2nd Platoon Lead
+00:03:29 destroyed  RU Tank Platoon Lead destroyed by US Tank Company 2nd Platoon Lead
+00:03:29 info       RU Tank Platoon: RU Tank Platoon Lead lost, RU Tank Platoon 3 takes command
+00:03:30 info       RU Tank Platoon broke and is falling back
+00:03:47 destroyed  RU Tank Platoon 3 destroyed by US Tank Company 2nd Platoon Lead
+00:08:27 damaged    RU Mech Platoon Lead suffered a mobility kill
+00:08:27 info       RU Mech Platoon: RU Mech Platoon Lead immobilised, RU Mech Platoon 3 takes command
+00:08:33 destroyed  RU Mech Platoon Lead destroyed by US Tank Company 2nd Platoon 4
+00:08:34 info       RU Mech Platoon is shaken
+00:08:43 damaged    RU Mech Platoon 3 suffered a firepower kill
+00:08:49 destroyed  RU Mech Platoon 3 destroyed by US Tank Company 2nd Platoon 4
 ```
 
-All four kills were made at 520 m or less. At 30:00 the counts read **Blue
-14/14 · Red 2/6**. Both Red platoons broke and fell back after losing two
-vehicles each, and rallied soon after.
+The 2nd Platoon's leader destroys a BMP at almost 4 km and the whole tank
+platoon at about 3.5 km, the last tank as it falls back. The two remaining BMPs
+climb on through dead ground and come over the top right in front of the 2nd
+Platoon, where *US Tank Company 2nd Platoon 4* destroys both at 150 m and less.
+At 30:00 the counts read **Blue 14/14 · Red 0/6**.
 
 ![The company's line on the ridge, the nested chain of command in the Objects tab, and kills on the timeline](../images/tutorial-15-company.png)
 
@@ -241,13 +250,15 @@ curl -X POST localhost:8080/api/v1/scenario/undo -H 'Content-Type: application/j
 ```
 
 ```json
-{"undo":9,"redo":1,"time":0}
+{"undo":10,"redo":1,"time":0}
 ```
 
 That response came from a fresh server just after the setup above. The undo
-took back the RU Mech Platoon's move order, the last edit, and 9 earlier edits
-remain (starting with **File → New scenario**). A group order is one edit per unit, so undoing it fully takes one undo
-per unit. MCP's `manage_scenario` has `undo` and `redo` actions.
+took back the last edit, the group order to the two Red platoons: a group order
+is a single edit, so one undo takes back the orders to every unit in it. 10
+earlier edits remain, starting with **File → New scenario** (applying the
+simulation settings counts as three). MCP's `manage_scenario` has `undo` and
+`redo` actions.
 
 ## 7. Measure
 
@@ -260,8 +271,8 @@ above the ground at each end. From the middle of the company's line at
 - to **12.24E 6.4N**: *200 m 180°*, *line of sight: clear*;
 - to **12.24E 5.9N**: *700 m 180°*, *line of sight: blocked*.
 
-The crest at about 6.3N hides the forward slope beyond it, which is why the Red
-platoons met the tanks at close range. Backspace removes the last point and Esc
+The crest at about 6.3N hides the forward slope beyond it, which is why only
+the 2nd Platoon saw the attack coming and the last BMPs met it at close range. Backspace removes the last point and Esc
 ends measuring. The check counts terrain, forest, buildings and smoke clouds,
 the same things that block the simulation's sensors. Over the API it is
 `POST /api/v1/terrain/line-of-sight` (add `"radar": true` to see through
@@ -272,15 +283,15 @@ smoke).
 Do this before you rewind for the batch runs below, because rewinding starts a
 new recording. With the fight run to 30:00, press **AAR** in the toolbar and
 **Report** in the AAR bar. For the run above, the report read:
-*00:00:00 to 00:30:00 · 1801 frames · 28 detections*.
+*00:00:00 to 00:30:00 · 1801 frames · 15 detections*.
 
 | Force | Start | End | Losses | Kills | Rounds fired |
 | --- | --- | --- | --- | --- | --- |
-| Blue | 14 | 14 | 0 | 4 | 27 |
-| Red | 6 | 2 | 4 | 0 | 7 |
+| Blue | 14 | 14 | 0 | 6 | 13 |
+| Red | 6 | 0 | 6 | 0 | 6 |
 
 The report also has a strength chart, the list of kills, and rounds fired by
-weapon (120 mm 27, Konkurs 6, 125 mm 1). Its buttons download it:
+weapon (120 mm 13, Konkurs 6). Its buttons download it:
 
 - **Download PDF**: a one-page report (`aar-report.pdf`) with the same tables
   and chart;
@@ -288,8 +299,8 @@ weapon (120 mm 27, Konkurs 6, 125 mm 1). Its buttons download it:
 
   ```
   time,victim_id,victim,victim_force,killer_id,killer,weapon
-  502.3,E20,RU Mech Platoon 3,Red,E10,US Tank Company 2nd Platoon 4,120mm M256 smoothbore (APFSDS)
-  516.8,E15,RU Tank Platoon Lead,Red,E3,US Tank Company 1st Platoon Lead,120mm M256 smoothbore (APFSDS)
+  150.7,E19,RU Mech Platoon 2,Red,E7,US Tank Company 2nd Platoon Lead,120mm M256 smoothbore (APFSDS)
+  203.4,E16,RU Tank Platoon 2,Red,E7,US Tank Company 2nd Platoon Lead,120mm M256 smoothbore (APFSDS)
   ```
 
 - **Events CSV**: the whole event log (`time,kind,text,entity,target`);
@@ -313,28 +324,28 @@ rewind to the saved state at 0:00. Then choose **File → Batch analysis…**:
 | Stop when a side is wiped out | ticked |
 
 Press **Run**. The runs happen on the server in the background, each with its
-own random seed (1000, 1001, …). On this machine 20 runs took about 10 s:
+own random seed (1000, 1001, …). On this machine 20 runs took about 6 s:
 
 ```
-Hold the ridge: 20 runs of 30 min in 10.3 s · runs ended at 30 min on average · 35.5 rounds fired per run
+Hold the ridge: 20 runs of 30 min in 5.5 s · runs ended at 13 min on average · 18 rounds fired per run
 
 Force  Losses (mean ± sd)   95% CI          Range
-Blue   0.2 ± 0.41 of 14     0.02 – 0.38     0 – 1
-Red    4.15 ± 0.366 of 6    3.989 – 4.311   4 – 5
+Blue   0 ± 0 of 14          0 – 0           0 – 0
+Red    5.55 ± 0.759 of 6    5.217 – 5.883   4 – 6
 
-Loss exchange ratio (Red lost per Blue lost): 20.75
-Ridge held at the end: Blue 75%
+Ridge held at the end: Blue 100%
 ```
 
-In the other 25 % of runs a surviving Red vehicle was still inside the area at
-the end, so nobody held it. The histograms show the spread of losses. **Download runs (CSV)** saves one row
-per run:
+Blue lost nothing in any run, so there is no loss exchange ratio to show. In 14
+runs Red was wiped out, half of them within four minutes, and those runs
+stopped early. The histograms show the spread of losses. **Download runs (CSV)**
+saves one row per run:
 
 ```
 run,seed,end_time,force1_total,force1_lost,force2_total,force2_lost,shots,first_kill,held_Ridge
-0,1000,1800,14,0,6,4,35,502.5,1
-1,1001,1800,14,0,6,4,38,502.3,1
-2,1002,1800,14,1,6,4,35,502.3,1
+0,1000,1800,14,0,6,4,16,145.2,1
+1,1001,1800,14,0,6,5,16,145.2,1
+2,1002,510,14,0,6,6,19,144.4,1
 ```
 
 The wall-clock time depends on your machine. The statistics depend only on the

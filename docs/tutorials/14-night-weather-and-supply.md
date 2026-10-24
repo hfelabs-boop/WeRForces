@@ -118,7 +118,7 @@ In daylight the same setup goes the other way. With the time of day left at
 ## 4. Muzzle flashes
 
 At **0:30**, select the tank platoon, right-click **10.4E 8.5N** (800 m from the
-squad) and choose **Move here**. The tanks arrive at about 2:50 and keep their
+squad) and choose **Move here**. The tanks arrive at about 2:51 and keep their
 thermal contacts. At 2:59 the riflemen still have no contacts: a tank 800 m away
 in the dark is invisible to them.
 
@@ -130,11 +130,11 @@ The tanks open fire, and in the same second the squad sees them:
 00:03:00 detected   RU Rifle Squad Lead detected US Tank Platoon 2
 00:03:00 detected   RU Rifle Squad 5 detected US Tank Platoon 3
 ...
-00:03:12 destroyed  RU Rifle Squad 8 destroyed by US Tank Platoon 2
+00:03:13 destroyed  RU Rifle Squad 4 destroyed by US Tank Platoon 3
 ...
-00:03:32 info       RU Rifle Squad broke and is falling back
+00:03:24 info       RU Rifle Squad broke and is falling back
 ...
-00:03:51 destroyed  RU Rifle Squad Lead destroyed by US Tank Platoon 3
+00:03:32 destroyed  RU Rifle Squad Lead destroyed by US Tank Platoon 3
 ```
 
 For 5 s after a weapon fires, a sensor sees the shooter as if the light were at
@@ -153,7 +153,7 @@ from Alderford to Calloway took:
 | Precipitation | Off-road, 2.4 km | Top speed off-road | By road, 6.3 km |
 | --- | --- | --- | --- |
 | None | 3:56 | 39.6 km/h | 9:36 |
-| Rain | 4:01 | 39.6 km/h | 9:39 |
+| Rain | 4:02 | 39.6 km/h | 9:39 |
 | Heavy rain | 4:48 | 33.7 km/h | 9:50 |
 | Snow | 5:08 | 31.4 km/h | 9:55 |
 
@@ -180,7 +180,7 @@ moved to (10484, 9552) by 0:40, (10564, 9552) by 1:00 and (10724, 9552) by 1:40:
 Let the night fight run on to **5:00** and pause. Click **US Tank Platoon
 Lead**. The inspector has a **Fuel** gauge: hover over it for the percentage
 (*100%* here, 0.997 over the API after about 1.5 km of driving). An M1A2 holds
-fuel for 426 km. **Weapons** shows the main gun at *31/40*.
+fuel for 426 km. **Weapons** shows the main gun at *34/40*.
 
 The HEMTT's inspector shows **Supplies: 10.0 vehicle loads**. One load is a full
 tank of fuel and a full load of every weapon for one vehicle.
@@ -190,15 +190,15 @@ from M977 HEMTT supply truck 13**. In the test run the order was given at 5:00:
 
 ```
 00:05:00 task       US Tank Platoon: Resupply from M977 HEMTT supply truck 13
-00:08:03 info       US Tank Platoon 4 resupplied by M977 HEMTT supply truck 13
-00:08:11 info       US Tank Platoon 2 resupplied by M977 HEMTT supply truck 13
-00:08:11 info       US Tank Platoon 3 resupplied by M977 HEMTT supply truck 13
-00:08:20 info       US Tank Platoon Lead resupplied by M977 HEMTT supply truck 13
+00:08:00 info       US Tank Platoon 4 resupplied by M977 HEMTT supply truck 13
+00:08:08 info       US Tank Platoon 2 resupplied by M977 HEMTT supply truck 13
+00:08:08 info       US Tank Platoon 3 resupplied by M977 HEMTT supply truck 13
+00:08:17 info       US Tank Platoon Lead resupplied by M977 HEMTT supply truck 13
 ```
 
 Each tank drives to the truck, halts within 60 m of it and takes on fuel and
 ammunition. Supplies only flow while both are halted. All four ended with 40/40
-main gun rounds and a full tank, and the truck had 9.76 loads left
+main gun rounds and a full tank, and the truck had 9.84 loads left
 (*9.8 vehicle loads* in the inspector). A unit order sends every member that
 needs anything. Without a named truck, a resupply order goes to the nearest
 friendly supply vehicle with stock left.
@@ -217,18 +217,18 @@ particular truck.
 
 Two plan steps wait on supply levels, and one goes to get more:
 
-- **Wait until fuel below (%)**: the average fuel of the entity, or of the unit's
-  vehicles and aircraft.
-- **Wait until ammunition below (%)**: the average over the unit's members of
+- **Wait until…** *fuel below (%)*: the average fuel of the entity, or of the
+  unit's vehicles and aircraft.
+- **Wait until…** *ammunition below (%)*: the average over the unit's members of
   each one's ammunition. A member's ammunition is the mean of its weapons, each
-  as a fraction of a full load. A tank with 31/40 main gun rounds and an
-  untouched machine gun is at (31/40 + 1) / 2 ≈ 89 %.
+  as a fraction of a full load. A tank with 34/40 main gun rounds and an
+  untouched machine gun is at (34/40 + 1) / 2 ≈ 93 %.
 - **Resupply at the nearest supply vehicle**.
 
 A plan waits at a *Wait until* step but still fights, because engagements don't
-depend on tasks. A useful pattern for a unit holding ground is **Wait until
-ammunition below 40 %**, then **Resupply at the nearest supply vehicle**, then
-**Move to** back to its position.
+depend on tasks. A useful pattern for a unit holding ground is **Wait until…**
+*ammunition below (%)* 40, then **Resupply at the nearest supply vehicle**,
+then **Move to (pick)** back to its position.
 
 Helicopters burn fuel by the hour, which makes them a quicker example. Choose
 **File → New scenario** (a new scenario starts at noon on 21 June again), then
@@ -242,34 +242,34 @@ Select the first Apache and build a plan in the **Plan editor**:
 
 | Step | Value |
 | --- | --- |
-| Wait until fuel below (%) | 30 |
-| Move to (pick) | right beside the HEMTT, within 50 m (zoom in) |
-| Set altitude (m AGL) | 0 |
+| Wait until… | fuel below (%), 30 |
+| Resupply at the nearest supply vehicle | |
 
 Name it *On station*, press **Assign plan**, and run at **32×**. Each Apache can
 fly for 2.5 hours, and a helicopter hovering in place burns fuel as fast as one
 flying:
 
 ```
-00:00:00 task       AH-64D Apache 2: plan On station assigned (3 steps)
-01:45:36 task       AH-64D Apache 2: plan On station complete
+00:00:00 task       AH-64D Apache 2: plan On station assigned (2 steps)
 01:46:26 info       AH-64D Apache 2 resupplied by M977 HEMTT supply truck 1
+01:46:26 task       AH-64D Apache 2: plan On station complete
 02:00:00 info       AH-64D Apache 3 is low on fuel (20%)
 02:30:00 destroyed  AH-64D Apache 3 destroyed by fuel exhaustion
 ```
 
-The first Apache left station at 30 %, landed beside the truck and refuelled
-(the truck went from 10 to 9.65 loads). The second had no plan. It warned at
-20 % and came down when its tank was empty. Out of fuel, ground vehicles just
-stop where they are.
+The first Apache left station at 30 % (1:45), flew to the truck, set down
+beside it, refuelled and went back up to 60 m (the truck went from 10 to 9.65
+loads). Helicopters resupply in the field like ground vehicles; fixed-wing
+aircraft can't. The second Apache had no plan. It warned at 20 % and came down
+when its tank was empty. Out of fuel, ground vehicles just stop where they
+are.
 
 Over the API, the plan is:
 
 ```json
 {"name": "On station", "statements": [
   {"kind": "waitUntil", "condition": {"type": "fuelBelow", "fraction": 0.3}},
-  {"kind": "task", "task": {"type": "moveTo", "target": {"x": 11830, "y": 7000}}},
-  {"kind": "setAltitude", "altitude": 0}
+  {"kind": "task", "task": {"type": "resupply"}}
 ]}
 ```
 

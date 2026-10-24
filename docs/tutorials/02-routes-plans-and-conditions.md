@@ -67,11 +67,12 @@ The convoy follows the route in **column**. Note the lead vehicle's name
    | Step | Choose | Value |
    | --- | --- | --- |
    | 1 | Set ROE | Hold fire |
-   | 2 | Wait until enemy detected | |
+   | 2 | Wait until… | enemy detected |
    | 3 | Wait (seconds) | 20 |
    | 4 | Set ROE | Fire at will |
 
-   For each step, pick the type, set the value, and press **Add**.
+   For each step, pick the type, set the value, and press **Add**. *Wait
+   until…* takes its condition from a second list.
    ![The Ambush plan in the plan editor](../images/tutorial-02-plan.png)
 
 3. Press **Assign plan**. *Current activity* shows *Ambush 1/4: Set ROE holdFire*,
@@ -89,7 +90,7 @@ and the trucks behind the lead are in view by then.
 
    | Step | Choose | Value |
    | --- | --- | --- |
-   | 1 | Wait until destroyed (pick) | then click the **convoy's lead vehicle** (zoom in and click the first symbol of the convoy; click the unit symbol to use its current leader) |
+   | 1 | Wait until… | **entity destroyed (pick)**, press **Add**, then click the **convoy's lead vehicle** (zoom in and click the first symbol of the convoy; click the unit symbol to use its current leader) |
    | 2 | Set formation | wedge |
    | 3 | Move to (pick) | then click **8.8E 13.6N** (beside the road) |
 
@@ -101,31 +102,36 @@ and the trucks behind the lead are in view by then.
 2. Speed **4×**, then **Run**.
 3. Select the Bradley platoon and watch *Current activity*.
 
-![2:56: the convoy lead is destroyed and the reserve (QRF) is moving up](../images/tutorial-02-ambush.png)
+![3:10: the convoy is destroyed and the reserve (QRF) is moving up](../images/tutorial-02-ambush.png)
 
 What happens (times are simulation time):
 
 | Time | What you see |
 | --- | --- |
 | ~2:21 | The convoy comes round the bend. *US Mech Platoon 2 detected RU Supply Convoy Lead* (and the BRDM spots the Bradleys at the same moment, but holds its fire). The plan moves to step 3 |
-| ~2:41 | The 20 s are up: *US Mech Platoon: plan Ambush complete*, ROE is now fire at will, and the Bradleys fire TOWs at about 1.2 km. Being fired at, the BRDM answers with its heavy machine gun |
-| ~2:45 | *RU Supply Convoy Lead destroyed*. The reserve's condition is met, so the tank platoon forms a wedge and moves north. The BRDM has just destroyed *US Mech Platoon 2*, and that Bradley's TOW *lost guidance and missed* |
-| 3:00–3:50 | The trucks drive on west towards Calloway and are destroyed one by one; each time, the next vehicle takes command and carries on along the route. When the third vehicle is lost (3:40) the convoy *breaks and is falling back*, too late: in our run a TOW immobilised the last truck at 3:44, and the arriving tanks finished it at 3:47 from about 1.3 km |
+| ~2:41 | The 20 s are up: *US Mech Platoon: plan Ambush complete*, ROE is now fire at will, and the Bradleys fire four TOWs at 1.2–1.3 km, one at each vehicle of the convoy (a unit spreads its fire over the targets it sees). Being fired at, the BRDM answers with its heavy machine gun |
+| ~2:45 | The BRDM destroys *US Mech Platoon Lead* (*US Mech Platoon 2 takes command*), and that Bradley's TOW *lost guidance and missed*. The other three TOWs hit: a firepower kill on the first truck, and the other two trucks destroyed. The convoy *is shaken* |
+| ~3:03 | A second volley: *RU Supply Convoy Lead destroyed*. The reserve's condition is met, so the tank platoon forms a wedge and moves north, showing its distance to go and ETA. The last truck takes command, the convoy *breaks and is falling back*, and a TOW destroys it at 3:06 |
+| ~5:45 | The tanks reach the road (*plan QRF complete*), with nothing left to fight |
 
-In our run the convoy was destroyed for the loss of one Bradley, hit by the
-BRDM's heavy machine gun. Your results will vary with exact positions: in
-another run, with the units placed a few metres differently, both BRDM bursts
-missed and no Bradley was lost.
+In our run the convoy was destroyed in 25 seconds of firing for the loss of one
+Bradley, hit by the BRDM's heavy machine gun. Your results will vary with exact
+positions. With the units placed by mouse clicks (a fraction of a metre from
+the grid references above), the first volley only knocked out the BRDM's weapons
+(*firepower kill*) while destroying all three trucks. The BRDM fell back out of
+sight and survived, no Bradley was lost, and the reserve never moved: *Wait
+until destroyed* waits for the vehicle to be **destroyed**, and a firepower or
+mobility kill is not enough.
 
 ## 8. Experiment
 
 Rewind (⏮) between experiments.
 
 - **No patience.** Remove the 20 s wait. The Bradleys open fire at the first
-  sighting and destroy the BRDM at 2:26, while the trucks are still out of view.
-  The trucks then drive into the kill zone one at a time; in our run the
-  Bradleys destroyed two of them (2:44 and 3:03), and the last one broke off,
-  fell back out of sight north of the road and survived.
+  sighting and destroy the BRDM at 2:26, while the trucks are still out of view,
+  so the reserve sets off at once. The trucks then drive into the kill zone one
+  at a time; in our run the Bradleys destroyed them at 2:44, 3:03 and 3:05 (the
+  convoy broke at 3:04, too late), and no Bradley was lost.
 - **Make the convoy fight.** Set its ROE to **Fire at will**.
 - **Loop a patrol.** Give the convoy **Patrol** instead of Follow. An open route
   is driven back and forth; a closed one (last point on the first) loops.
@@ -145,8 +151,9 @@ Rewind (⏮) between experiments.
 
 Conditions: time, in area (the entity, or its unit's leader, is inside an area),
 enemy detected, under fire (shot at in the last 15 s), entity destroyed, enemy in
-area (a hostile is inside an area), and strength, fuel or ammunition below a
-percentage. See
+area (a hostile is inside an area), strength, fuel or ammunition below a
+percentage, and a codeword received (or not yet received). The plan editor
+also has *If…* and *Repeat while…* blocks that use the same conditions. See
 [Concepts → Plans](../concepts.md#plans).
 
 **Next:** [Tutorial 3: Building and sharing a scenario](03-building-a-scenario.md).

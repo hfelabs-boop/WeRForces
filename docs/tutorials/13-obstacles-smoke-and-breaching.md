@@ -63,12 +63,12 @@ The BMPs on the ridge can see almost the whole slope down to the dip at 2.5N,
 and their Konkurs missiles reach 4 km. Blue starts in the only dead ground.
 
 To see what the tanks would do on their own, select the tank platoon,
-right-click the ridge at **12.45E 5.8N**, choose **Move here** and press ⏭ to
-step one second (a route is planned when the order starts to run). The dashed
-planned path (**Layers → Planned paths**) runs 5.2 km east, round the end of
-the ditch and straight through the minefield, because Blue does not know the
-minefield is there. Press **Ctrl+Z**. This undoes the order, and the clock goes
-back to 0:00 with it.
+right-click the ridge at **12.45E 5.8N** and choose **Move here**. The route is
+planned at once, with the clock still stopped: *Current activity* reads *Move
+to (12450, 5800) — 5.2 km to go*, and the dashed planned path (**Layers →
+Planned paths**) runs east, round the end of the ditch and straight through the
+minefield, because Blue does not know the minefield is there. Press
+**Ctrl+Z** to undo the order.
 
 ## 3. Smoke first
 

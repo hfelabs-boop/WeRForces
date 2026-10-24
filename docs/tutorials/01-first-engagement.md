@@ -72,7 +72,9 @@ things:
 
 1. Select **US Tank Platoon** (click its symbol).
 2. **Right-click the ground just south-west of Brenham**, at about **13.6E 6.4N**,
-   and choose **Move here**. *Current activity* shows *Move to (13600, 6400)*.
+   and choose **Move here**. *Current activity* shows *Move to (13600, 6400) —
+   3.8 km to go, ETA 12:06 local (in 6 min)*: the route is planned as soon as
+   you give the order, even with the clock stopped.
 
    Don't stop much further back: around 13.4E 6.4N the tanks end up deep in the
    woods, where the canopy blocks the view of Brenham and there is usually no
@@ -82,7 +84,8 @@ things:
    symbol offers **Attack RU Mech Platoon Lead** and **Follow RU Mech Platoon
    Lead** instead (Attack is covered in step 9).
 3. Open **Layers ▾** and make sure **Planned paths** is ticked. A dashed white
-   line shows the route the platoon leader will drive. It follows roads where
+   line shows the route the platoon leader will drive (it is already there
+   before you press Run). It follows roads where
    that is faster and avoids water and steep slopes.
 
 ## 7. Run it
@@ -117,9 +120,14 @@ setup (Blue at 10.9E 4.0N, Red at 13.8E 6.8N) the lead tank destroyed a BMP at
 5:27. The other two fired Konkurs missiles at it, but it fired its smoke
 grenades and both missiles lost guidance. It destroyed a second BMP at 5:34,
 the Red platoon broke and began to fall back, and the last BMP was destroyed at
-5:40. Final count: *Blue 4/4 · Red 0/3*. Starting a hundred metres away gives
-different times, and sometimes a BMP immobilised before it is destroyed, but
-in our tries the tanks always won without loss.
+5:40. Final count: *Blue 4/4 · Red 0/3*. Even a fraction of a metre changes
+the details: placed by mouse clicks, half a metre from those grid references,
+the same setup had the lead tank immobilise the Red leader at 5:35, *US Tank
+Platoon 3* destroy the BMP that took command at 5:41, and the lead tank finish
+the immobilised one a moment later. Starting up to a hundred metres away gives
+different times, and often a tank other than the lead scores. In 25 tries the
+tanks always won, but in four of them a Konkurs got through and destroyed the
+lead tank (*US Tank Platoon Lead lost, US Tank Platoon 2 takes command*).
 
 > Tip: click **3D** (or **Split**) during the fight, select a tank and tick
 > **Follow selected**.

@@ -37,8 +37,8 @@ The listener shows:
 
 ```
 listening for CoT on udp 0.0.0.0:16969
-a-f-G-U-C-A    Team ARMOR Lead          50.7885763, 10.0497392  course 52.5°  3.8 m/s
-a-f-G-U-C-A    Team ARMOR 2             50.7878570, 10.0508216  course 304.0°  3.7 m/s
+a-f-G-U-C-A    Team ARMOR Lead          50.7885564, 10.0497150  course 10.5°  0.8 m/s
+a-f-G-U-C-A    Team ARMOR 2             50.7878381, 10.0508476  course 346.0°  1.0 m/s
 …
 ```
 
@@ -129,7 +129,7 @@ webhook receiver on http://127.0.0.1:9000/hook (verifying signatures)
 [Calloway Crossroads] destroyed  Tank Plt 1 Lead destroyed by Gunslinger Lead
 [Calloway Crossroads] destroyed  Tank Plt 1 3 destroyed by Gunslinger 2
 [Calloway Crossroads] destroyed  Convoy 7 Lead destroyed by Gunslinger 2
-[Calloway Crossroads] destroyed  Convoy 7 2 destroyed by Gunslinger 2
+[Calloway Crossroads] destroyed  Convoy 7 2 destroyed by Gunslinger Lead
 …
 ```
 

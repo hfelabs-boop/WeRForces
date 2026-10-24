@@ -140,14 +140,14 @@ curl -s -H 'Authorization: Bearer control' localhost:8080/api/v1/recording/repor
 ```
 
 ```json
-{"force":1,"start":14,"end":14,"losses":0,"shots":12,"kills":6}
+{"force":1,"start":14,"end":14,"losses":0,"shots":11,"kills":6}
 {"force":2,"start":19,"end":13,"losses":6,"shots":0,"kills":0}
 {"force":3,"start":3,"end":3,"losses":0,"shots":0,"kills":0}
 {"time":136.7,"victimId":"E15","victim":"Tank Plt 1 Lead","victimForce":2,"killerId":"E11","killer":"Gunslinger Lead","weaponId":"hellfire"}
-{"hellfire":12}
+{"hellfire":11}
 ```
 
-Twelve Hellfires for six kills. Red never fired a shot: it never saw the
+Eleven Hellfires for six kills. Red never fired a shot: it never saw the
 helicopters. That is the kind of thing the debrief is for. AI agents get the
 same report as text from the MCP tool `after_action_report`.
 
