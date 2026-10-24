@@ -30,7 +30,11 @@ export class Ew {
     this.jammed = new Map();
     const jammers = this.jammers();
     if (!jammers.length) {
-      for (const [id, j] of prev) if (j.radio) this.announce(id, undefined);
+      // The last jammer went off: once per unit (its leader) or loose entity.
+      for (const [id, j] of prev) {
+        const e = this.engine.entities.get(id);
+        if (j.radio && e && (!e.unit || e.unit.leader === e)) this.announce(id, undefined);
+      }
       return;
     }
     for (const e of this.engine.entities.values()) {

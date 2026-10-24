@@ -306,6 +306,9 @@ export class PlanExecutor {
       }
       if (st.kind === 'sendCodeword') {
         const force = owner.members()[0]?.force;
+        // A jammed radio cannot send it: the plan waits here until the radio is clear.
+        const speaker = owner.reference();
+        if (speaker && engine.ew.radioJammed(speaker)) return;
         if (force !== undefined) engine.sendCodeword(force, st.codeword, owner.id);
         this.index++;
         continue;

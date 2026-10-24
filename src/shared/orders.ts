@@ -140,11 +140,20 @@ function words(text: string): string[] {
   return out;
 }
 
+/** Drop copies: graphics of the same name and shape (e.g. an objective drawn once for each force) are one place. */
+function distinct<T extends { name: string }>(items: T[]): T[] {
+  const shape = (it: T) => ('points' in it ? `${norm(it.name)}|${JSON.stringify((it as { points: unknown }).points)}` : null);
+  return items.filter((it, i) => {
+    const s = shape(it);
+    return s === null || items.findIndex((o) => shape(o) === s) === i;
+  });
+}
+
 /** Match the longest run of words at the start of `ws` against names. */
 function matchName<T extends { name: string; id: string }>(ws: string[], items: T[]): { item: T; used: number } | { ambiguous: T[]; used: number } | null {
   for (let n = ws.length; n >= 1; n--) {
     const phrase = norm(ws.slice(0, n).join(' ')).replace(/,$/, '');
-    const exact = items.filter((it) => norm(it.name) === phrase || it.id.toLowerCase() === phrase || norm(`${it.name} (${it.id})`) === phrase);
+    const exact = distinct(items.filter((it) => norm(it.name) === phrase || it.id.toLowerCase() === phrase || norm(`${it.name} (${it.id})`) === phrase));
     if (exact.length === 1) return { item: exact[0], used: n };
     if (exact.length > 1) return { ambiguous: exact, used: n };
   }

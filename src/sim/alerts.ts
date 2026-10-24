@@ -45,6 +45,9 @@ export class Alerts {
   private seq = 0;
   private memory = new Map<string, OwnerMemory>();
 
+  /** Acknowledged alerts whose condition has since cleared. */
+  private readonly cleared = new WeakSet<Alert>();
+
   constructor(private readonly engine: Engine) {
     engine.on('event', (ev) => {
       if (ev.kind !== 'destroyed' || !ev.entityId) return;
@@ -108,9 +111,10 @@ export class Alerts {
     return a;
   }
 
-  /** Close an open alert whose condition has cleared. */
+  /** Close an open alert whose condition has cleared; an acknowledged one stays in the history but no longer holds back a new one. */
   private resolve(kind: AlertKind, objectId: string): void {
     this.list = this.list.filter((a) => !(a.kind === kind && a.objectId === objectId && !a.acknowledged));
+    for (const a of this.list) if (a.kind === kind && a.objectId === objectId) this.cleared.add(a);
   }
 
   private owners(): Owner[] {
@@ -175,7 +179,7 @@ export class Alerts {
         if (low && !empty) this.raiseOnce('lowFuel', o, o.unit ? `${o.name}: ${low} low on fuel` : `${o.name} is low on fuel`);
         else this.resolve('lowFuel', o.id);
       }
-      // Ammunition: members whose direct-fire weapons are all empty.
+      // Ammunition: members whose weapons are all empty.
       const armed = o.members.filter((e) => e.type.weapons.length > 0);
       const dry = armed.filter((e) => e.type.weapons.every((w) => (e.ammo.get(w) ?? 0) <= 0)).length;
       if (dry) this.raiseOnce('outOfAmmo', o, o.unit ? `${o.name}: ${dry} of ${o.members.length} out of ammunition` : `${o.name} is out of ammunition`);
@@ -217,6 +221,7 @@ export class Alerts {
   private raiseOnce(kind: AlertKind, o: Owner, text: string): void {
     const open = this.list.find((a) => a.kind === kind && a.objectId === o.id && !a.acknowledged);
     if (open) open.text = text;
-    else if (!this.list.some((a) => a.kind === kind && a.objectId === o.id && a.acknowledged)) this.raise(kind, o.id, o.force, text);
+    // Acknowledged while the condition lasts: stay quiet until it clears and comes back.
+    else if (!this.list.some((a) => a.kind === kind && a.objectId === o.id && a.acknowledged && !this.cleared.has(a))) this.raise(kind, o.id, o.force, text);
   }
 }

@@ -268,7 +268,8 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
   engine.addGraphic('area', ring(objective, 400), `OBJ ${objName}`, 2);
 
   const phases: Record<number, Phase[]> = { 1: [], 2: [] };
-  const order = (u: Unit | { id: string }, task: TaskSpec, text: string): PhaseOrder => ({ targetId: u.id, task, text });
+  // Given as tasks, not text: the sync matrix dialog shows them as their description.
+  const order = (u: Unit | { id: string }, task: TaskSpec): PhaseOrder => ({ targetId: u.id, task });
   const opener = { type: 'time', time: 1 } as const;
   const lines: string[] = [];
   const sideName = (s: Required<WizardSide>, top: Unit) => `${top.name}${s.support.length ? ` with ${s.support.map(supportName).join(', ')}` : ''}`;
@@ -282,21 +283,21 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
     const assault: PhaseOrder[] = [];
     if (subs.length >= 3) {
       // Support by fire with one platoon; the others assault.
-      assault.push(order(subs[0], { type: 'overwatch', position: attackPos, facing: deg(toward) }, `${subs[0].name}: support by fire from ATK POS`));
-      for (const s of subs.slice(1)) assault.push(order(s, { type: 'moveTo', target: objective }, `${s.name}: assault OBJ ${objName}`));
+      assault.push(order(subs[0], { type: 'overwatch', position: attackPos, facing: deg(toward) }));
+      for (const s of subs.slice(1)) assault.push(order(s, { type: 'moveTo', target: objective }));
     } else {
-      assault.push(order(att, { type: 'moveTo', target: objective }, `${att.name}: assault OBJ ${objName}`));
+      assault.push(order(att, { type: 'moveTo', target: objective }));
     }
     phases[fa].push(
-      { id: 'P1', name: 'Move', trigger: opener, orders: [order(att, { type: 'moveTo', target: attackPos }, `${att.name}: move to ATK POS`)] },
+      { id: 'P1', name: 'Move', trigger: opener, orders: [order(att, { type: 'moveTo', target: attackPos })] },
       { id: 'P2', name: 'Assault', trigger: { type: 'previousDone', delay: 30 }, orders: assault },
-      { id: 'P3', name: 'Consolidate', trigger: { type: 'previousDone', delay: 10 }, orders: [order(att, { type: 'defend', position: objective, facing: deg(toward), width: width(attSide.size) }, `${att.name}: consolidate on OBJ ${objName}`)] },
+      { id: 'P3', name: 'Consolidate', trigger: { type: 'previousDone', delay: 10 }, orders: [order(att, { type: 'defend', position: objective, facing: deg(toward), width: width(attSide.size) })] },
     );
     return attackPos;
   };
   const defend = (fd: ForceId, def: Unit, defSide: Required<WizardSide>, facing: number) => {
     engine.addGraphic('area', ring(objective, width(defSide.size) / 2 + 150, 6), 'BP 1', fd);
-    phases[fd].push({ id: 'P1', name: 'Defend', trigger: { type: 'time', time: 0 }, orders: [order(def, { type: 'defend', position: objective, facing: deg(facing), width: width(defSide.size) }, `${def.name}: defend BP 1`)] });
+    phases[fd].push({ id: 'P1', name: 'Defend', trigger: { type: 'time', time: 0 }, orders: [order(def, { type: 'defend', position: objective, facing: deg(facing), width: width(defSide.size) })] });
     if (defSide.support.includes('engineers')) {
       // A minefield the defence laid in front of its position.
       const c = along(objective, (fd === 1 ? 1 : -1) * 700);
@@ -310,8 +311,8 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
   switch (o.mission) {
     case 'meeting': {
       both('phaseLine', line(objective, Math.max(width(o.blue.size), width(o.red.size))), 'PL CONTACT');
-      phases[1].push({ id: 'P1', name: 'Advance', trigger: opener, orders: [order(blue, { type: 'moveTo', target: objective }, `${blue.name}: advance to OBJ ${objName}`)] });
-      phases[2].push({ id: 'P1', name: 'Advance', trigger: opener, orders: [order(red, { type: 'moveTo', target: objective }, `${red.name}: advance to OBJ ${objName}`)] });
+      phases[1].push({ id: 'P1', name: 'Advance', trigger: opener, orders: [order(blue, { type: 'moveTo', target: objective })] });
+      phases[2].push({ id: 'P1', name: 'Advance', trigger: opener, orders: [order(red, { type: 'moveTo', target: objective })] });
       lines.push(`Both sides advance on OBJ ${objName}${town ? ` (${town.name})` : ''}, ${km(D)} apart at the start. Blue: ${sideName(o.blue, blue)}. Red: ${sideName(o.red, red)}.`);
       break;
     }
@@ -330,14 +331,14 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
       engine.addGraphic('phaseLine', line(objective, width(o.blue.size) + 300), 'PL 1', 1);
       engine.addGraphic('phaseLine', line(rear, width(o.blue.size) + 300), 'PL 2', 1);
       engine.addGraphic('point', [rear], `OBJ ${objName} 2`, 2);
-      phases[1].push({ id: 'P1', name: 'Screen', trigger: { type: 'time', time: 0 }, orders: [order(blue, { type: 'screen', position: objective, facing: deg(blueHeading), width: width(o.blue.size), fallback: rear }, `${blue.name}: screen on PL 1, fall back to PL 2`)] });
-      phases[2].push({ id: 'P1', name: 'Advance', trigger: opener, orders: [order(red, { type: 'moveTo', target: rear }, `${red.name}: advance through OBJ ${objName} to PL 2`)] });
+      phases[1].push({ id: 'P1', name: 'Screen', trigger: { type: 'time', time: 0 }, orders: [order(blue, { type: 'screen', position: objective, facing: deg(blueHeading), width: width(o.blue.size), fallback: rear })] });
+      phases[2].push({ id: 'P1', name: 'Advance', trigger: opener, orders: [order(red, { type: 'moveTo', target: rear })] });
       lines.push(`Blue (${sideName(o.blue, blue)}) screens on PL 1 at OBJ ${objName} and falls back to PL 2 when Red closes. Red (${sideName(o.red, red)}) pushes through from ${km(D)} out.`);
       break;
     }
     case 'recon': {
       const nai = engine.addGraphic('area', ring(objective, Math.min(D * 0.35, 2000), 8), 'NAI 1', 1);
-      phases[1].push({ id: 'P1', name: 'Reconnoitre', trigger: opener, orders: [order(blue, { type: 'search', areaId: nai.id }, `${blue.name}: search NAI 1`)] });
+      phases[1].push({ id: 'P1', name: 'Reconnoitre', trigger: opener, orders: [order(blue, { type: 'search', areaId: nai.id })] });
       // Red is spread through the area in hidden positions.
       const parts = engine.subordinatesOf(red).length ? engine.subordinatesOf(red) : [red];
       phases[2].push({
@@ -346,7 +347,7 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
         trigger: { type: 'time', time: 0 },
         orders: parts.map((p, i) => {
           const spot = land(ring(objective, parts.length > 1 ? Math.min(D * 0.25, 1400) : 0, parts.length)[i], 400) ?? objective;
-          return order(p, { type: 'defend', position: spot, facing: deg(redHeading), width: 300 }, `${p.name}: hide and defend`);
+          return order(p, { type: 'defend', position: spot, facing: deg(redHeading), width: 300 });
         }),
       });
       for (const p of parts) engine.setRoe(p.id, 'returnFire');
@@ -366,21 +367,22 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
       const battery = build({ template: guns }, force, at(s.size === 'company' ? 4000 : 1200), heading);
       if (attacking) {
         const fire = phases[force].find((p) => p.name === 'Assault');
-        fire?.orders.push(order(battery, { type: 'fireMission', target: objective, rounds: 4, radius: 150 }, `${battery.name}: fire on OBJ ${objName}`));
+        fire?.orders.push(order(battery, { type: 'fireMission', target: objective, rounds: 4, radius: 150 }));
       }
     }
     if (s.support.includes('recon')) {
       const scouts = build({ template: k.recon }, force, at(-600, 300), heading);
-      const forward = land(along(objective, -back * (attacking || o.mission === 'meeting' ? 1500 : -1500)), 600) ?? objective;
+      // Attacking: watch the objective from 1.5 km short of it, on this side. Defending: screen 1.5 km out in front.
+      const forward = land(along(objective, back * (attacking || o.mission === 'meeting' ? 1500 : -1500)), 600) ?? objective;
       extra.push(
         attacking || o.mission === 'meeting'
-          ? order(scouts, { type: 'overwatch', position: forward, facing: deg(heading) }, `${scouts.name}: watch OBJ ${objName}`)
-          : order(scouts, { type: 'screen', position: forward, facing: deg(heading), width: 600, fallback: objective }, `${scouts.name}: screen forward`),
+          ? order(scouts, { type: 'overwatch', position: forward, facing: deg(heading) })
+          : order(scouts, { type: 'screen', position: forward, facing: deg(heading), width: 600, fallback: objective }),
       );
     }
     if (s.support.includes('engineers') && attacking) {
       const sappers = build({ template: k.engineers }, force, at(300, -200), heading);
-      extra.push(order(sappers, { type: 'follow', targetId: top.leader!.id, distance: 250 }, `${sappers.name}: follow ${top.name}`));
+      extra.push(order(sappers, { type: 'follow', targetId: top.leader!.id, distance: 250 }));
     }
     if (s.support.includes('supply')) build({ template: k.supply }, force, at(1500), heading);
     if (s.support.includes('air')) {
@@ -389,17 +391,15 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
         ? build({ template: k.air.template }, force, p, heading)
         : engine.groupUnit([0, 1].map((i) => engine.createEntity({ typeId: k.air.type!, force, x: p.x + i * 150, y: p.y, heading }).id), `${s.nation.toUpperCase()} Attack Helicopter Team`, 'echelonRight', 200, 'team');
       const holding = { x: (start.x + objective.x) / 2, y: (start.y + objective.y) / 2 };
-      extra.push(order(team, { type: 'orbit', center: holding, radius: 1200 }, `${team.name}: hold over the battle area`));
+      extra.push(order(team, { type: 'orbit', center: holding, radius: 1200 }));
     }
     if (s.support.includes('airDefense')) {
       const p = at(700, 250);
       engine.createEntity({ typeId: k.airDefense, force, x: p.x, y: p.y, heading });
     }
-    if (extra.length) {
-      const first = phases[force][0];
-      if (first) first.orders.push(...extra);
-      else phases[force].push({ id: 'P1', name: 'Deploy', trigger: opener, orders: extra });
-    }
+    // Support gets its orders in a phase of its own first: scouts watching or helicopters
+    // holding never finish, and must not hold up a phase that waits for the one before.
+    if (extra.length) phases[force].unshift({ id: 'P0', name: 'Deploy', trigger: { type: 'time', time: 0 }, orders: extra });
   };
   const blueAttacks = o.mission === 'attack' || o.mission === 'recon';
   const redAttacks = o.mission === 'defend' || o.mission === 'delay';

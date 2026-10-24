@@ -221,6 +221,8 @@ export class Unit implements Taskable {
 
   taskStatus(): TaskStatus | 'none' {
     if (!this.taskSpec) return 'none';
+    // No one left to carry it out.
+    if (!this.alive().length) return 'failed';
     if (perMemberTask(this.taskSpec)) {
       const type = this.taskSpec.type;
       return this.alive().some((m) => m.task?.status === 'running' && m.task.spec.type === type) ? 'running' : 'done';

@@ -590,6 +590,8 @@ export class Engine {
       e.assignedPlan = undefined;
       e.assignedTask = { type: 'manual' };
       this.setEntityTask(e, new ManualTask({ type: 'manual' }));
+      // Members holding their own tasks (defend, overwatch...) drop them and follow in formation.
+      if (u && u.leader === e) u.formUp(this);
       this.log('task', `${e.name}: under direct control`, e.id);
     }
     (e.task as ManualTask).input(this, input);

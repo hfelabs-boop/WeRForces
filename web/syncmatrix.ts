@@ -166,12 +166,15 @@ export class SyncMatrixDialog {
               c.kept.delete(r.id);
               check(input, r.id);
             });
-            check(input, r.id);
+            // Orders given as tasks (through the API or a quick battle) show as their description.
+            if (c.kept.has(r.id)) input.title = 'Given as a task; type over it to change it';
+            else check(input, r.id);
             return h('td', {}, input);
           }),
           h('td', {}),
         ),
       );
+      const codeword = h('input', { type: 'text', class: 'sync-codeword', placeholder: 'Codeword, e.g. EXECUTE', maxlength: '40' }) as HTMLInputElement;
       body.append(
         h('h3', { text: 'Synchronization matrix' }),
         h('p', { class: 'hint', text: 'Phases start in order, each on its trigger, and give the orders in their column at once (type them as on the order line: "move to Calloway covered", "defend OBJ CALLOWAY facing north", "hold fire"; several with ";"). A phase also sends its name as a codeword, so unit plans can wait for it.' }),
@@ -180,6 +183,19 @@ export class SyncMatrixDialog {
         h(
           'div',
           { class: 'row' },
+          codeword,
+          h('button', {
+            text: 'Send codeword',
+            title: 'Send a codeword to this force now: plans and phases waiting for it go on',
+            onclick: () => {
+              const word = codeword.value.trim();
+              if (!word) return;
+              void this.host
+                .v1('POST', '/codewords', { force, codeword: word })
+                .then(() => ((codeword.value = ''), this.host.toast(`Codeword ${word.toUpperCase()} sent`, true)))
+                .catch((err: Error) => this.host.toast(err.message));
+            },
+          }),
           h('span', { class: 'spacer' }),
           h('button', { class: 'primary', text: 'Save', onclick: () => void this.save(force, columns).then((m) => m && (all.splice(0, all.length, ...all.filter((x) => x.force !== force), m), load(force), this.host.toast('Synchronization matrix saved', true))) }),
           h('button', { text: 'Close', onclick: () => close() }),

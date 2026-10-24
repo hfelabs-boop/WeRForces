@@ -211,7 +211,7 @@ export function buildOpenApi(baseUrl: string): Schema {
           requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['phases'], properties: { phases: { type: 'array', items: { type: 'object' } } } } } } },
         }),
       },
-      '/api/v1/sync-matrix/{force}/phases/{id}/start': { post: op('Simulation', 'Start a phase now, whatever its trigger (the phases before it must have started)', { parameters: [idParam('force'), idParam()] }) },
+      '/api/v1/sync-matrix/{force}/phases/{id}/start': { post: op('Simulation', 'Start a phase now, whatever its trigger (also out of turn; phases already started are not started again)', { parameters: [idParam('force'), idParam()] }) },
       '/api/v1/terrain/viewshed': {
         post: op('Terrain', 'What an entity or a point can see out to a radius: a grid of cells (0 out of range or water, 1 hidden, 2 seen), base64 bytes row by row from (x0, y0) at `cell` m spacing, plus the share seen. Body: {from: entity id or position (with optional height), radius?, targetHeight? (default 2 m), radar?}. An entity\'s radius defaults to its sensor range in the current light and weather', {
           requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['from'], properties: { from: {}, radius: { type: 'number' }, targetHeight: { type: 'number' }, radar: { type: 'boolean' } } } } } },
