@@ -53,6 +53,30 @@ describe('a 200 km tiled terrain', () => {
     expect(tiled.cache.stats().bytes).toBeLessThanOrEqual(CACHE);
   });
 
+  it('keeps route cost overlays (minefields, obstacles) small', () => {
+    const engine = new Engine({ terrain: tiled });
+    engine.newScenario('Mines', tiled.spec);
+    const t = tiled.towns[40];
+    // A field of the planner's own force (so known to it) beside the town, and an obstacle line.
+    engine.addGraphic('minefield', [{ x: t.x + 800, y: t.y - 400 }, { x: t.x + 1600, y: t.y - 400 }, { x: t.x + 1600, y: t.y + 400 }, { x: t.x + 800, y: t.y + 400 }], 'MF 1', 1);
+    engine.addGraphic('obstacle', [{ x: t.x - 1500, y: t.y - 1000 }, { x: t.x - 1500, y: t.y + 1000 }], 'OBS 1', 1);
+    const overlay = engine.obstacles.overlay(1, 'ground')!;
+    expect(overlay).not.toBeNull();
+    // A whole-grid array would be 178 MB.
+    expect(overlay.bytes).toBeLessThan(1024 * 1024);
+    const route = engine.planRoute(t, { x: t.x + 3000, y: t.y }, 'ground', 0.6, 1)!;
+    // The route goes round the field.
+    let prev = { x: t.x, y: t.y };
+    for (const q of route) {
+      for (let k = 0; k <= 50; k++) {
+        const x = prev.x + ((q.x - prev.x) * k) / 50;
+        const y = prev.y + ((q.y - prev.y) * k) / 50;
+        expect(x > t.x + 800 && x < t.x + 1600 && y > t.y - 400 && y < t.y + 400).toBe(false);
+      }
+      prev = q;
+    }
+  });
+
   it('sees 30 km between masts but not between people on the ground', () => {
     // Over the lowlands in the south-west the ground is gentle: a 2 m eye's horizon is the limit.
     const a = { x: 20000, y: 20000 };

@@ -4,6 +4,7 @@
 
 import type { Domain, ForceId } from '../shared/types.js';
 import type { Engine } from './engine.js';
+import { PostOverlay } from './postOverlay.js';
 
 /** Extra route cost per unit of exposure (1 = in sight at point-blank range of one enemy). */
 const THREAT_COST = 8;
@@ -25,7 +26,7 @@ export interface Threat {
 }
 
 export class ThreatMap {
-  private cache = new Map<string, { key: string; ids: string; at: number; grid: Float32Array | null }>();
+  private cache = new Map<string, { key: string; ids: string; at: number; grid: PostOverlay | null }>();
 
   constructor(private readonly engine: Engine) {}
 
@@ -61,7 +62,7 @@ export class ThreatMap {
   }
 
   /** Per-post route cost multipliers for a force crossing ground in a domain (null: no known threats). */
-  overlay(force: ForceId, domain: Domain): Float32Array | null {
+  overlay(force: ForceId, domain: Domain): PostOverlay | null {
     if (domain === 'air' || domain === 'surface') return null;
     const threats = this.threats(force, domain);
     const key = threats.map((t) => `${t.id}:${Math.round(t.x / 25)}:${Math.round(t.y / 25)}`).sort().join('|');
@@ -76,12 +77,12 @@ export class ThreatMap {
     return grid;
   }
 
-  private build(threats: Threat[]): Float32Array {
+  private build(threats: Threat[]): PostOverlay {
     const t = this.engine.terrain;
     const cs = t.spec.cellSize;
     const cols = t.cols;
     const rows = t.rows;
-    const exposure = new Float32Array(cols * rows);
+    const exposure = new PostOverlay(cols, rows, 0);
     for (const th of threats) {
       const reach = Math.ceil(th.range / cs);
       const stride = Math.max(1, Math.ceil((2 * reach) / SAMPLES_ACROSS));
@@ -101,12 +102,10 @@ export class ThreatMap {
           const z = t.surfaceHeight(x, y) + 2;
           if (!t.lineOfSight({ x: th.x, y: th.y, z: th.z }, { x, y, z })) continue;
           const w = 1 - d / th.range;
-          for (let rr = r; rr < Math.min(r + stride, r1 + 1); rr++) for (let cc = c; cc < Math.min(c + stride, c1 + 1); cc++) exposure[rr * cols + cc] += w;
+          for (let rr = r; rr < Math.min(r + stride, r1 + 1); rr++) for (let cc = c; cc < Math.min(c + stride, c1 + 1); cc++) exposure.add(rr * cols + cc, w);
         }
       }
     }
-    const grid = new Float32Array(cols * rows);
-    for (let i = 0; i < grid.length; i++) grid[i] = 1 + THREAT_COST * exposure[i];
-    return grid;
+    return exposure.map((v) => 1 + THREAT_COST * v);
   }
 }

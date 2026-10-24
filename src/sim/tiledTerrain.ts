@@ -8,6 +8,7 @@ import { LAND_COVER } from '../shared/terrainGrid.js';
 import { type TerrainTile, type TileManifest, TilePyramid, emptyTile, tileBytes } from '../shared/terrainTiles.js';
 import type { Domain, TerrainData, Vec2, Vec3 } from '../shared/types.js';
 import { gridAStar } from './pathfinding.js';
+import type { PostOverlay } from './postOverlay.js';
 import { CANOPY_HEIGHT, FOREST_SEE_THROUGH, LOS_BLOCK, LOS_CHUNK, landMobility, Terrain, URBAN_COVERAGE, URBAN_SEE_THROUGH } from './terrain.js';
 
 /** Where tiles come from: files on disk, a generator, or an in-memory grid. */
@@ -487,14 +488,14 @@ export class TiledTerrain extends Terrain {
     return grid[(r - ty * T) * n + (c - tx * T)];
   }
 
-  override planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number, overlay: Float32Array | null = null): Vec2[] | null {
+  override planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number, overlay: PostOverlay | null = null): Vec2[] | null {
     if (domain === 'air') return [to];
     const cs = this.spec.cellSize;
     if (dist2d(from, to) < cs * 6 && Number.isFinite(this.segmentCost(from, to, domain, offroadFactor, overlay))) return [to];
     const key = `${domain}:${offroadFactor}`;
     const cols = this.cols;
     const cost = overlay
-      ? (c: number, r: number) => this.fineCost(c, r, key, domain, offroadFactor) * overlay[r * cols + c]
+      ? (c: number, r: number) => this.fineCost(c, r, key, domain, offroadFactor) * overlay.get(r * cols + c)
       : (c: number, r: number) => this.fineCost(c, r, key, domain, offroadFactor);
     const span = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y)) / cs;
     let pts: Vec2[] | null;

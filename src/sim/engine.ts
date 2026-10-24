@@ -59,6 +59,7 @@ import { TravelCache } from './eta.js';
 import { SyncPlans } from './sync.js';
 import { Life } from './life.js';
 import { Ew, JAMMED_ORDER_DELAY } from './ew.js';
+import { PostOverlay } from './postOverlay.js';
 
 export const DEFAULT_DT = 0.1;
 export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false, curvature: true };
@@ -975,7 +976,7 @@ export class Engine {
   planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number, force?: ForceId, avoidThreats = false): Vec2[] | null {
     let overlay = this.obstacles.overlay(force, domain);
     const threat = avoidThreats && force !== undefined ? this.threats.overlay(force, domain) : null;
-    if (threat) overlay = overlay ? overlay.map((v, i) => v * threat[i]) : threat;
+    if (threat) overlay = overlay ? PostOverlay.product(overlay, threat) : threat;
     const route = this.terrain.planRoute(from, to, domain, offroadFactor, overlay);
     return route && overlay && domain !== 'lifeform' ? this.obstacles.threadLanes(route, from) : route;
   }
