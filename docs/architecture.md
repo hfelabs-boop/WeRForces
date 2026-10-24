@@ -25,7 +25,7 @@ src/sim           The simulation engine; no I/O, usable as a library
   aggregate.ts      aggregate level: units as one object, Lanchester attrition, (dis)aggregation
   sensors.ts        detection
   combat.ts         target and weapon selection, fly-out, damage, indirect fire and blast
-  models.ts         swappable hit/kill (armour by aspect), ballistic and radar models
+  models.ts         swappable hit/kill (armour by aspect), ballistic, radar and navigation models
   fires.ts          automatic call for fire
   morale.ts         suppression, pinning, unit morale, breaking and rallying
   environment.ts    sun, light level, weather, sensor range at night
@@ -35,7 +35,10 @@ src/sim           The simulation engine; no I/O, usable as a library
   threats.ts        threat map for covered routes
   batch.ts          Monte Carlo replications and their statistics (no I/O)
   sync.ts           synchronization matrices: phases, triggers, phase orders
-  ew.ts             electronic warfare: who is radio- or radar-jammed
+  ew.ts             electronic warfare: who is jammed (radio, radar, datalink, GNSS), radio silence
+  navigation.ts     GNSS navigators and GNSS-guided munitions under jamming and spoofing
+  emcon.ts          what entities radiate, direction finding (DF contacts), anti-radiation missiles
+  protection.ts     active protection systems and flares/chaff on the shot flow
   life.ts           pattern of life: background civilian cars and pedestrians
   explain.ts        "Why?" explanations for entities and units (read-only)
   alerts.ts         the attention queue (read-only)
@@ -88,6 +91,8 @@ docs              this documentation (served at /docs)
 5. **Tasks:** each running task sets the entity's `steer` command (a target
    point, a speed, whether to stop there). An entity halted by its on-contact
    reaction, or pinned down by suppression, stops instead, keeping its task.
+   A GNSS navigator that has lost its fix runs its task from where it thinks
+   it is, and the steer point is shifted back by the navigation error.
 6. **Movement:** `stepMovement` turns `steer` into heading, speed and position
    changes, and applies terrain and weather effects. Vehicles out of fuel stay
    put. Ground movement is checked against obstacles and minefields (mine
@@ -98,7 +103,9 @@ docs              this documentation (served at /docs)
    order a full scan would visit them, so results do not depend on the grid.
 8. **Once per second:** the light and weather are updated, smoke drifts and
    expires, observers request fire missions, unit morale is updated, supply
-   vehicles resupply, jamming is worked out, the pattern of life tops up and
+   vehicles resupply, jamming is worked out, GNSS navigators lose or regain
+   their fix, direction finders take bearings (and call for fire on good
+   fixes), anti-radiation missiles home on their emitters, the pattern of life tops up and
    moves its civilians, alerts are checked, and synchronization-matrix
    triggers are checked (starting phases).
 9. **Combat:** pick a target and weapon, fire, and put the shot in flight.
@@ -253,7 +260,8 @@ npm run docs:gen      # regenerate docs/reference/catalog.md and mcp-tools.md
 | `sync.test.ts` | synchronization matrices: triggers, phase orders, per-force state |
 | `viewshed.test.ts` | viewshed grids |
 | `life.test.ts` | pattern of life: civilians kept topped up, fleeing |
-| `ew.test.ts` | radio and radar jamming |
+| `ew.test.ts` | radio, radar, datalink and GNSS jamming |
+| `countermeasures.test.ts` | GNSS denial and spoofing, GNSS-guided munitions, counter-UAS jammers, guns and interceptors, emission control, direction finding and triangulation, DF calls for fire, active protection, decoys, anti-radiation missiles, save/load, fog of war, REST and MCP |
 | `fidelity.test.ts` | armour by aspect, ballistics of unguided rounds, the radar range equation, swapping models |
 | `drive.test.ts` | direct control |
 | `catalog-edit.test.ts` | catalog editor validation and per-scenario entries |

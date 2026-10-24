@@ -225,9 +225,9 @@ systems but no beams, when it stops: switched off, destroyed, mounted or deleted
 
 | Emitter | When | System function | Beam function | Beam (one per system) |
 | --- | --- | --- | --- | --- |
-| Each radar sensor (`radar: true` in the [catalog](catalog.md)) with an all-round field of view | The entity is alive and not mounted | 2 Early Warning/Surveillance | 1 Search | 3 GHz, 200 MHz wide, 90 dBm ERP, PRF 1 kHz, pulse width 1 µs, azimuth sweep ±180°, elevation ±15° |
+| Each radar sensor (`radar: true` in the [catalog](catalog.md)) with an all-round field of view | The entity is alive and not mounted, and its radar is not switched off by [emission control](../concepts.md#emission-control) | 2 Early Warning/Surveillance | 1 Search | 3 GHz, 200 MHz wide, 90 dBm ERP, PRF 1 kHz, pulse width 1 µs, azimuth sweep ±180°, elevation ±15° |
 | A radar sensor with a sector field of view | The same | 4 Fire Control | 4 Tracking | 9.5 GHz, 500 MHz wide, 80 dBm ERP, PRF 3 kHz, pulse width 0.5 µs, azimuth sweep ± half the field of view, elevation up to ±30° |
-| A jammer (`jammer` in the catalog) | Switched on, not firepower-killed or mounted | 42 Jammer | 12 Jamming | Radio jammer: 59 MHz, 58 MHz wide (30–88 MHz), 63 dBm. Radar jammer: 10 GHz, 4 GHz wide (8–12 GHz), 70 dBm. Sweep ±180° |
+| A jammer (`jammer` in the catalog) | Switched on, not firepower-killed or mounted | 42 Jammer | 12 Jamming | One beam per band jammed. Radio: 59 MHz, 58 MHz wide (30–88 MHz), 63 dBm. Radar: 10 GHz, 4 GHz wide (8–12 GHz), 70 dBm. Drone datalinks: 4.1 GHz, 3.6 GHz wide (the 2.4 and 5.8 GHz control bands), 50 dBm. GNSS: 1.4 GHz, 400 MHz wide (L1/L2), 50 dBm. Sweep ±180° |
 
 - Emitters are numbered from 1 on each entity and are located at sensor height above
   the entity origin.
@@ -238,7 +238,7 @@ systems but no beams, when it stops: switched off, destroyed, mounted or deleted
 
   | Catalog type | Emitter name |
   | --- | --- |
-  | F-16C | 1890 AN/APG-68 |
+  | F-16C, F-16CJ | 1890 AN/APG-68 |
   | Su-27 | 21881 N001V |
   | DDG-51 | 7260 AN/SPY-1D |
   | SA-8 | 19260 Land Roll (target acquisition) |

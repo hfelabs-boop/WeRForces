@@ -87,6 +87,30 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | `us-ddg51` | DDG-51 Arleigh Burke — US guided-missile destroyer | 54 / 32 km/h | ship | 1000 | RIM-66 SM-2 SAM<br>127mm Mk 45 naval gun | Naval surface/air radar<br>Binoculars | 1.3.225.4.1.0.0 |
 | `us-patrol-boat` | Mk VI Patrol Boat — US patrol boat | 83 / 50 km/h | ship | 30 | 12.7mm heavy machine gun (burst) | Binoculars | 1.3.225.61.1.0.0 |
 
+## Electronic warfare and protection
+
+Jammers, ground control stations, active protection, flares and chaff, and satellite navigation (see [Concepts](../concepts.md#electronic-warfare)).
+
+| Id | Name | Jams (reach) | Protection | Navigation and control |
+| --- | --- | --- | --- | --- |
+| `ru-r330zh` | R-330Zh Zhitel jammer | radios (15 km) | — | — |
+| `ru-krasukha` | 1L269 Krasukha-2 radar jammer | radars (25 km) | — | — |
+| `us-mfew` | M1133 Stryker EW (MFEW) | radios (10 km) | — | — |
+| `us-m1a2-sepv3` | M1A2 SEPv3 Abrams (Trophy) | — | Trophy: 8 charges, 0.9 | — |
+| `ru-t72b3-arena` | T-72B3 with Arena-M | — | Arena-M: 22 charges, 0.75, 270° arc | — |
+| `us-ah64e` | AH-64E Apache Guardian (flares, chaff) | — | flares/chaff: 12 salvos, pk × 0.35 | — |
+| `ru-mi24p` | Mi-24P Hind (flares) | — | flares/chaff: 16 salvos, pk × 0.4 | — |
+| `us-f16cj` | F-16CJ Wild Weasel (HARM) | — | flares/chaff: 10 salvos, pk × 0.4 | — |
+| `ru-su34` | Su-34 Fullback (Kh-31P) | — | flares/chaff: 10 salvos, pk × 0.4 | — |
+| `us-lmadis` | L-MADIS counter-drone (JLTV) | datalinks, GNSS (3 km) | — | — |
+| `ru-silok` | Silok counter-drone jammer | datalinks, GNSS (4 km) | — | — |
+| `ru-shipovnik` | Shipovnik-Aero counter-drone EW (spoofing) | datalinks, GNSS (spoofing) (10 km) | — | — |
+| `ru-pole21` | Pole-21 GNSS jammer | GNSS (25 km) | — | — |
+| `us-dronebuster-team` | Infantry with DroneBuster (handheld C-UAS) | datalinks, GNSS (1 km) | — | — |
+| `ru-stupor-team` | Infantry with Stupor anti-drone rifle | datalinks, GNSS (1.5 km) | — | — |
+| `us-uas-gcs` | US UAS ground control station | — | — | ground control station (50 km) |
+| `ru-uas-gcs` | RU UAS ground control station | — | — | ground control station (50 km) |
+
 ## Weapons
 
 Pk is the probability of a catastrophic kill per shot at short range against each armour class, before range, motion, concealment and armour modifiers (see [Concepts](../concepts.md#combat-and-damage)). Penetration (mm RHA equivalent) is set against the protection of the face hit; spread (mrad) and range-estimate error turn on the ballistic model for unguided rounds.
@@ -120,16 +144,16 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `how-152mm` | 152mm 2A64 howitzer (OF-45 HE) | 2000–24700 m | 320 m/s | 12 s | 50 | no | ground, lifeform, surface | armored 0.28, light 0.6, soft 0.85, lifeform 0.75, ship 0.1 | 110 mm | — |
 | `mortar-81mm` | 81mm M252 mortar (M821 HE) | 80–5600 m | 200 m/s | 5 s | 30 | no | ground, lifeform | armored 0.02, light 0.2, soft 0.65, lifeform 0.7 | 25 mm | — |
 | `mortar-120mm` | 120mm 2B11 mortar (OF-843 HE) | 480–7100 m | 220 m/s | 6 s | 24 | no | ground, lifeform | armored 0.06, light 0.35, soft 0.75, lifeform 0.75 | 45 mm | — |
-| `agm88` | AGM-88 HARM anti-radiation missile | 2000–110000 m | 680 m/s | 10 s | 2 | yes | ground, surface | soft 0.9, light 0.8, armored 0.3, ship 0.3 | — | — |
-| `kh31p` | Kh-31P anti-radiation missile | 3000–110000 m | 1000 m/s | 10 s | 2 | yes | ground, surface | soft 0.9, light 0.8, armored 0.3, ship 0.3 | — | — |
+| `agm88` | AGM-88 HARM anti-radiation missile | 2000–110000 m | 680 m/s | 10 s | 2 | yes (anti-radiation) | ground, surface | soft 0.9, light 0.8, armored 0.3, ship 0.3 | — | — |
+| `kh31p` | Kh-31P anti-radiation missile | 3000–110000 m | 1000 m/s | 10 s | 2 | yes (anti-radiation) | ground, surface | soft 0.9, light 0.8, armored 0.3, ship 0.3 | — | — |
 | `gun-30mm-xm914` | 30mm XM914 (proximity airburst) | 0–3000 m | 1080 m/s | 2 s | 60 | no | air, ground, lifeform | drone 0.45, air 0.3, light 0.3, soft 0.6, lifeform 0.45 | 40 mm | — |
 | `gun-30mm-2a38` | 30mm 2A38M twin anti-aircraft guns (burst) | 0–4000 m | 960 m/s | 2 s | 50 | no | air, ground, lifeform | drone 0.4, air 0.4, light 0.3, soft 0.6, lifeform 0.45 | 35 mm | — |
 | `sam-9m311` | 9M311 SAM (Tunguska) | 2500–8000 m | 900 m/s | 8 s | 8 | yes | air | air 0.65, drone 0.5 | — | — |
 | `coyote` | Coyote Block 2 interceptor | 200–10000 m | 150 m/s | 6 s | 12 | yes | air | drone 0.85, air 0.5 | — | — |
 | `interceptor-drone` | FPV interceptor drone | 50–3000 m | 60 m/s | 30 s | 4 | yes | air | drone 0.6, air 0.2 | — | — |
-| `how-155mm-excalibur` | 155mm M982 Excalibur (GPS-guided) | 3000–38000 m | 300 m/s | 20 s | 12 | no | ground, lifeform, surface | armored 0.3, light 0.65, soft 0.85, lifeform 0.75, ship 0.1 | 120 mm | — |
-| `gmlrs` | M31 GMLRS unitary rocket (GPS-guided) | 15000–70000 m | 900 m/s | 10 s | 6 | no | ground, lifeform, surface | armored 0.45, light 0.8, soft 0.9, lifeform 0.85, ship 0.2 | 150 mm | — |
-| `rocket-9m544` | 9M544 300mm rocket (GLONASS-corrected) | 20000–120000 m | 1000 m/s | 4 s | 12 | no | ground, lifeform, surface | armored 0.4, light 0.8, soft 0.9, lifeform 0.85, ship 0.2 | 120 mm | — |
+| `how-155mm-excalibur` | 155mm M982 Excalibur (GPS-guided) | 3000–38000 m | 300 m/s | 20 s | 12 | no (GNSS) | ground, lifeform, surface | armored 0.3, light 0.65, soft 0.85, lifeform 0.75, ship 0.1 | 120 mm | — |
+| `gmlrs` | M31 GMLRS unitary rocket (GPS-guided) | 15000–70000 m | 900 m/s | 10 s | 6 | no (GNSS) | ground, lifeform, surface | armored 0.45, light 0.8, soft 0.9, lifeform 0.85, ship 0.2 | 150 mm | — |
+| `rocket-9m544` | 9M544 300mm rocket (GLONASS-corrected) | 20000–120000 m | 1000 m/s | 4 s | 12 | no (GNSS) | ground, lifeform, surface | armored 0.4, light 0.8, soft 0.9, lifeform 0.85, ship 0.2 | 120 mm | — |
 
 ## Sensors
 
@@ -147,8 +171,8 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `naval-radar` | Naval surface/air radar | 80000 m (60000 m against 1 m²) | 360° | air, surface | yes |
 | `cuas-radar` | Counter-drone radar (RPS-42 class) | 10000 m (3500 m against 0.01 m²) | 360° | air | yes |
 | `spaag-radar` | SPAAG search/track radar | 18000 m (4000 m against 0.01 m²) | 360° | air | yes |
-| `df-ground` | SIGINT direction finder (radio, datalink, radar, jammer) | 30000 m | 360° |  | no |
-| `arm-elint` | ARM targeting receiver (radar and jammer bands) | 120000 m | 360° |  | no |
+| `df-ground` | SIGINT direction finder (radio, datalink, radar, jammer) | 30000 m | 360° | emitters: radar, jammer, radio, datalink (bearing ±1.5°) | no |
+| `arm-elint` | ARM targeting receiver (radar and jammer bands) | 120000 m | 360° | emitters: radar, jammer (bearing ±1°) | no |
 
 ## Unit templates
 

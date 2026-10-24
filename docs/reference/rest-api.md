@@ -69,7 +69,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | --- | --- | --- |
 | GET | `/entities` | `?force=1\|blue&domain=air&unit=U1&alive=true&remote=false` |
 | POST | `/entities` | `{"typeId", "force", "position", "heading"?, "name"?, "altitude"?}` |
-| GET / PATCH / DELETE | `/entities/{id}` | PATCH: `{"name"?, "roe"?, "reactions"?, "position"?, "heading"?, "jamming"?}` (`jamming`: switch a jammer on or off) |
+| GET / PATCH / DELETE | `/entities/{id}` | PATCH: `{"name"?, "roe"?, "reactions"?, "position"?, "heading"?, "jamming"?, "emcon"?}` (`jamming`: switch a jammer on or off; `emcon`: [emission control](#emission-control-and-direction-finding)) |
 | POST | `/entities/{id}/task` | a [task](#tasks) |
 | POST | `/entities/{id}/plan` | a [plan](#plans) |
 | POST | `/entities/{id}/stop` | |
@@ -80,7 +80,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | POST | `/entities/{id}/drive` | direct control: `{"throttle"?: 0..1, "turn"?: -1..1, "targetId"?: "E12" or null}`. The first call replaces its task and plan with a `manual` task; a turn is let go after 1.5 s without another call; any other order ends it. Returns the entity |
 | GET | `/units` | `?force=` |
 | POST | `/units` | `{"templateId", "force", "position", "heading"?, "name"?}` or `{"entityIds": [...], "name"?, "formation"?}` |
-| GET / PATCH / DELETE | `/units/{id}` | PATCH: `{"name"?, "formation"?, "roe"?, "reactions"?, "superiorId"?}` (`superiorId`: put under another unit, `null` for none). DELETE removes the members too; its subordinates become independent |
+| GET / PATCH / DELETE | `/units/{id}` | PATCH: `{"name"?, "formation"?, "roe"?, "reactions"?, "superiorId"?, "emcon"?}` (`superiorId`: put under another unit, `null` for none; `emcon`: for its members and subordinate units). DELETE removes the members too; its subordinates become independent |
 | POST | `/units/{id}/task` · `/plan` · `/stop` · `/embark` · `/disembark` | as for entities. A unit embarking into a carrier unit shares out the seats |
 | POST | `/units/{id}/aggregate` · `/units/{id}/disaggregate` | Simulate the unit and the units under it as aggregates ([aggregate level](../concepts.md#aggregate-level)), or split them back into their entities. 400 with the reason when it cannot be done (aircraft, mounted or immobilised members, a task an aggregate cannot do, already aggregated). Returns the unit |
 | GET / POST | `/graphics` | POST `{"kind": "route\|area\|phaseLine\|point\|minefield\|obstacle", "points": [...], "name"?, "force"?, "density"?}` (`density`: minefields, strikes per 100 m) |
@@ -90,8 +90,14 @@ Entity and unit responses carry `travel` while moving along a planned path:
 `{"remaining": 1378, "eta": 252.4, "etaLocal": "10:04"}` (metres left, the
 simulation time and local time of arrival), or `{"remaining": ..., "stalled":
 "out of fuel"}` ([travel estimates](../concepts.md#travel-estimates)). Jammers
-carry `jamming` (on or off), and entities whose radio or radar is jammed
-`jammed: ["radio"]`. Background civilians carry `ambient: true`.
+carry `jamming` (on or off), and entities that enemy jamming denies something
+`jammed` (`radio`, `radar`, `datalink`, `gnss`). Entities also carry, when
+they apply: `emcon` (`{"radioSilence": true, "radarOff": true}`), `emitting`
+(what it radiates now: `radar`, `jammer`, `radio`, `datalink`), `aps`
+(`{"left": 6, "charges": 8}`, active protection), `decoys` (`{"left": 10,
+"salvos": 12}`, flare and chaff salvos), and while satellite navigation is
+lost `gnss` (`denied`, or `spoofed` for exercise control only) with `navError`
+(m). Background civilians carry `ambient: true`.
 
 An aggregated unit carries `aggregate`: `alive` and `total` members,
 `strength` per entity type (`alive`, `effective`: less losses still being
@@ -102,6 +108,26 @@ not in `/entities` and not in the unit's `members`; wrecks are. For players,
 enemy aggregates their force has seen are listed by `/units` as contacts
 (`enemy platoon (U6)`, with `contactAge`), with the types and numbers seen and
 nothing else.
+
+### Emission control and direction finding
+
+| Method | Path | Body / query |
+| --- | --- | --- |
+| PATCH | `/entities/{id}` · `/units/{id}` | `{"emcon": {"radioSilence"?: true, "radarOff"?: true, "jamming"?: false}}`: settings left out stay as they are; on a unit they apply to its members and subordinate units. Players: their own force |
+| GET | `/df-contacts` | Enemy emitters located by direction finding: the caller's force's (exercise control: every force's, or `?force=`) |
+
+```json
+{"id":"E4","force":1,"bands":["radar"],"x":9032.5,"y":12418.2,"lat":50.86,"lon":10.03,
+ "major":412.6,"minor":131.9,"orientation":0.48,"orientationDeg":28,"stations":2,"lastSeen":42,"age":0.4}
+```
+
+`id` is the emitter, `force` the force that located it. `major` and `minor` are
+the semi-axes (m) of the uncertainty ellipse (about 86 % likely to hold the
+emitter), `orientation` the bearing of its major axis. One station gives a long
+ellipse along its bearing (`stations: 1`); two or more cross their bearings.
+Fire on one with a fire mission at `x`, `y` (radius about `major / 2`). See
+[Concepts](../concepts.md#direction-finding). The full state (`/simulation`
+over WebSocket) carries them as `dfContacts`.
 
 ### Tasks
 
@@ -242,7 +268,8 @@ phase it could not understand. Up to 20 phases of 100 orders. See
 ```
 
 `kind` is `taskFailed`, `idle`, `broken`, `outOfFuel`, `lowFuel`, `outOfAmmo`,
-`leaderLost`, `losses`, `underFire`, `contact` or `jammed`; `severity` is
+`leaderLost`, `losses`, `underFire`, `contact`, `jammed`, `gnssDenied` or
+`apsSpent`; `severity` is
 `critical`, `warning` or `info`; `count` is how many times it was raised while
 open. See [Concepts](../concepts.md#explanations-and-alerts).
 
