@@ -6,6 +6,7 @@
 import type { ArmorClass, MoraleState, Vec2 } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
+import type { Terrain } from './terrain.js';
 import type { Unit } from './units.js';
 
 /** Seconds for suppression to halve once the fire stops. */
@@ -44,9 +45,11 @@ export function isPinned(engine: Engine, e: Entity): boolean {
 }
 
 /** Multiplier on the chance of hitting a target: pinned infantry are lying flat. */
-export function exposureFactor(e: Entity): number {
+export function exposureFactor(e: Entity, terrain?: Terrain): number {
   const prepared = e.prepared === 'dugIn' ? 0.4 : e.prepared === 'hullDown' ? 0.6 : 1;
-  return (e.pinned ? 0.5 : 1) * prepared;
+  // Troops in buildings have cover.
+  const buildings = terrain && e.domain === 'lifeform' && !e.prepared && terrain.isBuiltUp(e.x, e.y) ? 0.6 : 1;
+  return (e.pinned ? 0.5 : 1) * prepared * buildings;
 }
 
 function moraleOf(e: Entity): MoraleState {

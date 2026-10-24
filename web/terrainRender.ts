@@ -1,6 +1,15 @@
 // Rasterises the terrain grid into a shaded relief image with water, forest and contours.
 
-import type { TerrainGrid } from '../src/shared/terrainGrid.js';
+import { LAND_COVER, type TerrainGrid } from '../src/shared/terrainGrid.js';
+
+/** Land cover tints (blended over the relief tint), by class. */
+const COVER_TINT: Partial<Record<number, [[number, number, number], number]>> = {
+  [LAND_COVER.shrub]: [[128, 140, 80], 0.35],
+  [LAND_COVER.builtUp]: [[176, 168, 160], 0.6],
+  [LAND_COVER.wetland]: [[110, 160, 150], 0.45],
+  [LAND_COVER.bare]: [[210, 196, 170], 0.4],
+  [LAND_COVER.snow]: [[245, 248, 252], 0.8],
+};
 
 const TINTS: [number, [number, number, number]][] = [
   [0, [164, 190, 128]],
@@ -81,6 +90,13 @@ export function renderTerrain(grid: TerrainGrid, pxPerPost = 3, contourInterval 
       const len = Math.hypot(dx, dy, 1);
       const shade = Math.max(0, (-dx * lx - dy * ly + lz) / len);
       let [r, g, b] = tintOf(h);
+      const cover = grid.landCover ? COVER_TINT[grid.coverAt(x, y)] : undefined;
+      if (cover) {
+        const [[cr, cg, cb], a] = cover;
+        r = r * (1 - a) + cr * a;
+        g = g * (1 - a) + cg * a;
+        b = b * (1 - a) + cb * a;
+      }
       if (grid.isForest(x, y)) {
         r = r * 0.45 + 50 * 0.55;
         g = g * 0.45 + 110 * 0.55;

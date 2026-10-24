@@ -4,6 +4,7 @@
 import { angleDiff, bearing, clamp } from '../shared/math.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
+import { LAND_COVER } from '../shared/terrainGrid.js';
 import { sensorRange } from './environment.js';
 import { spotFactor } from './morale.js';
 
@@ -18,6 +19,8 @@ export function detectionProbability(engine: Engine, observer: Entity, target: E
   if (!radar) {
     const groundTarget = target.domain === 'ground' || target.domain === 'lifeform';
     if (groundTarget && engine.terrain.isForest(target.x, target.y)) p *= 0.35;
+    else if (groundTarget && engine.terrain.isBuiltUp(target.x, target.y)) p *= 0.6;
+    else if (target.domain === 'lifeform' && engine.terrain.coverAt(target.x, target.y) === LAND_COVER.shrub) p *= 0.7;
     if (target.domain === 'lifeform') p *= 0.6;
   }
   if (target.speed > 1) p *= 1.3;

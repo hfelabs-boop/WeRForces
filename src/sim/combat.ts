@@ -47,7 +47,7 @@ export function effectivePk(engine: Engine, shooter: Entity | undefined, target:
   }
   if ((target.domain === 'ground' || target.domain === 'lifeform') && engine.terrain.isForest(target.x, target.y)) pk *= 0.75;
   if (shooter) pk *= accuracyFactor(engine, shooter);
-  pk *= exposureFactor(target);
+  pk *= exposureFactor(target, engine.terrain);
   return pk;
 }
 

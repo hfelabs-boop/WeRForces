@@ -406,6 +406,55 @@ export class View3D {
     water.position.y = 0.2;
     this.waterMesh = water;
     this.scene.add(water);
+    this.buildBuildings();
+  }
+
+  private buildingsMesh: THREE.Mesh | null = null;
+
+  /** All building footprints extruded into one mesh, standing on the ground. */
+  private buildBuildings(): void {
+    if (this.buildingsMesh) {
+      this.scene.remove(this.buildingsMesh);
+      this.buildingsMesh.geometry.dispose();
+      this.buildingsMesh = null;
+    }
+    const list = this.data?.buildings ?? [];
+    if (!list.length || !this.grid) return;
+    const pos: number[] = [];
+    const k = this.exaggeration;
+    for (const b of list.slice(0, 100000)) {
+      const n = b.pts.length / 2;
+      if (n < 3) continue;
+      const ring: THREE.Vector2[] = [];
+      let lowest = Infinity;
+      for (let i = 0; i < n; i++) {
+        ring.push(new THREE.Vector2(b.pts[2 * i], b.pts[2 * i + 1]));
+        lowest = Math.min(lowest, this.grid.surfaceHeight(b.pts[2 * i], b.pts[2 * i + 1]));
+      }
+      if (THREE.ShapeUtils.isClockWise(ring)) ring.reverse();
+      const base = lowest * k;
+      const top = (lowest + b.h) * k;
+      const half = this.data!.spec.size / 2;
+      const sx = (p: THREE.Vector2) => p.x - half;
+      const sz = (p: THREE.Vector2) => -(p.y - half);
+      // Walls.
+      for (let i = 0; i < n; i++) {
+        const a = ring[i];
+        const c = ring[(i + 1) % n];
+        pos.push(sx(a), base, sz(a), sx(c), base, sz(c), sx(c), top, sz(c));
+        pos.push(sx(a), base, sz(a), sx(c), top, sz(c), sx(a), top, sz(a));
+      }
+      // Roof.
+      for (const [i, j, l] of THREE.ShapeUtils.triangulateShape(ring, [])) {
+        for (const p of [ring[i], ring[j], ring[l]]) pos.push(sx(p), top, sz(p));
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    this.buildingsMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xb8aea4, roughness: 0.9, metalness: 0, side: THREE.DoubleSide }));
+    this.buildingsMesh.name = 'buildings';
+    this.scene.add(this.buildingsMesh);
   }
 
   // ------------------------------------------------------------ graphics

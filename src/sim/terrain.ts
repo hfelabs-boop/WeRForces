@@ -2,8 +2,8 @@
 // plus mobility, line-of-sight and route planning queries used by the engine.
 
 import { dist2d } from '../shared/math.js';
-import { base64ToBytes, bytesToBase64, decodeHeights, TerrainGrid } from '../shared/terrainGrid.js';
-import type { Domain, TerrainData, TerrainSpec, Town, Vec2, Vec3 } from '../shared/types.js';
+import { base64ToBytes, bytesToBase64, decodeHeights, LAND_COVER, TerrainGrid } from '../shared/terrainGrid.js';
+import type { Building, Domain, TerrainData, TerrainSpec, Town, Vec2, Vec3 } from '../shared/types.js';
 import { gridAStar, simplifyPolyline } from './pathfinding.js';
 import { Rng } from './rng.js';
 
@@ -21,6 +21,24 @@ export const DEFAULT_TERRAIN: TerrainSpec = {
 const CANOPY_HEIGHT = 15;
 /** Metres of forest a sight line can pass through before it is blocked. */
 const FOREST_SEE_THROUGH = 150;
+/** Metres of built-up area a sight line can pass through (streets, gaps) before buildings block it. */
+const URBAN_SEE_THROUGH = 25;
+/** A post counts as built-up when buildings cover at least this fraction of its cell. */
+export const URBAN_COVERAGE = 0.25;
+
+/** Off-road speed factors by land cover class: [vehicles, on foot]. */
+const COVER_MOBILITY: Record<number, [number, number]> = {
+  [LAND_COVER.shrub]: [0.8, 0.85],
+  [LAND_COVER.builtUp]: [0.7, 0.9],
+  [LAND_COVER.wetland]: [0.35, 0.6],
+  [LAND_COVER.bare]: [1, 1],
+  [LAND_COVER.snow]: [0.6, 0.5],
+};
+
+export interface TerrainLayers {
+  landCover?: Uint8Array | null;
+  buildings?: Building[];
+}
 /** Line-of-sight samples checked against the coarse obstacle grid at a time. */
 const LOS_CHUNK = 8;
 /** Posts per side of a coarse obstacle-height block. */
@@ -89,12 +107,88 @@ export class Terrain extends TerrainGrid {
   /** A* node costs per domain and off-road factor, computed on first use. */
   private readonly costGrids = new Map<string, Float32Array>();
 
-  constructor(spec: TerrainSpec, heights: Float32Array, forest: Uint8Array, roads: Vec2[][], towns: Town[], water: Uint8Array | null = null) {
-    super(spec, heights, forest, water);
+  readonly buildings: Building[];
+  /** Per post: fraction (0-100) of the cell covered by buildings, and their mean height in metres. */
+  private readonly urbanCover: Uint8Array | null;
+  private readonly urbanHeight: Uint8Array | null;
+
+  constructor(spec: TerrainSpec, heights: Float32Array, forest: Uint8Array, roads: Vec2[][], towns: Town[], water: Uint8Array | null = null, layers: TerrainLayers = {}) {
+    super(spec, heights, forest, water, layers.landCover ?? null);
     this.roads = roads;
     this.towns = towns;
+    this.buildings = layers.buildings ?? [];
     this.roadMask = new Uint8Array(heights.length);
     for (const road of roads) this.rasterizeRoad(road);
+    if (this.buildings.length) {
+      this.urbanCover = new Uint8Array(heights.length);
+      this.urbanHeight = new Uint8Array(heights.length);
+      this.rasterizeBuildings();
+    } else {
+      this.urbanCover = null;
+      this.urbanHeight = null;
+    }
+  }
+
+  /** Building cover per post: the share of each cell inside footprints (4x4 samples), and their height. */
+  private rasterizeBuildings(): void {
+    const cs = this.spec.cellSize;
+    const cols = this.cols;
+    const hits = new Uint16Array(this.heights.length);
+    const hsum = new Float32Array(this.heights.length);
+    const S = 4;
+    for (const b of this.buildings) {
+      const n = b.pts.length / 2;
+      if (n < 3) continue;
+      let x0 = Infinity;
+      let x1 = -Infinity;
+      let y0 = Infinity;
+      let y1 = -Infinity;
+      for (let i = 0; i < n; i++) {
+        x0 = Math.min(x0, b.pts[2 * i]);
+        x1 = Math.max(x1, b.pts[2 * i]);
+        y0 = Math.min(y0, b.pts[2 * i + 1]);
+        y1 = Math.max(y1, b.pts[2 * i + 1]);
+      }
+      const c0 = Math.max(0, Math.round(x0 / cs - 0.5));
+      const c1 = Math.min(cols - 1, Math.round(x1 / cs + 0.5));
+      const r0 = Math.max(0, Math.round(y0 / cs - 0.5));
+      const r1 = Math.min(this.rows - 1, Math.round(y1 / cs + 0.5));
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          let k = 0;
+          for (let sy = 0; sy < S; sy++) {
+            for (let sx = 0; sx < S; sx++) {
+              const px = (c - 0.5 + (sx + 0.5) / S) * cs;
+              const py = (r - 0.5 + (sy + 0.5) / S) * cs;
+              if (px < x0 || px > x1 || py < y0 || py > y1) continue;
+              if (insideFlat(px, py, b.pts)) k++;
+            }
+          }
+          if (!k) continue;
+          const i = r * cols + c;
+          hits[i] += k;
+          hsum[i] += k * b.h;
+        }
+      }
+    }
+    for (let i = 0; i < hits.length; i++) {
+      if (!hits[i]) continue;
+      this.urbanCover![i] = Math.min(100, Math.round((hits[i] / (S * S)) * 100));
+      this.urbanHeight![i] = Math.min(255, Math.round(hsum[i] / hits[i]));
+    }
+  }
+
+  /** Building cover at a point: fraction of the area (0-1) and mean height (m). */
+  urbanAt(x: number, y: number): { cover: number; height: number } {
+    if (!this.urbanCover) return { cover: 0, height: 0 };
+    const i = this.nearestPost(x, y);
+    return { cover: this.urbanCover[i] / 100, height: this.urbanHeight![i] };
+  }
+
+  /** True where buildings (or built-up land cover) give cover and concealment. */
+  isBuiltUp(x: number, y: number): boolean {
+    if (this.urbanCover && this.urbanCover[this.nearestPost(x, y)] >= URBAN_COVERAGE * 100) return true;
+    return this.coverAt(x, y) === LAND_COVER.builtUp;
   }
 
   static generate(partial: Partial<TerrainSpec> = {}): Terrain {
@@ -151,6 +245,8 @@ export class Terrain extends TerrainGrid {
       heightScale: scale === 0.1 ? undefined : scale,
       forestB64: this.encodeForest(),
       waterB64: this.water ? bytesToBase64(this.water) : undefined,
+      landCoverB64: this.landCover ? bytesToBase64(this.landCover) : undefined,
+      buildings: this.buildings.length ? this.buildings : undefined,
       roads: this.roads,
       towns: this.towns,
     };
@@ -161,7 +257,10 @@ export class Terrain extends TerrainGrid {
     const spec = data.spec;
     const cols = Math.round(spec.size / spec.cellSize) + 1;
     if (data.cols !== cols || data.rows !== cols) throw new Error('terrain dataset grid does not match its size and cell size');
-    return new Terrain(spec, decodeHeights(data), base64ToBytes(data.forestB64), data.roads ?? [], data.towns ?? [], data.waterB64 ? base64ToBytes(data.waterB64) : null);
+    return new Terrain(spec, decodeHeights(data), base64ToBytes(data.forestB64), data.roads ?? [], data.towns ?? [], data.waterB64 ? base64ToBytes(data.waterB64) : null, {
+      landCover: data.landCoverB64 ? base64ToBytes(data.landCoverB64) : null,
+      buildings: data.buildings ?? [],
+    });
   }
 
   // ------------------------------------------------------------ generation helpers
@@ -289,15 +388,23 @@ export class Terrain extends TerrainGrid {
     if (water) return 0;
     const s = this.slope(x, y);
     const road = this.isRoad(x, y);
+    const cover = this.landCover && !road ? COVER_MOBILITY[this.coverAt(x, y)] : undefined;
+    const urban = this.urbanCover && !road ? this.urbanCover[this.nearestPost(x, y)] / 100 : 0;
     if (domain === 'lifeform') {
       if (s > 1.0) return 0;
       let f = road ? 1 : offroadFactor;
       if (this.isForest(x, y)) f *= 0.75;
+      if (cover) f *= cover[1];
+      if (urban >= URBAN_COVERAGE) f *= 0.8;
       return f * Math.max(0.3, 1 - s * 0.8);
     }
     if (s > 0.6 && !road) return 0;
+    // Vehicles cannot drive through solid blocks of buildings.
+    if (urban >= 0.5) return 0;
     let f = road ? 1 : offroadFactor;
     if (!road && this.isForest(x, y)) f *= 0.45;
+    if (cover) f *= cover[0];
+    if (urban >= URBAN_COVERAGE) f *= 0.4;
     return f * Math.max(0.2, 1 - s * 1.4);
   }
 
@@ -313,6 +420,7 @@ export class Terrain extends TerrainGrid {
     const n = Math.ceil(d / (this.spec.cellSize / 2));
     const stepLen = d / n;
     let underCanopy = 0;
+    let amongBuildings = 0;
     const tops = this.obstacleTops();
     const cs = this.spec.cellSize;
     const cols = this.cols;
@@ -347,6 +455,13 @@ export class Terrain extends TerrainGrid {
         underCanopy += stepLen;
         if (underCanopy > FOREST_SEE_THROUGH) return false;
       }
+      if (this.urbanCover) {
+        const p = this.nearestPost(x, y);
+        if (this.urbanCover[p] >= URBAN_COVERAGE * 100 && ground + this.urbanHeight![p] > z) {
+          amongBuildings += stepLen;
+          if (amongBuildings > URBAN_SEE_THROUGH) return false;
+        }
+      }
     }
     return true;
   }
@@ -359,7 +474,8 @@ export class Terrain extends TerrainGrid {
     for (let r = 0; r < this.rows; r++) {
       for (let c = 0; c < this.cols; c++) {
         const i = r * this.cols + c;
-        const top = Math.max(0, this.heights[i]) + (this.forest[i] ? CANOPY_HEIGHT : 0);
+        const urban = this.urbanCover && this.urbanCover[i] >= URBAN_COVERAGE * 100 ? this.urbanHeight![i] : 0;
+        const top = Math.max(0, this.heights[i]) + Math.max(this.forest[i] ? CANOPY_HEIGHT : 0, urban);
         // A post on a block edge belongs to the blocks on both sides.
         for (const br of r % LOS_BLOCK === 0 && r > 0 ? [r / LOS_BLOCK - 1, r / LOS_BLOCK] : [Math.floor(r / LOS_BLOCK)]) {
           for (const bcol of c % LOS_BLOCK === 0 && c > 0 ? [c / LOS_BLOCK - 1, c / LOS_BLOCK] : [Math.floor(c / LOS_BLOCK)]) {
@@ -511,4 +627,18 @@ export class Terrain extends TerrainGrid {
     }
     return out;
   }
+}
+
+/** Point-in-polygon for a flat x,y coordinate array. */
+function insideFlat(x: number, y: number, pts: number[]): boolean {
+  let inside = false;
+  const n = pts.length / 2;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = pts[2 * i];
+    const yi = pts[2 * i + 1];
+    const xj = pts[2 * j];
+    const yj = pts[2 * j + 1];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }

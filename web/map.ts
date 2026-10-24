@@ -1,6 +1,6 @@
 // 2D tactical map: terrain, tactical graphics, entities/units, effects and editing tools.
 
-import { FORCE_NAMES, type EntitySnapshot, type Graphic, type GraphicKind, type SimEvent, type SimState, type TerrainData, type UnitSnapshot, type Vec2 } from '../src/shared/types.js';
+import { FORCE_NAMES, type Building, type EntitySnapshot, type Graphic, type GraphicKind, type SimEvent, type SimState, type TerrainData, type UnitSnapshot, type Vec2 } from '../src/shared/types.js';
 import { TerrainGrid } from '../src/shared/terrainGrid.js';
 import { drawSymbol, FORCE_COLORS } from './symbols.js';
 import { renderTerrain } from './terrainRender.js';
@@ -94,7 +94,38 @@ export class MapView {
     this.terrain = data;
     this.grid = TerrainGrid.fromData(data);
     this.terrainImage = renderTerrain(this.grid);
+    this.buildingBuckets = bucketBuildings(data.buildings ?? []);
     this.fit();
+  }
+
+  /** Buildings grouped into square buckets, for drawing only those in view. */
+  private buildingBuckets = new Map<string, Building[]>();
+
+  private drawBuildings(): void {
+    // Footprints are only legible when zoomed in.
+    if (!this.buildingBuckets.size || this.scale < 0.25) return;
+    const ctx = this.ctx;
+    const a = this.toWorld(0, this.height);
+    const b = this.toWorld(this.width, 0);
+    ctx.fillStyle = 'rgba(96,86,80,0.85)';
+    ctx.strokeStyle = 'rgba(40,34,30,0.9)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    // One bucket of margin: a building is filed under its first corner.
+    for (let by = Math.floor(a.y / BUCKET) - 1; by <= Math.floor(b.y / BUCKET) + 1; by++) {
+      for (let bx = Math.floor(a.x / BUCKET) - 1; bx <= Math.floor(b.x / BUCKET) + 1; bx++) {
+        for (const bld of this.buildingBuckets.get(`${bx},${by}`) ?? []) {
+          for (let i = 0; i < bld.pts.length; i += 2) {
+            const s = this.toScreen({ x: bld.pts[i], y: bld.pts[i + 1] });
+            if (i === 0) ctx.moveTo(s.x, s.y);
+            else ctx.lineTo(s.x, s.y);
+          }
+          ctx.closePath();
+        }
+      }
+    }
+    ctx.fill();
+    if (this.scale >= 0.8) ctx.stroke();
   }
 
   setState(state: SimState): void {
@@ -394,6 +425,7 @@ export class MapView {
     if (this.layers.grid) this.drawGrid(size);
     this.drawRoads();
     this.drawTowns();
+    this.drawBuildings();
     this.drawNight();
     this.drawSmoke();
     this.drawGraphics();
@@ -900,4 +932,17 @@ function laneMarker(ctx: CanvasRenderingContext2D, a: Vec2, b: Vec2, half: numbe
   ctx.lineTo(b.x - nx, b.y - ny);
   ctx.stroke();
   arrow(ctx, a, b);
+}
+
+const BUCKET = 250;
+
+function bucketBuildings(list: Building[]): Map<string, Building[]> {
+  const out = new Map<string, Building[]>();
+  for (const b of list) {
+    const key = `${Math.floor(b.pts[0] / BUCKET)},${Math.floor(b.pts[1] / BUCKET)}`;
+    const l = out.get(key);
+    if (l) l.push(b);
+    else out.set(key, [b]);
+  }
+  return out;
 }

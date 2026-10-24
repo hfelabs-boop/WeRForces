@@ -313,7 +313,7 @@ export interface TerrainDataset extends TerrainData {
   name: string;
   title?: string;
   /** Where the data came from, for attribution. */
-  source?: { dem?: string; features?: string; imported?: string; attribution?: string };
+  source?: { dem?: string; features?: string; landCover?: string; imported?: string; attribution?: string };
 }
 
 export interface Town {
@@ -333,8 +333,18 @@ export interface TerrainData {
   forestB64: string;
   /** 1 = inland water (lakes, rivers) per post; sea is wherever elevation is below 0. */
   waterB64?: string;
+  /** Land cover class per post (see LAND_COVER), e.g. from ESA WorldCover. */
+  landCoverB64?: string;
+  /** Building footprints, e.g. from OpenStreetMap. */
+  buildings?: Building[];
   roads: Vec2[][];
   towns: Town[];
+}
+
+/** A building: footprint as local x,y pairs in metres (x0, y0, x1, y1, ...) and height in metres. */
+export interface Building {
+  pts: number[];
+  h: number;
 }
 
 // ---------------------------------------------------------------- scenario file
