@@ -13,6 +13,8 @@ const FUNCTION: Record<SymbolKind, string> = {
   artillery: 'UCF---',
   engineer: 'UCE---',
   supply: 'USS---',
+  // Electronic warfare units are drawn as military intelligence.
+  ew: 'UUM---',
   rotary: 'MHA---',
   'fixed-wing': 'MFF---',
   uav: 'MFQ---',

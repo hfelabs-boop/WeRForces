@@ -1,6 +1,11 @@
 // Remote-control command dispatcher shared by the REST and WebSocket APIs.
 
-import type { Command, CommandResult, Condition, Environment, ForceId, Formation, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
+import type { Command, CommandResult, Condition, Environment, ForceId, Formation, Phase, PhaseOrder, PhaseTrigger, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
+import { FORCE_NAMES } from '../shared/types.js';
+import type { Engine } from '../sim/engine.js';
+import { MAX_AMBIENT } from '../sim/life.js';
+import { CATALOG_SECTIONS, VALIDATORS } from '../sim/catalogEdit.js';
+import { generateBattle, WizardError, type WizardOptions } from '../sim/wizard.js';
 import type { SimRunner } from './runner.js';
 
 const FORCES = new Set([0, 1, 2, 3]);
@@ -74,6 +79,8 @@ export function validateTask(v: unknown): TaskSpec {
       return { type: 'mount', carrierId: str(t.carrierId, 'carrierId') };
     case 'dismount':
       return { type: 'dismount' };
+    case 'manual':
+      return { type: 'manual' };
     case 'fireMission': {
       const rounds = t.rounds === undefined ? undefined : Math.floor(num(t.rounds, 'rounds'));
       if (rounds !== undefined && (rounds < 1 || rounds > 100)) throw new ValidationError('rounds must be between 1 and 100');
@@ -142,6 +149,15 @@ function validateCondition(v: unknown): Condition {
       if (fraction <= 0 || fraction > 1) throw new ValidationError('fraction must be in (0, 1]');
       return { type: c.type, fraction };
     }
+    case 'codeword':
+      return { type: 'codeword', codeword: codeword(c.codeword) };
+    case 'all':
+    case 'any': {
+      if (!Array.isArray(c.conditions) || c.conditions.length === 0 || c.conditions.length > 20) throw new ValidationError(`${c.type}: conditions must be a list of 1 to 20 conditions`);
+      return { type: c.type, conditions: c.conditions.map(validateCondition) };
+    }
+    case 'not':
+      return { type: 'not', condition: validateCondition(c.condition) };
     default:
       throw new ValidationError(`unknown condition ${String(c.type)}`);
   }
@@ -168,13 +184,31 @@ export function validateReactions(v: unknown): Reactions {
   return out;
 }
 
-export function validatePlan(v: unknown): Plan {
-  if (!v || typeof v !== 'object') throw new ValidationError('plan must be an object');
-  const p = v as Record<string, unknown>;
-  if (!Array.isArray(p.statements) || p.statements.length > 200) throw new ValidationError('plan.statements must be an array');
-  const statements: PlanStatement[] = p.statements.map((s: unknown) => {
+/** A codeword: letters, digits, spaces and -, upper-cased. */
+export function codeword(v: unknown): string {
+  const s = str(v, 'codeword').trim().toUpperCase();
+  if (!/^[A-Z0-9][A-Z0-9 _-]{0,39}$/.test(s)) throw new ValidationError('codeword: 1-40 letters, digits, spaces, - or _');
+  return s;
+}
+
+function validateStatements(v: unknown, what: string, depth: number, count: { n: number }): PlanStatement[] {
+  if (!Array.isArray(v)) throw new ValidationError(`${what} must be an array`);
+  if (depth > 8) throw new ValidationError('plan blocks are nested too deeply');
+  return v.map((s: unknown) => {
+    if (++count.n > 200) throw new ValidationError('a plan has at most 200 statements');
     const st = (s ?? {}) as Record<string, unknown>;
     switch (st.kind) {
+      case 'if':
+        return { kind: 'if', condition: validateCondition(st.condition), then: validateStatements(st.then, 'if.then', depth + 1, count), ...(st.else !== undefined ? { else: validateStatements(st.else, 'if.else', depth + 1, count) } : {}) };
+      case 'while':
+        return { kind: 'while', condition: validateCondition(st.condition), body: validateStatements(st.body, 'while.body', depth + 1, count) };
+      case 'sendCodeword':
+        return { kind: 'sendCodeword', codeword: codeword(st.codeword) };
+      case 'report': {
+        const text = str(st.text, 'text').trim();
+        if (!text || text.length > 200) throw new ValidationError('report text: 1-200 characters');
+        return { kind: 'report', text };
+      }
       case 'task':
         return { kind: 'task', task: validateTask(st.task) };
       case 'setRoe':
@@ -193,11 +227,67 @@ export function validatePlan(v: unknown): Plan {
         throw new ValidationError(`unknown plan statement ${String(st.kind)}`);
     }
   });
+}
+
+function validateTrigger(v: unknown): PhaseTrigger {
+  const t = (v ?? { type: 'manual' }) as Record<string, unknown>;
+  switch (t.type) {
+    case 'manual':
+      return { type: 'manual' };
+    case 'time':
+      return { type: 'time', time: num(t.time, 'time') };
+    case 'codeword':
+      return { type: 'codeword', codeword: codeword(t.codeword) };
+    case 'previousDone': {
+      const delay = t.delay === undefined ? undefined : num(t.delay, 'delay');
+      if (delay !== undefined && delay < 0) throw new ValidationError('delay must be 0 or more');
+      return delay ? { type: 'previousDone', delay } : { type: 'previousDone' };
+    }
+    case 'condition':
+      return { type: 'condition', ownerId: str(t.ownerId, 'ownerId'), condition: validateCondition(t.condition) };
+    default:
+      throw new ValidationError(`unknown phase trigger ${String(t.type)}`);
+  }
+}
+
+/** A force's synchronization matrix: up to 20 phases of up to 100 orders, each for an object of that force. */
+export function validatePhases(engine: Engine, f: ForceId, v: unknown): Phase[] {
+  if (!Array.isArray(v) || v.length > 20) throw new ValidationError('phases must be a list of at most 20 phases');
+  const ids = new Set<string>();
+  return v.map((raw: unknown, i) => {
+    const p = (raw ?? {}) as Record<string, unknown>;
+    const id = p.id === undefined ? `P${i + 1}` : str(p.id, 'phase id');
+    if (!/^[A-Za-z0-9_-]{1,24}$/.test(id) || ids.has(id)) throw new ValidationError(`phase id ${id} must be unique: letters, digits, - and _`);
+    ids.add(id);
+    const name = (p.name === undefined ? `Phase ${i + 1}` : str(p.name, 'phase name')).trim().slice(0, 60) || `Phase ${i + 1}`;
+    if (!Array.isArray(p.orders ?? []) || ((p.orders as unknown[]) ?? []).length > 100) throw new ValidationError('orders must be a list of at most 100');
+    const orders: PhaseOrder[] = ((p.orders as unknown[]) ?? []).map((ro) => {
+      const o = (ro ?? {}) as Record<string, unknown>;
+      const targetId = str(o.targetId, 'targetId');
+      const owner = engine.entities.get(targetId)?.force ?? engine.units.get(targetId)?.force;
+      if (owner === undefined) throw new ValidationError(`unknown object ${targetId}`);
+      if (owner !== f) throw new ValidationError(`${engine.nameOf(targetId)} is not ${FORCE_NAMES[f]}`);
+      const out: PhaseOrder = { targetId };
+      if (o.task !== undefined && o.task !== null) out.task = validateTask(o.task);
+      if (o.roe !== undefined && o.roe !== null) out.roe = roe(o.roe);
+      if (o.stop === true) out.stop = true;
+      if (typeof o.text === 'string') out.text = o.text.slice(0, 200);
+      if (!out.task && !out.roe && !out.stop) throw new ValidationError(`order for ${engine.nameOf(targetId)} has no task, roe or stop`);
+      return out;
+    });
+    return { id, name, trigger: validateTrigger(p.trigger), orders };
+  });
+}
+
+export function validatePlan(v: unknown): Plan {
+  if (!v || typeof v !== 'object') throw new ValidationError('plan must be an object');
+  const p = v as Record<string, unknown>;
+  const statements = validateStatements(p.statements, 'plan.statements', 0, { n: 0 });
   return { name: typeof p.name === 'string' ? p.name.slice(0, 80) : undefined, statements, loop: p.loop === true };
 }
 
 /** Commands that do not change the scenario, so are not undone. */
-const NOT_EDITS = new Set(['run', 'pause', 'step', 'setTimeScale', 'undo', 'redo']);
+const NOT_EDITS = new Set(['run', 'pause', 'step', 'setTimeScale', 'undo', 'redo', 'ackAlert', 'sendCodeword', 'drive']);
 
 export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
   const cmd = raw && typeof raw === 'object' ? (raw as { cmd?: unknown }).cmd : undefined;
@@ -241,6 +331,39 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         runner.setRunning(false);
         engine.newScenario(typeof c.name === 'string' ? c.name : 'Untitled', c.terrain ?? {});
         return;
+      case 'batch': {
+        const list = c.commands;
+        if (!Array.isArray(list) || list.length > 500) throw new ValidationError('commands must be a list of at most 500');
+        const backup = engine.toScenario();
+        for (const [i, sub] of list.entries()) {
+          const name = sub && typeof sub === 'object' ? (sub as { cmd?: unknown }).cmd : undefined;
+          if (name === 'batch' || name === 'undo' || name === 'redo') throw new ValidationError(`commands[${i}]: ${String(name)} cannot be batched`);
+          // Deleting a unit takes its members with it: a later delete of one of them is no error.
+          if (name === 'deleteObject') {
+            const id = String((sub as { id?: unknown }).id);
+            if (!engine.entities.has(id) && !engine.units.has(id) && !engine.graphics.has(id)) continue;
+          }
+          const r = runCommand(runner, sub);
+          if (!r.ok) {
+            // All or nothing: put back what the earlier commands did.
+            engine.loadScenario(backup);
+            throw new ValidationError(`commands[${i}]: ${r.error}`);
+          }
+        }
+        return;
+      }
+      case 'quickBattle': {
+        runner.setRunning(false);
+        if (!c.options || typeof c.options !== 'object') throw new ValidationError('options must be an object');
+        const backup = engine.toScenario();
+        try {
+          return generateBattle(engine, c.options as WizardOptions).blueId;
+        } catch (err) {
+          engine.loadScenario(backup);
+          if (err instanceof WizardError) throw new ValidationError(err.message);
+          throw err;
+        }
+      }
       case 'loadScenario': {
         runner.setRunning(false);
         // Restore the previous state if the file is rejected part-way through.
@@ -324,9 +447,84 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
       case 'setRoe':
         engine.setRoe(str(c.targetId, 'targetId'), roe(c.roe));
         return;
+      case 'sendCodeword':
+        engine.sendCodeword(force(c.force), codeword(c.codeword));
+        return;
+      case 'setSyncMatrix': {
+        const f = force(c.force);
+        engine.sync.set({ force: f, phases: validatePhases(engine, f, c.phases) });
+        return;
+      }
+      case 'startPhase': {
+        const f = force(c.force);
+        const id = str(c.phaseId, 'phaseId');
+        if (!engine.sync.get(f)?.phases.some((p) => p.id === id)) throw new ValidationError(`unknown phase ${id}`);
+        engine.sync.start(f, id, 'started by hand');
+        return;
+      }
+      case 'ackAlert': {
+        const force = (c as { force?: ForceId }).force;
+        if (c.all) {
+          engine.alerts.acknowledgeAll(force);
+          return;
+        }
+        const id = str(c.id, 'id');
+        const a = engine.alerts.all().find((x) => x.id === id);
+        if (!a || (force !== undefined && a.force !== force)) throw new ValidationError(`unknown alert ${id}`);
+        engine.alerts.acknowledge(id);
+        return;
+      }
       case 'setReactions':
         engine.setReactions(str(c.targetId, 'targetId'), validateReactions(c.reactions));
         return;
+      case 'setCatalogEntry':
+      case 'removeCatalogEntry': {
+        const section = c.section;
+        if (!CATALOG_SECTIONS.includes(section)) throw new ValidationError(`section: one of ${CATALOG_SECTIONS.join(', ')}`);
+        try {
+          if (c.cmd === 'setCatalogEntry') engine.setCatalogEntry(section, VALIDATORS[section](c.entry));
+          else engine.removeCatalogEntry(section, str(c.id, 'id'));
+        } catch (err) {
+          throw new ValidationError((err as Error).message);
+        }
+        return;
+      }
+      case 'drive': {
+        const e = engine.entities.get(str(c.id, 'id'));
+        if (!e || e.remote) throw new ValidationError('unknown local entity');
+        if (!e.alive) throw new ValidationError(`${e.name} is destroyed`);
+        if (e.embarkedIn) throw new ValidationError(`${e.name} is mounted; drive its carrier`);
+        const input: { throttle?: number; turn?: number; targetId?: string | null } = {};
+        if (c.throttle !== undefined) input.throttle = num(c.throttle, 'throttle');
+        if (c.turn !== undefined) input.turn = num(c.turn, 'turn');
+        if (c.targetId !== undefined) {
+          if (c.targetId !== null && !engine.entities.has(str(c.targetId, 'targetId'))) throw new ValidationError(`unknown entity ${String(c.targetId)}`);
+          input.targetId = c.targetId;
+        }
+        engine.drive(e, input);
+        return;
+      }
+      case 'setJamming': {
+        const e = engine.entities.get(str(c.id, 'id'));
+        if (!e || e.remote) throw new ValidationError('unknown local entity');
+        if (!e.type.jammer) throw new ValidationError(`${e.name} is not a jammer`);
+        if (typeof c.on !== 'boolean') throw new ValidationError('on must be true or false');
+        e.jamming = c.on;
+        engine.log('info', `${e.name}: jamming ${c.on ? 'on' : 'off'}`, e.id);
+        engine.ew.update();
+        return;
+      }
+      case 'setPatternOfLife': {
+        const n = (v: unknown, what: string) => {
+          if (v === undefined) return undefined;
+          const x = num(v, what);
+          if (x < 0 || x > MAX_AMBIENT) throw new ValidationError(`${what} must be 0-${MAX_AMBIENT}`);
+          return Math.round(x);
+        };
+        const cur = engine.life.settings;
+        engine.life.set({ vehicles: n(c.vehicles, 'vehicles') ?? cur.vehicles, pedestrians: n(c.pedestrians, 'pedestrians') ?? cur.pedestrians });
+        return;
+      }
       case 'setRules': {
         const r = (c.rules ?? {}) as Record<string, unknown>;
         if (typeof r !== 'object' || Object.values(r).some((v) => typeof v !== 'boolean')) throw new ValidationError('rules must be an object of booleans');

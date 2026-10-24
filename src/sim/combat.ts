@@ -80,9 +80,14 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
     shooter.engagingId = undefined;
     return;
   }
-  // Keep the current target first, then nearest.
+  // Keep the current target first, then nearest; spread fire across the unit by counting a
+  // target others in the unit already engage as further away (fire distribution).
+  const mates = shooter.unit?.memberList.filter((m) => m !== shooter && m.alive) ?? [];
   const dist = new Map<Entity, number>();
-  for (const t of candidates) dist.set(t, dist2d(shooter, t));
+  for (const t of candidates) {
+    const engaged = mates.reduce((n, m) => n + (m.engagingId === t.id ? 1 : 0), 0);
+    dist.set(t, dist2d(shooter, t) * (1 + 0.6 * engaged));
+  }
   candidates.sort((a, b) => {
     if (a === explicit) return -1;
     if (b === explicit) return 1;
@@ -130,15 +135,19 @@ function fire(engine: Engine, shooter: Entity, target: Entity, w: WeaponDef, ran
   shooter.weaponReadyAt.set(w.id, now + w.reloadTime * engine.rng.range(0.9, 1.1) * reloadFactor(engine, shooter));
   shooter.lastFiredAt = now;
   shooter.engagingId = target.id;
+  const flight = Math.max(0.1, range / w.projectileSpeed);
+  // Fire control leads a moving target: aim where it will be when the round arrives.
+  // (Guided weapons steer themselves; the aim point only matters for unguided rounds.)
+  const v = w.guided ? { x: 0, y: 0, z: 0 } : target.velocity;
   const shot: Shot = {
     eventNumber: engine.nextEventNumber(),
     shooterId: shooter.id,
     targetId: target.id,
     weapon: w,
     from: { x: shooter.x, y: shooter.y, z: shooter.z + shooter.type.sensorHeight },
-    to: { x: target.x, y: target.y, z: target.z + 1 },
+    to: { x: target.x + v.x * flight, y: target.y + v.y * flight, z: target.z + v.z * flight + 1 },
     fireTime: now,
-    impactTime: now + Math.max(0.1, range / w.projectileSpeed),
+    impactTime: now + flight,
     range,
   };
   engine.launch(shot);
@@ -261,7 +270,8 @@ export function resolveImpact(engine: Engine, shot: Shot): Detonation {
       return { shot, location: scatter(engine, target.position), hit: false, outcome: 'miss', guidanceLost: true };
     }
   }
-  // Guided munitions track the target; ballistic rounds land at the launch aim point.
+  // Guided munitions track the target; ballistic rounds land at the (led) aim point, so a
+  // target that changed speed or turned while the round was in flight is missed.
   const moved = dist2d(target, shot.to);
   const tracked = shot.weapon.guided || moved < 6;
   const pk = tracked ? effectivePk(engine, shooter, target, shot.weapon, shot.range) : 0;

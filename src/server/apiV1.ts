@@ -7,6 +7,10 @@ import type { IntegrationHub } from '../integrations/hub.js';
 import { dist2d } from '../shared/math.js';
 import type { Command, CommandResult, EntitySnapshot, ForceId, Role, ScenarioFile, SimEventKind, SimState, TerrainData, TerrainDataset, UnitSnapshot, Vec2 } from '../shared/types.js';
 import { outcomesCsv } from '../sim/batch.js';
+import { explainEntity, explainUnit } from '../sim/explain.js';
+import { computeViewshed } from '../sim/viewshed.js';
+import { sensorRange } from '../sim/environment.js';
+import { OrderError, orderContext, parseOrder } from '../shared/orders.js';
 import type { BatchManager } from './batch.js';
 import { attachment, eventsCsv, killsCsv, reportPdf, strengthCsv } from './reports.js';
 import { DATASET_NAME, listDatasets } from '../terrain/store.js';
@@ -17,6 +21,7 @@ import { executeCommand } from './commands.js';
 import { buildOpenApi } from './openapi.js';
 import { HttpError, Router, type RouteRequest } from './router.js';
 import type { SimRunner } from './runner.js';
+import { COMPOSITIONS, MISSION_TEXT, MISSIONS, SIZES, SUPPORTS, WEATHERS } from '../sim/wizard.js';
 
 export interface ApiContext {
   runner: SimRunner;
@@ -50,8 +55,18 @@ const PLAYER_ROUTES: [string, RegExp][] = [
   ['GET', /^\/api\/v1\/(openapi\.json|simulation|catalog(\/[\w-]+)?|entities|units|graphics|events|terrain(\/point)?)\/?$/],
   ['GET', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
   ['GET', /^\/api\/v1\/entities\/[^/]+\/path\/?$/],
+  ['GET', /^\/api\/v1\/(entities|units)\/[^/]+\/explain\/?$/],
+  ['GET', /^\/api\/v1\/alerts\/?$/],
+  ['POST', /^\/api\/v1\/orders\/?$/],
+  ['POST', /^\/api\/v1\/entities\/[^/]+\/drive\/?$/],
+  ['GET', /^\/api\/v1\/codewords\/?$/],
+  ['GET', /^\/api\/v1\/sync-matrix\/?$/],
+  ['PUT', /^\/api\/v1\/sync-matrix\/[^/]+\/?$/],
+  ['POST', /^\/api\/v1\/sync-matrix\/[^/]+\/phases\/[^/]+\/start\/?$/],
+  ['POST', /^\/api\/v1\/codewords\/?$/],
+  ['POST', /^\/api\/v1\/alerts\/([^/]+\/)?acknowledge\/?$/],
   ['POST', /^\/api\/v1\/(entities|units)\/[^/]+\/(task|plan|stop|embark|disembark)\/?$/],
-  ['POST', /^\/api\/v1\/(graphics|terrain\/line-of-sight|terrain\/route)\/?$/],
+  ['POST', /^\/api\/v1\/(graphics|terrain\/line-of-sight|terrain\/route|terrain\/viewshed)\/?$/],
   ['PATCH', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
   ['DELETE', /^\/api\/v1\/graphics\/[^/]+\/?$/],
 ];
@@ -148,6 +163,51 @@ export class ApiV1 {
     return u;
   }
 
+  /**
+   * Phase orders may be given as words ({targetId, text: "move to Calloway covered"}):
+   * turn them into tasks with the order parser, as the target's commander would say them.
+   */
+  private resolvePhases(v: unknown, force: ForceId): unknown {
+    if (!Array.isArray(v)) return v;
+    const t = this.engine.terrain;
+    let ctx: ReturnType<typeof orderContext> | null = null;
+    return v.map((raw) => {
+      const p = { ...obj(raw) };
+      if (Array.isArray(p.orders)) {
+        p.orders = p.orders.map((ro: unknown) => {
+          const o = { ...obj(ro) };
+          if (typeof o.text !== 'string' || o.task || o.roe || o.stop) return o;
+          ctx ??= orderContext(this.state(), t.towns, t.spec.size, (id) => this.engine.catalog.types.get(id), force);
+          try {
+            const parsed = parseOrder(`${String(o.targetId)} ${o.text}`, ctx);
+            const c = parsed.commands[0] as { cmd: string; task?: unknown; roe?: unknown };
+            if (parsed.commands.length !== 1 || parsed.targets[0]?.id !== o.targetId) throw new OrderError('give one order for this unit');
+            if (c.cmd === 'assignTask') o.task = c.task;
+            else if (c.cmd === 'setRoe') o.roe = c.roe;
+            else if (c.cmd === 'stop') o.stop = true;
+          } catch (err) {
+            throw new HttpError(400, `${this.engine.nameOf(String(o.targetId))} in ${String(p.name ?? p.id ?? 'a phase')}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          return o;
+        });
+      }
+      return p;
+    });
+  }
+
+  /** A force in a path: 1-3 or blue/red/neutral. */
+  private forceParam(v: string): ForceId {
+    const f = ({ blue: 1, red: 2, neutral: 3, '0': 0, '1': 1, '2': 2, '3': 3 } as Record<string, ForceId>)[v.toLowerCase()];
+    if (f === undefined) throw new HttpError(400, `unknown force ${v} (blue, red, neutral or 0-3)`);
+    return f;
+  }
+
+  /** Open alerts the caller may see. */
+  private alertsView() {
+    const list = this.engine.alerts.open();
+    return this.role.kind === 'player' ? list.filter((a) => a.force === (this.role as { force: ForceId }).force) : list;
+  }
+
   private weaponName(id: string): string {
     return this.engine.catalog.weapons.get(id)?.name ?? id;
   }
@@ -215,6 +275,12 @@ export class ApiV1 {
       this.run({ cmd: 'setRules', rules: obj(req.body) as never });
       return { json: this.engine.rules };
     });
+    r.get(`${P}/simulation/pattern-of-life`, () => ({ json: this.engine.life.settings }));
+    r.put(`${P}/simulation/pattern-of-life`, (req) => {
+      const b = obj(req.body);
+      this.run({ cmd: 'setPatternOfLife', vehicles: b.vehicles as number | undefined, pedestrians: b.pedestrians as number | undefined });
+      return { json: this.engine.life.settings };
+    });
     r.get(`${P}/simulation/environment`, () => ({ json: this.engine.env }));
     r.put(`${P}/simulation/environment`, (req) => {
       this.run({ cmd: 'setEnvironment', environment: obj(req.body) as never });
@@ -232,6 +298,13 @@ export class ApiV1 {
       const b = obj(req.body);
       this.run({ cmd: 'newScenario', name: typeof b.name === 'string' ? b.name : 'Untitled', terrain: b.terrain as never });
       return { status: 201, json: this.simulationSummary() };
+    });
+    r.get(`${P}/scenario/quick-battle`, () => ({ json: { missions: MISSIONS.map((id) => ({ id, text: MISSION_TEXT[id] })), compositions: COMPOSITIONS, sizes: SIZES, support: SUPPORTS, weather: WEATHERS, nations: ['us', 'ru'] } }));
+    r.post(`${P}/scenario/quick-battle`, (req) => {
+      const b = obj(req.body);
+      const seed = b.seed === undefined ? Math.floor(Math.random() * 1e6) : b.seed;
+      this.run({ cmd: 'quickBattle', options: { ...b, seed } });
+      return { status: 201, json: { ...this.simulationSummary(), seed } };
     });
     r.post(`${P}/scenario/undo`, () => (this.run({ cmd: 'undo' }), { json: this.history() }));
     r.post(`${P}/scenario/redo`, () => (this.run({ cmd: 'redo' }), { json: this.history() }));
@@ -370,6 +443,23 @@ export class ApiV1 {
 
     // ---------------------------------------------------------------- catalog
     r.get(`${P}/catalog`, () => ({ json: this.engine.catalog.catalog }));
+    r.get(`${P}/catalog/custom`, () => ({ json: this.engine.customCatalog }));
+    const sections: Record<string, 'entityTypes' | 'weapons' | 'sensors' | 'unitTemplates'> = { 'entity-types': 'entityTypes', weapons: 'weapons', sensors: 'sensors', 'unit-templates': 'unitTemplates' };
+    const section = (s: string) => {
+      const k = sections[s];
+      if (!k) throw new HttpError(404, `unknown catalog section ${s} (entity-types, weapons, sensors, unit-templates)`);
+      return k;
+    };
+    r.put(`${P}/catalog/{section}/{id}`, (req) => {
+      const sec = section(req.params.section);
+      const entry = { ...obj(req.body), id: req.params.id };
+      this.run({ cmd: 'setCatalogEntry', section: sec, entry });
+      return { json: this.engine.catalog.catalog[sec].find((x) => x.id === req.params.id) };
+    });
+    r.delete(`${P}/catalog/{section}/{id}`, (req) => {
+      this.run({ cmd: 'removeCatalogEntry', section: section(req.params.section), id: req.params.id });
+      return { status: 204 };
+    });
     r.get(`${P}/catalog/entity-types`, () => ({
       json: this.engine.catalog.catalog.entityTypes.map((t) => ({
         id: t.id,
@@ -417,6 +507,7 @@ export class ApiV1 {
       if (b.name !== undefined) this.run({ cmd: 'rename', id, name: b.name as string });
       if (b.roe !== undefined) this.run({ cmd: 'setRoe', targetId: id, roe: b.roe as never });
       if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
+      if (b.jamming !== undefined) this.run({ cmd: 'setJamming', id, on: b.jamming as boolean });
       if (b.position !== undefined || b.x !== undefined || b.lat !== undefined) {
         const p = this.point(b.position ?? b);
         this.run({ cmd: 'moveEntity', id, x: p.x, y: p.y, heading: b.heading as number | undefined });
@@ -429,6 +520,20 @@ export class ApiV1 {
       return { status: 204 };
     });
     r.get(`${P}/entities/{id}/path`, (req) => (this.ownEntity(req.params.id), { json: this.engine.plannedPath(req.params.id) }));
+    r.post(`${P}/entities/{id}/drive`, (req) => {
+      const b = obj(req.body);
+      this.run({ cmd: 'drive', id: req.params.id, throttle: b.throttle as number | undefined, turn: b.turn as number | undefined, targetId: b.targetId as string | null | undefined });
+      return { json: this.entityView(this.entity(req.params.id)) };
+    });
+    r.get(`${P}/entities/{id}/explain`, (req) => {
+      this.ownEntity(req.params.id);
+      return { json: explainEntity(this.engine, this.engine.entities.get(req.params.id)!, { omniscient: this.role.kind === 'controller' }) };
+    });
+    r.get(`${P}/units/{id}/explain`, (req) => {
+      const u = this.unit(req.params.id);
+      if (this.role.kind === 'player' && u.force !== this.role.force) throw new HttpError(404, `unknown unit ${req.params.id}`);
+      return { json: explainUnit(this.engine, this.engine.units.get(req.params.id)!, { omniscient: this.role.kind === 'controller' }) };
+    });
     for (const kind of ['entities', 'units'] as const) {
       const check = (id: string) => (kind === 'entities' ? this.entity(id) : this.unit(id));
       r.post(`${P}/${kind}/{id}/task`, (req) => {
@@ -546,6 +651,54 @@ export class ApiV1 {
     });
 
     // ---------------------------------------------------------------- events
+    r.get(`${P}/sync-matrix`, () => {
+      const list = this.engine.sync.states();
+      return { json: this.role.kind === 'player' ? list.filter((m) => m.force === (this.role as { force: ForceId }).force) : list };
+    });
+    r.put(`${P}/sync-matrix/{force}`, (req) => {
+      const force = this.forceParam(req.params.force);
+      this.run({ cmd: 'setSyncMatrix', force, phases: this.resolvePhases(obj(req.body).phases, force) as never });
+      return { json: this.engine.sync.states().find((m) => m.force === force) ?? { force, phases: [], started: {} } };
+    });
+    r.post(`${P}/sync-matrix/{force}/phases/{id}/start`, (req) => {
+      const force = this.forceParam(req.params.force);
+      this.run({ cmd: 'startPhase', force, phaseId: req.params.id });
+      return { json: this.engine.sync.states().find((m) => m.force === force) };
+    });
+    r.get(`${P}/codewords`, () => {
+      const list = [...this.engine.codewords].map(([k, time]) => ({ force: Number(k.split('|')[0]) as ForceId, codeword: k.slice(k.indexOf('|') + 1), time }));
+      return { json: this.role.kind === 'player' ? list.filter((c) => c.force === (this.role as { force: ForceId }).force) : list };
+    });
+    r.post(`${P}/codewords`, (req) => {
+      const b = obj(req.body);
+      const force = this.role.kind === 'player' ? this.role.force : ((b.force ?? 1) as ForceId);
+      this.run({ cmd: 'sendCodeword', force, codeword: String(b.codeword ?? '') });
+      return { status: 201, json: { force, codeword: String(b.codeword).trim().toUpperCase(), time: this.engine.time } };
+    });
+    r.post(`${P}/orders`, (req) => {
+      const b = obj(req.body);
+      const text = typeof b.text === 'string' ? b.text : '';
+      const force = this.role.kind === 'player' ? this.role.force : undefined;
+      const t = this.engine.terrain;
+      let parsed;
+      try {
+        parsed = parseOrder(text, orderContext(this.state(), t.towns, t.spec.size, (id) => this.engine.catalog.types.get(id), force));
+      } catch (err) {
+        if (err instanceof OrderError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      // An order to several units is one edit: one undo step.
+      if (b.dryRun !== true) this.run(parsed.commands.length === 1 ? parsed.commands[0] : { cmd: 'batch', commands: parsed.commands });
+      return { json: { description: parsed.description, targets: parsed.targets.map((o) => o.id), commands: parsed.commands, executed: b.dryRun !== true } };
+    });
+    r.get(`${P}/alerts`, (req) => {
+      const all = req.query.get('all') === 'true' || req.query.get('all') === '1';
+      let list = all ? this.engine.alerts.all() : this.engine.alerts.open();
+      if (this.role.kind === 'player') list = list.filter((a) => a.force === (this.role as { force: ForceId }).force);
+      return { json: list };
+    });
+    r.post(`${P}/alerts/acknowledge`, () => (this.run({ cmd: 'ackAlert', all: true }), { json: this.alertsView() }));
+    r.post(`${P}/alerts/{id}/acknowledge`, (req) => (this.run({ cmd: 'ackAlert', id: req.params.id }), { json: this.alertsView() }));
     r.get(`${P}/events`, (req) => {
       const since = Number(req.query.get('since') ?? 0) || 0;
       const kinds = req.query.get('kinds')?.split(',').filter(Boolean) as SimEventKind[] | undefined;
@@ -585,6 +738,17 @@ export class ApiV1 {
       const a = this.endpoint(b.from, 'from');
       const c = this.endpoint(b.to, 'to');
       return { json: { visible: this.engine.lineOfSight(a, c, b.radar === true), distance: Math.round(Math.hypot(c.x - a.x, c.y - a.y, c.z - a.z)), from: a, to: c } };
+    });
+    r.post(`${P}/terrain/viewshed`, (req) => {
+      const b = obj(req.body);
+      const eye = this.endpoint(b.from, 'from');
+      const e = typeof b.from === 'string' ? this.engine.entities.get(b.from) : undefined;
+      // An entity sees as far as its best sensor does now (light and weather); a point, 3 km.
+      const reach = e ? Math.max(...e.type.sensors.map((s) => sensorRange(this.engine.catalog.sensors.get(s)!, this.engine.env)), 0) : 3000;
+      const radius = b.radius === undefined ? Math.min(10000, Math.max(1000, reach)) : num(b.radius, 'radius');
+      if (radius < 100 || radius > 20000) throw new HttpError(400, 'radius must be 100-20000 m');
+      const targetHeight = b.targetHeight === undefined ? 2 : num(b.targetHeight, 'targetHeight');
+      return { json: computeViewshed(this.engine, eye, radius, targetHeight, b.radar === true) };
     });
     r.post(`${P}/terrain/route`, (req) => {
       const b = obj(req.body);
@@ -687,14 +851,18 @@ export class ApiV1 {
 
   resolvePlan(body: unknown): unknown {
     const p = { ...obj(body) };
-    if (Array.isArray(p.statements)) {
-      p.statements = p.statements.map((s) => {
-        const st = { ...obj(s) };
-        if (st.kind === 'task') st.task = this.resolveTask(st.task);
-        if (st.kind === 'setReactions') st.reactions = this.resolveReactions(st.reactions);
-        return st;
-      });
-    }
+    const list = (v: unknown): unknown =>
+      Array.isArray(v)
+        ? v.map((s) => {
+            const st = { ...obj(s) };
+            if (st.kind === 'task') st.task = this.resolveTask(st.task);
+            if (st.kind === 'setReactions') st.reactions = this.resolveReactions(st.reactions);
+            // Blocks: places inside them too.
+            for (const k of ['then', 'else', 'body']) if (Array.isArray(st[k])) st[k] = list(st[k]);
+            return st;
+          })
+        : v;
+    p.statements = list(p.statements);
     return p;
   }
 

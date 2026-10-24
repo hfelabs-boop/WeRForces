@@ -68,7 +68,8 @@ click Calloway. A passenger's orders wait until it is out of the vehicle, so the
 squad will start its assault the moment the Bradleys drop it off.
 
 **Red counterattack.** Select the BMP platoon, set **On contact → Halt and
-fight**, and give it a plan: **Wait until time** 540, then **Move to** Calloway.
+fight**, and give it a plan: **Wait until…** *time is (s)* 540, then **Move to
+(pick)** Calloway.
 
 ## 4. Run it
 
@@ -119,18 +120,15 @@ FO Hawk at (5208, 12093), 243 m, 2.8 km from Calloway; reactions {"callForFire":
   ...
   00:12:01  Team MECH: plan Carry and support complete
   00:12:11  Red Squad 4 destroyed by Team MECH 2
-  00:13:25  Red Mech Lead: halted on contact
-  00:13:33  1st Squad 3 destroyed by Red Mech Lead
-  00:13:47  1st Squad Lead destroyed by Red Mech Lead
-  ...
-  00:14:43  1st Squad 9 destroyed by Red Mech Lead
-  ...
-  00:16:55  Red Mech Lead destroyed by Team MECH 2
+  00:13:43  Red Mech Lead: halted on contact
+  00:14:08  Red Mech: plan Counterattack complete
+  00:14:29  Red Mech Lead: halted on contact
+  00:14:32  Red Mech Lead destroyed by Team MECH 2
 
 After-action review
-  Blue  12/18 left, 9 kills, 176 rounds fired
-  Red    2/11 left, 6 kills, 30 rounds fired
-  Kills by weapon: how-155mm 7, gun-30mm-2a42 6, gun-25mm 1, atgm-tow 1
+  Blue  18/18 left, 9 kills, 175 rounds fired
+  Red    2/11 left, 0 kills, 2 rounds fired
+  Kills by weapon: how-155mm 7, gun-25mm 1, atgm-tow 1
   Artillery rounds: 156
 ```
 
@@ -138,11 +136,12 @@ The artillery breaks up the squad in the town: it kills six of the nine
 riflemen, and the shelling pins the rest down again and again, so the squad
 breaks and falls back several times (the full event log shows *pinned down* and
 *broke and is falling back*). It also destroys one BMP and immobilises another
-3 km out, long before contact. But the last BMP catches the dismounted squad in
-the open and kills six of them with its 30 mm cannon before the Bradleys
-destroy it. One Red rifleman survives on the east edge of the town. Run it
-twice: the result is the same each time, because the simulation is
-deterministic.
+3 km out, long before contact. When the last BMP comes forward, the Bradleys,
+in line 700 m short of the town, see it first. Both sides fire smoke
+grenades, so the first TOWs and the BMP's Konkurs all lose guidance, but at
+14:32 a TOW destroys it. Blue loses nobody. Two Red entities are left: the
+immobilised BMP 3 km out and one rifleman on the east edge of the town. Run it twice: the result is the same each time, because the simulation
+is deterministic.
 
 ## 6. Manual fire missions
 
@@ -165,7 +164,8 @@ curl -X POST localhost:8080/api/v1/units/U3/task -H 'Content-Type: application/j
 
 `radius` spreads the rounds over an area (a sheaf). A target inside the
 weapon's minimum range (2 km for 155 mm) fails with *target out of range* in the
-event log, and a unit without artillery with *no indirect-fire weapon*.
+event log, and an order to a unit without artillery is refused at once (*US Tank
+Platoon has no artillery or mortars for a fire mission*).
 
 ## 7. Things to try
 

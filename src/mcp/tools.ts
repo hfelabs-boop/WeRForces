@@ -32,6 +32,12 @@ const position = z
 
 const force = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(0)]).describe('1 Blue, 2 Red, 3 Neutral, 0 Other');
 const roe = z.enum(['fireAtWill', 'returnFire', 'holdFire']);
+const side = z.object({
+  nation: z.enum(['us', 'ru']).optional().describe('default us for blue, ru for red'),
+  composition: z.enum(['armor', 'mech', 'infantry', 'combined']).optional().describe('default mech; combined: tanks and mechanised infantry'),
+  size: z.enum(['platoon', 'company']).optional().describe('default platoon; a company is three platoons and an HQ'),
+  support: z.array(z.enum(['artillery', 'recon', 'engineers', 'supply', 'air', 'airDefense'])).optional(),
+});
 
 function text(value: unknown) {
   return { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 1) }] };
@@ -68,6 +74,7 @@ interface EntityRow {
   contacts: string[];
   engagingId?: string;
   ammo: { weapon: string; rounds: number }[];
+  travel?: { remaining: number; eta?: number; etaLocal?: string; stalled?: string };
 }
 
 function compactEntity(e: EntityRow) {
@@ -87,6 +94,7 @@ function compactEntity(e: EntityRow) {
     damage: e.damage,
     task: e.plan ? `${e.plan}${e.task ? ` / ${e.task}` : ''}` : e.task,
     ...(e.remote ? { remote: true } : {}),
+    ...(e.travel ? { travel: e.travel.eta !== undefined ? `${(e.travel.remaining / 1000).toFixed(1)} km to go, arrives ${fmtTime(e.travel.eta)}${e.travel.etaLocal ? ` (${e.travel.etaLocal} local)` : ''}` : `stalled: ${e.travel.stalled}` } : {}),
   };
 }
 
@@ -126,16 +134,18 @@ export function createMcpServer(call: ApiCaller): McpServer {
     'Overview of the simulation: scenario, time, running state, strength per force, terrain size and towns, units and tactical graphics. Call this first.',
     {},
     async () => {
-      const [sim, units, graphics] = await Promise.all([
+      const [sim, units, graphics, alerts] = await Promise.all([
         api<Record<string, unknown>>('GET', '/api/v1/simulation'),
         api<{ id: string; name: string; force: number; echelon: string; formation: string; leaderId?: string; memberIds: string[]; x: number; y: number; task?: string; plan?: string }[]>('GET', '/api/v1/units'),
         api<{ id: string; name: string; kind: string; force: number; points: unknown[] }[]>('GET', '/api/v1/graphics'),
+        api<{ severity: string; text: string }[]>('GET', '/api/v1/alerts'),
       ]);
       return {
         ...sim,
         time: `${fmtTime(sim.time as number)} (${Math.round(sim.time as number)} s)`,
         units: units.map((u) => ({ id: u.id, name: u.name, force: u.force, echelon: u.echelon, members: u.memberIds.length, leader: u.leaderId, x: Math.round(u.x), y: Math.round(u.y), activity: u.plan ?? u.task ?? 'idle' })),
         graphics: graphics.map((g) => ({ id: g.id, name: g.name, kind: g.kind, force: g.force, points: g.points.length })),
+        alerts: alerts.length ? `${alerts.length} open (get_alerts): ${alerts.slice(0, 3).map((a) => a.text).join('; ')}` : 'none',
       };
     },
     { readOnlyHint: true },
@@ -171,6 +181,79 @@ export function createMcpServer(call: ApiCaller): McpServer {
       return { ...compactEntity(e), domain: e.domain, roe: e.roe, ammo: e.ammo, contacts: e.contacts, engaging: e.engagingId };
     },
     { readOnlyHint: true },
+  );
+
+  tool(
+    'explain',
+    'Why an entity or unit is or is not moving, shooting or seeing the enemy: blockers (no line of sight and what blocks it, out of range, ROE, out of ammo or fuel, pinned, halted on contact, broken, order still on its way...) with suggested fixes. Use it whenever something does not do what you ordered.',
+    { id: z.string().describe('Entity or unit id') },
+    async ({ id }) => {
+      const kind = id.startsWith('U') ? 'units' : 'entities';
+      const ex = await api<{ summary: string; activity: string; movement: unknown[]; fire: unknown[]; sensing: unknown[]; unit?: unknown[] }>('GET', `/api/v1/${kind}/${encodeURIComponent(id)}/explain`).catch(async (err) => {
+        // Unit ids normally start with U, but be lenient.
+        if (kind === 'units') throw err;
+        return api<never>('GET', `/api/v1/units/${encodeURIComponent(id)}/explain`);
+      });
+      const brief = (fs: unknown[]) => (fs as { severity: string; text: string; fix?: string }[]).map((f) => `${f.severity}: ${f.text}${f.fix ? ` Fix: ${f.fix}` : ''}`);
+      return { summary: ex.summary, activity: ex.activity, ...(ex.unit ? { unit: brief(ex.unit) } : {}), movement: brief(ex.movement), fire: brief(ex.fire), sensing: brief(ex.sensing) };
+    },
+    { readOnlyHint: true },
+  );
+
+  tool(
+    'give_order',
+    'Give an order in plain words, the way a commander would say it: "<who> <verb> <where/what> [modifiers]". Who: unit or entity names (join several with "and"). Verbs: move to (covered, fast, slowly, at N km/h), attack, follow, defend/overwatch/screen <place> [facing <direction>] [width <m>], ambush <area> [from <place>], search <area>, patrol <route>, follow route <route>, fire [N rounds] on <place>, smoke <place>, orbit <place> [radius N km], mount <carrier>, dismount, resupply [from X], breach <minefield>, wait N min, stop, hold fire, return fire, fire at will. Places: town or graphic names, objects, "x y", or "2 km north of Brenham". Use dryRun to check how it is understood. Prefer this for simple orders; use assign_task for details it cannot express.',
+    { text: z.string().describe('The order, e.g. "Team ARMOR move to Calloway covered"'), dryRun: z.boolean().optional() },
+    async ({ text, dryRun }) => api('POST', '/api/v1/orders', { text, dryRun }),
+  );
+
+  tool(
+    'viewshed',
+    'What an entity (or a point) can see: the share of the ground within the radius that is in its line of sight, and the dead ground. Use it to choose observation posts, overwatch positions or covered approaches.',
+    { from: z.union([z.string(), z.object({ x: z.number(), y: z.number(), height: z.number().optional() })]).describe('entity id, or a position'), radius: z.number().optional() },
+    async ({ from, radius }) => {
+      const v = await api<{ visibleFraction: number; radius: number; cell: number; eye: { x: number; y: number; z: number } }>('POST', '/api/v1/terrain/viewshed', { from, radius });
+      return { radius: v.radius, seen: `${Math.round(v.visibleFraction * 100)}% of the ground within ${(v.radius / 1000).toFixed(1)} km`, eyeHeight: Math.round(v.eye.z), cell: v.cell };
+    },
+    { readOnlyHint: true },
+  );
+
+  tool(
+    'set_sync_matrix',
+    'Plan an operation in phases for a force (a synchronization matrix, or global plan). Each phase has a trigger and orders for units; phases start in order, each giving all its orders at once and announcing its name as a codeword (e.g. phase "Phase 2 Assault" sends codeword "PHASE 2 ASSAULT", which unit plans can wait for). Triggers: {type:"manual"} (start_phase), {type:"time",time} (s), {type:"codeword",codeword}, {type:"previousDone",delay?} (when the previous phase\'s orders are carried out), {type:"condition",ownerId,condition} (plan conditions). Orders: {targetId, text} with the order in words as for give_order without the name ("move to Calloway covered", "defend OBJ CALLOWAY facing north", "hold fire"), or {targetId, task}. An empty phases list removes the matrix.',
+    {
+      force: z.enum(['blue', 'red', 'neutral']),
+      phases: z.array(z.object({ id: z.string().optional(), name: z.string(), trigger: z.record(z.string(), z.unknown()).optional(), orders: z.array(z.record(z.string(), z.unknown())) })),
+    },
+    async ({ force, phases }) => api('PUT', `/api/v1/sync-matrix/${force}`, { phases }),
+  );
+
+  tool(
+    'start_phase',
+    'Start a phase of a synchronization matrix now, whatever its trigger.',
+    { force: z.enum(['blue', 'red', 'neutral']), phaseId: z.string() },
+    async ({ force, phaseId }) => api('POST', `/api/v1/sync-matrix/${force}/phases/${encodeURIComponent(phaseId)}/start`),
+  );
+
+  tool(
+    'send_codeword',
+    'Send a codeword to a force (players: their own). Plans waiting for it ({type:"codeword"} conditions) go on: use it to trigger phases ("EXECUTE", "PHASE 2"). Also lists codewords sent so far.',
+    { codeword: z.string(), force: z.enum(['blue', 'red', 'neutral']).optional().describe('default blue (exercise control only)') },
+    async ({ codeword, force }) => {
+      await api('POST', '/api/v1/codewords', { codeword, force: force ? { blue: 1, red: 2, neutral: 3 }[force] : undefined });
+      return api('GET', '/api/v1/codewords');
+    },
+  );
+
+  tool(
+    'get_alerts',
+    'The attention queue: what needs looking at now (units idle after finishing their orders, broken, out of fuel or ammunition, leader lost, losses, failed tasks, under fire, first contact), newest first. Pass acknowledge: true to clear them once handled.',
+    { acknowledge: z.boolean().optional().describe('Acknowledge all open alerts after reading them') },
+    async ({ acknowledge }) => {
+      const list = await api<{ id: string; kind: string; severity: string; objectId: string; text: string; time: number; count: number }[]>('GET', '/api/v1/alerts');
+      if (acknowledge && list.length) await api('POST', '/api/v1/alerts/acknowledge');
+      return list.map((a) => ({ id: a.id, severity: a.severity, kind: a.kind, about: a.objectId, text: a.text, time: fmtTime(a.time), ...(a.count > 1 ? { times: a.count } : {}) }));
+    },
   );
 
   tool(
@@ -295,7 +378,7 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'assign_task',
-    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm. Tactical tasks: overwatch/defend/screen need `to` (the position) and take `facing` (degrees) and `width` (units deploy in a line); ambush also needs `graphicId` (the kill zone area) and opens fire only when an enemy enters it; screen falls back when an enemy comes within 1.5 km; search needs `graphicId` (an area) and sweeps it. Holding still, infantry dig in and vehicles go hull-down. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
+    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm (helicopters land beside it). Tactical tasks: overwatch/defend/screen need `to` (the position) and take `facing` (degrees) and `width` (units deploy in a line); ambush also needs `graphicId` (the kill zone area) and opens fire only when an enemy enters it; screen falls back before an enemy gets within reach of its direct fire (at least 1.5 km) or as soon as it comes under fire; search needs `graphicId` (an area) and sweeps it. Holding still, infantry dig in and vehicles go hull-down. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
     {
       targetId: z.string().describe('entity (E..) or unit (U..) id'),
       type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission', 'mount', 'dismount', 'breach', 'resupply', 'overwatch', 'defend', 'screen', 'ambush', 'search']),
@@ -356,7 +439,10 @@ export function createMcpServer(call: ApiCaller): McpServer {
       '{kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), ' +
       '{kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, ' +
       '{kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, ' +
-      '{kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"fuelBelow",fraction}|{type:"ammoBelow",fraction}|{type:"entityDestroyed",entityId}}.',
+      '{kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"fuelBelow",fraction}|{type:"ammoBelow",fraction}|{type:"entityDestroyed",entityId}|{type:"codeword",codeword}|{type:"all"|"any",conditions:[...]}|{type:"not",condition}}, ' +
+      '{kind:"if", condition, then:[statements], else:[statements]}, {kind:"while", condition, body:[statements]} (repeats while the condition holds), ' +
+      '{kind:"sendCodeword", codeword} (plans of the same force waiting for it go on), {kind:"report", text} (a radio message). ' +
+      'Codewords coordinate units: e.g. one unit sends "PHASE 2" when it reaches a phase line, others wait for it.',
     {
       targetId: z.string(),
       name: z.string().optional(),
@@ -424,6 +510,56 @@ export function createMcpServer(call: ApiCaller): McpServer {
     { suppression: z.boolean().optional(), morale: z.boolean().optional(), fuel: z.boolean().optional(), orderDelay: z.boolean().optional() },
     async (rules) => api('PUT', '/api/v1/simulation/rules', rules),
     { idempotentHint: true },
+  );
+
+  tool(
+    'edit_catalog',
+    'Add or change a catalog entry for this scenario (entity type, weapon, sensor or unit template), e.g. a new vehicle variant: start from list_catalog\'s fields of a similar entry, change what differs, give it a new id. Fields are checked; new entities use it at once. remove: true deletes a custom entry.',
+    { section: z.enum(['entity-types', 'weapons', 'sensors', 'unit-templates']), id: z.string(), entry: z.record(z.string(), z.unknown()).optional(), remove: z.boolean().optional() },
+    async ({ section, id, entry, remove }) => {
+      if (remove) {
+        await api('DELETE', `/api/v1/catalog/${section}/${encodeURIComponent(id)}`);
+        return `${id} removed`;
+      }
+      return api('PUT', `/api/v1/catalog/${section}/${encodeURIComponent(id)}`, entry ?? {});
+    },
+  );
+
+  tool(
+    'set_jamming',
+    'Switch a jammer (an electronic warfare entity, e.g. R-330Zh Zhitel, Krasukha-2, Stryker MFEW) on or off. While on, enemy radios within its range are jammed: orders to them arrive a minute late, they do not share contacts within their unit, cannot call for fire and do not hear codewords; radar jammers cut enemy radars\' range.',
+    { id: z.string(), on: z.boolean() },
+    async ({ id, on }) => {
+      const e = await api<{ name: string; jamming?: boolean }>('PATCH', `/api/v1/entities/${encodeURIComponent(id)}`, { jamming: on });
+      return `${e.name}: jamming ${e.jamming ? 'on' : 'off'}`;
+    },
+  );
+
+  tool(
+    'quick_battle',
+    'Replace the scenario with a generated, ready-to-run battle: pick the mission (from Blue\'s side), each force\'s nation, composition, size and support, time and weather. Both forces are placed on land either side of an objective (a town near the middle when there is one), with the mission\'s graphics and a synchronization matrix per force; start the simulation to fight it. Returns the mission brief.',
+    {
+      mission: z.enum(['meeting', 'attack', 'defend', 'delay', 'recon']).optional().describe('default attack'),
+      blue: side.optional(),
+      red: side.optional(),
+      time: z.number().min(0).max(24).optional().describe('local time at the start, hours (default 10)'),
+      weather: z.enum(['clear', 'haze', 'fog', 'rain']).optional(),
+      distance: z.number().min(1000).max(20000).optional().describe('metres between the sides at the start'),
+      civilians: z.boolean().optional(),
+      seed: z.number().int().optional().describe('same seed and options, same battle'),
+      name: z.string().max(80).optional(),
+    },
+    async (a) => {
+      const r = await api<{ seed: number; description: string }>('POST', '/api/v1/scenario/quick-battle', a);
+      return `${r.description}`;
+    },
+  );
+
+  tool(
+    'set_pattern_of_life',
+    'Fill the map with background civilians: cars driving between towns along the roads and people walking about the towns (neutral, force 3). They run from shots and blasts nearby; any killed are logged. Set both to 0 to remove them.',
+    { vehicles: z.number().int().min(0).max(300).optional(), pedestrians: z.number().int().min(0).max(300).optional() },
+    async (a) => api('PUT', '/api/v1/simulation/pattern-of-life', a),
   );
 
   tool(

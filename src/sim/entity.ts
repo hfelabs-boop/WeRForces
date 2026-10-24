@@ -90,6 +90,11 @@ export class Entity {
   /** Explicit target from an attack task; engaged regardless of ROE. */
   attackTargetId?: string;
 
+  /** Jammers: switched on (they start on). */
+  jamming = true;
+  /** A background civilian the pattern-of-life model adds and removes. */
+  ambient?: boolean;
+
   /** True for entities owned by another simulation (received via DIS). */
   remote = false;
   /** DIS entity number for locally owned entities, or full remote id. */

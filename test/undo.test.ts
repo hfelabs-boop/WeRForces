@@ -58,3 +58,33 @@ describe('undo and redo', () => {
     expect(engine.entities.get(a.id!)!.x).toBeCloseTo(moved, 1); // checkpoints keep positions to 0.1 m
   });
 });
+
+describe('batched commands', () => {
+  it('are one undo step, all or nothing, and checked one by one for players', async () => {
+    const { checkCommand, ForbiddenError } = await import('../src/server/fog.js');
+    const engine = new Engine({ terrain });
+    engine.newScenario('batch', terrain.spec);
+    const runner = new SimRunner(engine);
+    const run = (c: unknown) => executeCommand(runner, c);
+    const ids = [0, 1, 2].map((i) => run({ cmd: 'createEntity', typeId: 'us-m1a2', force: 1, x: 1000 + i * 100, y: 1000 }).id!);
+    const red = run({ cmd: 'createEntity', typeId: 'ru-t72b3', force: 2, x: 4000, y: 4000 }).id!;
+    const before = runner.state().history!.undo;
+    const move = (id: string, x: number) => ({ cmd: 'assignTask', targetId: id, task: { type: 'moveTo', target: { x, y: 2000 } } });
+    expect(run({ cmd: 'batch', commands: ids.map((id, i) => move(id, 1000 + i * 100)) }).ok).toBe(true);
+    expect(runner.state().history!.undo).toBe(before + 1);
+    expect(ids.every((id) => engine.entities.get(id)!.task?.spec.type === 'moveTo')).toBe(true);
+    expect(run({ cmd: 'undo' }).ok).toBe(true);
+    expect(ids.every((id) => !engine.entities.get(id)!.task)).toBe(true);
+    // One bad command: none of them happen.
+    const r = run({ cmd: 'batch', commands: [{ cmd: 'rename', id: ids[0], name: 'Alpha' }, move('E999', 0)] });
+    expect(r.error).toMatch(/^commands\[1\]: unknown/);
+    expect(engine.entities.get(ids[0])!.name).not.toBe('Alpha');
+    expect(run({ cmd: 'batch', commands: [{ cmd: 'undo' }] }).error).toMatch(/cannot be batched/);
+    // Deleting a unit and then one of its members is fine.
+    const unit = run({ cmd: 'groupUnit', entityIds: ids }).id!;
+    expect(run({ cmd: 'batch', commands: [{ cmd: 'deleteObject', id: unit }, { cmd: 'deleteObject', id: ids[0] }] }).ok).toBe(true);
+    // A player may not slip an order for the enemy into a batch.
+    const blue = { kind: 'player', force: 1 } as const;
+    expect(() => checkCommand(engine, blue, { cmd: 'batch', commands: [{ cmd: 'stop', targetId: red }] })).toThrow(ForbiddenError);
+  });
+});

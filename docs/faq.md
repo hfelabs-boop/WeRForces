@@ -19,9 +19,19 @@ For DIS, another program may hold UDP 3000; use `--dis-port`.
 - A unit's followers keep formation on the leader. Task the unit, not the
   individual members.
 
+### Why isn't my unit doing what I ordered?
+
+Select it and read **Why?** in the inspector (**Details** for every reason). It
+says what stops it moving, shooting or seeing, such as *Pinned down*, *Halted on
+contact*, *Rules of engagement: hold fire*, *No line of sight to T-72B3: blocked
+by the ground (a crest or ridge) at (9070, 7813)* or *Radio jammed*, with a fix.
+Click a finding with a place to mark it on the map. Scripts use `GET
+/api/v1/entities/{id}/explain`; AI agents the MCP tool `explain`. See
+[Concepts](concepts.md#explanations-and-alerts).
+
 ### Nobody is shooting
 
-Check these in order:
+Read **Why?** first (above). Otherwise check these in order:
 
 1. **ROE.** *Hold fire* and *Return fire* restrict engagement (see
    [Concepts](concepts.md#rules-of-engagement)).
@@ -117,13 +127,47 @@ You are using a player key (`--player`). Players can only see and order their
 own force; time, scenarios, recordings and exports need the `--api-key`. See
 [Concepts → Fog of war and roles](concepts.md#fog-of-war-and-roles).
 
+### Orders arrive a minute late, and contacts aren't shared
+
+The unit's radio is jammed: its activity shows *RADIO JAMMED* and the alerts list
+*radio jammed*. An enemy jammer within reach (15 km for the R-330Zh, 10 km for
+the Stryker MFEW) delays every order by 60 s at each level of the chain of
+command, stops contact sharing and calls for fire, and keeps codewords from it.
+Its reach is the purple dashed circle on the map. Move out of it, destroy the
+jammer, or switch it off (exercise control: the jammer's inspector, or `PATCH
+/api/v1/entities/{id}` with `{"jamming": false}`). See
+[Concepts](concepts.md#electronic-warfare).
+
+### A phase of the synchronization matrix doesn't start
+
+Phases start in order, so check that the one before it has started (**Phases**
+shows *started* and the time). A *when previous done* trigger waits until every
+order of the previous phase is carried out: an order that never ends, such as
+*Defend* or *Overwatch* without a duration, keeps it waiting (orders to units
+wiped out count as done). Move such orders to a phase of their own, or give the
+next phase another trigger. A *codeword* trigger needs exactly that codeword
+(`GET /api/v1/codewords` lists those sent); send it from the codeword box at
+the bottom of the **Phases** dialog. **▶ Start now** starts a phase by hand.
+
+### The order line says *which one?* or *where?*
+
+The order names something more than one object answers to, or a place it
+doesn't know. *which one?* lists the candidates with their ids: type the id
+(*E31*) or the name with its id (*T-72B3 (E31)*). For a place, use a town, a
+graphic name or id (*G5*), an object, coordinates (*9382 7938*) or *2 km north
+of Brenham*. Two different graphics with the same name can't be told apart
+(*where?*): use the id. A graphic drawn once for each force with the same name
+and shape, like a quick battle's *OBJ RAVEN*, counts as one place. Check an order
+without carrying it out with `POST /api/v1/orders` and `"dryRun": true`.
+
 ### The artillery doesn't answer my observer's calls
 
 A call needs: an observer with **Call for fire** set that currently sees a
 hostile ground target; a friendly gun, mortar or battery that is idle (no
 running task or plan, not on hold fire) and in range (155 mm: 2–22 km, 81 mm:
 80 m – 5.6 km); no friendly troops within 150 m of the target; and no other
-mission already on that spot. Observers call at most once a minute. See
+mission already on that spot. Observers call at most once a minute, and
+neither the observer nor the guns may have their radio jammed. See
 [Concepts → Indirect fire](concepts.md#indirect-fire-and-call-for-fire).
 
 ### My infantry won't get in

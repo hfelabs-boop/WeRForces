@@ -105,6 +105,40 @@ describe('screen', () => {
   });
 });
 
+describe('screen without a set break distance', () => {
+  it('falls back before the enemy is within its direct-fire reach', () => {
+    const eng = engine();
+    const scouts = eng.createUnitFromTemplate('us-scout-section', 1, 2000, 300);
+    eng.assignTask(scouts.id, { type: 'screen', position: { x: 2000, y: 300 }, facing: 0 });
+    // The T-72B3's gun reaches further than the old fixed 1500 m: the screen goes before it is in range.
+    const tanks = eng.createUnitFromTemplate('ru-tank-platoon', 2, 2000, 3900, Math.PI);
+    for (const m of tanks.memberList) m.roe = 'holdFire';
+    eng.assignTask(tanks.id, { type: 'moveTo', target: { x: 2000, y: 1000 } });
+    const log: { t: number; d: number; text: string }[] = [];
+    eng.on('event', (ev) => {
+      if (ev.text.includes('screen falling back')) log.push({ t: ev.time, d: Math.min(...scouts.memberList.flatMap((s) => tanks.memberList.map((t) => Math.hypot(t.x - s.x, t.y - s.y)))), text: ev.text });
+    });
+    eng.runFor(240);
+    expect(log.length).toBeGreaterThan(0);
+    const reach = Math.max(...eng.catalog.type('ru-t72b3').weapons.map((w) => eng.catalog.weapon(w)).filter((w) => !w.indirect && w.targets.includes('ground')).map((w) => w.maxRange));
+    expect(reach).toBeGreaterThan(2500);
+    // It goes as soon as it sees them, well before the old fixed 1500 m.
+    expect(log[0].d).toBeGreaterThan(2500);
+  });
+
+  it('falls back as soon as it comes under fire', () => {
+    const eng = engine();
+    const scout = eng.createEntity({ typeId: 'us-hmmwv', force: 1, x: 2000, y: 1000 });
+    eng.assignTask(scout.id, { type: 'screen', position: { x: 2000, y: 1000 }, facing: 0 });
+    eng.runFor(5);
+    scout.underFireUntil = eng.time + 15;
+    const enemy = eng.createEntity({ typeId: 'ru-rifleman', force: 2, x: 2000, y: 3900 });
+    scout.contacts.set(enemy.id, { id: enemy.id, x: enemy.x, y: enemy.y, time: eng.time } as never);
+    eng.runFor(1);
+    expect(scout.task?.describe(eng)).toBe('Screen: falling back');
+  });
+});
+
 describe('overwatch', () => {
   it('takes the position facing the given way and ends after its duration', () => {
     const eng = engine();

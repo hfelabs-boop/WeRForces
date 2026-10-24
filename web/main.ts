@@ -9,6 +9,8 @@ import type {
   EntitySnapshot,
   EntityTypeDef,
   EnvironmentState,
+  Explanation,
+  Finding,
   ForceId,
   Formation,
   Graphic,
@@ -22,7 +24,9 @@ import type {
   SimState,
   TaskSpec,
   TerrainData,
+  Travel,
   UnitSnapshot,
+  Viewshed,
   UnitTemplate,
   Vec2,
 } from '../src/shared/types.js';
@@ -34,6 +38,14 @@ import { setSymbolStyle, type SymbolStyle, symbolCanvas } from './symbols.js';
 import type { View3D } from './view3d.js';
 import { AarPlayer } from './aar.js';
 import { Timeline } from './timeline.js';
+import { QuickBar } from './quickbar.js';
+import { PlanEditor } from './planeditor.js';
+import { SyncMatrixDialog } from './syncmatrix.js';
+import { QuickBattleDialog } from './quickbattle.js';
+import { DriveMode } from './drive.js';
+import { CatalogEditor } from './catalogeditor.js';
+import { OrderLine } from './orderline.js';
+import { orderContext } from '../src/shared/orders.js';
 import type { CotStatus as CotView } from '../src/integrations/cot.js';
 import type { Webhook as WebhookView } from '../src/integrations/webhooks.js';
 
@@ -69,36 +81,13 @@ function moraleText(m: number | undefined, state: string | undefined): string {
   return `${Math.round(m * 100)}% · ${state ?? 'steady'}`;
 }
 
-type PlanStepKind =
-  | 'moveTo'
-  | 'followRoute'
-  | 'patrol'
-  | 'wait'
-  | 'attack'
-  | 'orbit'
-  | 'setRoe'
-  | 'setSpeed'
-  | 'setAltitude'
-  | 'setFormation'
-  | 'waitTime'
-  | 'waitArea'
-  | 'waitEnemy'
-  | 'waitFire'
-  | 'waitDestroyed'
-  | 'waitEnemyInArea'
-  | 'waitStrength'
-  | 'waitFuel'
-  | 'waitAmmo'
-  | 'resupply'
-  | 'setReaction'
-  | 'fireMission'
-  | 'setCallForFire'
-  | 'mount'
-  | 'dismount';
-
 class App {
   readonly api: Api;
   readonly map: MapView;
+  private quick!: QuickBar;
+  private syncDialog!: SyncMatrixDialog;
+  private driveMode!: DriveMode;
+  private orderLine!: OrderLine;
   catalog: Catalog | null = null;
   types = new Map<string, EntityTypeDef>();
   state: SimState | null = null;
@@ -118,7 +107,39 @@ class App {
   role: Role = { kind: 'controller' };
   armed: string | null = null;
   events: SimEvent[] = [];
-  planDrafts = new Map<string, Plan>();
+  private readonly plans: PlanEditor = new PlanEditor({
+    pickPoint: (label, onPick) => this.map.setMode({ kind: 'pickPoint', label, onPick }),
+    pickEntity: (label, onPick) => this.map.setMode({ kind: 'pickEntity', label, onPick }),
+    graphics: () => this.state?.graphics ?? [],
+    nameOf: (id) => this.graphic(id)?.name ?? this.entity(id)?.name ?? this.unit(id)?.name ?? id,
+    aimAt: (id) => this.unit(id)?.leaderId ?? id,
+    time: () => this.state?.time ?? 0,
+    can: (what) => {
+      const id = this.selectedId;
+      if (!id) return false;
+      const d = this.domainOf(id);
+      switch (what) {
+        case 'air':
+          return d === 'air';
+        case 'ground':
+          return d !== 'air' && d !== 'surface';
+        case 'indirect':
+          return this.hasIndirect(id);
+        case 'smoke':
+          return this.hasSmoke(id);
+        case 'carrier':
+          return this.isCarrier(id);
+        case 'infantry':
+          return d === 'lifeform';
+        case 'engineer':
+          return this.canBreach(id);
+        case 'unit':
+          return !!this.unit(id);
+      }
+    },
+    assign: async (plan) => (await this.cmd({ cmd: 'assignPlan', targetId: this.selectedId!, plan })).ok,
+    toast: (m, info) => this.toast(m, info),
+  });
   private inspectorFor: string | null = null;
   private treeSignature = '';
   private lastTree = 0;
@@ -150,6 +171,70 @@ class App {
       modeChanged: (m) => {
         if (m.kind !== 'place') this.disarm();
       },
+    });
+    this.quick = new QuickBar($('#quickbar'), {
+      targets: () => (this.aar.active ? [] : this.orderable().filter((id) => this.role.kind === 'controller' || (this.entity(id)?.force ?? this.unit(id)?.force) === this.role.force)),
+      orderAt: (w, make, line) => this.groupTaskAt(w, make, line),
+      orderEach: (make) => void this.groupOrder(make),
+      pickPoint: (label, onPick) => this.map.setMode({ kind: 'pickPoint', label, onPick }),
+      pickEntity: (label, onPick) => this.map.setMode({ kind: 'pickEntity', label, onPick }),
+      can: (id, what) =>
+        what === 'indirect'
+          ? this.hasIndirect(id)
+          : what === 'smoke'
+            ? this.hasSmoke(id)
+            : what === 'air'
+              ? this.domainOf(id) === 'air'
+              : what === 'ground'
+                ? this.domainOf(id) !== 'air' && this.domainOf(id) !== 'surface'
+                : what === 'carrier'
+                  ? this.isCarrier(id)
+                  : this.canBreach(id),
+      toast: (m, info) => this.toast(m, info),
+      nameOf: (id) => this.entity(id)?.name ?? this.unit(id)?.name ?? id,
+    });
+    this.syncDialog = new SyncMatrixDialog({
+      v1: (m, path, body) => this.api.v1(m, path, body),
+      context: (force) =>
+        this.state && this.terrainData ? orderContext(this.state, this.terrainData.towns, this.terrainData.spec.size, (id) => this.types.get(id), force) : null,
+      rows: (force) => [
+        ...(this.state?.units ?? []).filter((u) => u.force === force).map((u) => ({ id: u.id, name: u.name })),
+        ...(this.state?.entities ?? []).filter((e) => e.force === force && !e.unitId && !e.remote && e.damage !== 'destroyed').map((e) => ({ id: e.id, name: e.name })),
+      ],
+      playerForce: () => (this.role.kind === 'player' ? this.role.force : undefined),
+      time: () => this.state?.time ?? 0,
+      describe: (task) => this.plans.describe({ kind: 'task', task }),
+      modal: (c) => this.modal(c),
+      toast: (m, info) => this.toast(m, info),
+    });
+    $('#btn-sync').addEventListener('click', () => void this.syncDialog.open());
+    this.driveMode = new DriveMode($('#drive-hud'), {
+      entity: (id) => this.entity(id),
+      cmd: (c) => this.cmd(c),
+      pickEntity: (label, onPick) => this.map.setMode({ kind: 'pickEntity', label, onPick }),
+      follow: (id) => {
+        const e = this.entity(id);
+        if (e) this.map.centerOn(e);
+      },
+      weaponName: (id) => this.catalog?.weapons.find((w) => w.id === id)?.name ?? id,
+      toast: (m, info) => this.toast(m, info),
+    });
+    this.orderLine = new OrderLine($('#orderline'), {
+      context: () =>
+        this.state && this.terrainData
+          ? orderContext(this.state, this.terrainData.towns, this.terrainData.spec.size, (id) => this.types.get(id), this.role.kind === 'player' ? this.role.force : undefined)
+          : null,
+      selectedNames: () => this.quick.targetsNames(),
+      send: async (text) => {
+        try {
+          const r = await this.api.v1<{ description: string }>('POST', '/orders', { text });
+          this.refreshPath();
+          return r;
+        } catch (err) {
+          return { error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+      toast: (m, info) => this.toast(m, info),
     });
     this.timeline = new Timeline($('#timeline-strip'), {
       review: async (t) => {
@@ -201,9 +286,7 @@ class App {
       // Players cannot create objects: start on the Objects tab.
       ($('[data-tab="objects"]') as HTMLElement).click();
     }
-    this.catalog = catalog;
-    this.types = new Map(catalog.entityTypes.map((t) => [t.id, t]));
-    this.map.sidcOf = (id) => this.types.get(id)?.sidc;
+    this.applyCatalog(catalog);
     if (BASE) {
       const pill = $('#session-name');
       pill.textContent = `session ${decodeURIComponent(BASE.slice(3))}`;
@@ -249,6 +332,11 @@ class App {
     clock.classList.toggle('behind', behind);
     clock.title = behind ? `The server is busy ${Math.round((s.load ?? 0) * 100)}% of the time: the simulation runs slower than ${s.timeScale}x` : 'Simulation time';
     this.renderEnvironment(s.environment);
+    this.renderAlerts();
+    this.quick.update();
+    this.renderPhase(s);
+    this.driveMode.update();
+    this.checkCatalog(s);
     $('#scenario-name').textContent = s.scenarioName;
     const run = $('#btn-run');
     run.textContent = s.running ? '⏸ Pause' : '▶ Run';
@@ -414,7 +502,15 @@ class App {
       layersMenu.classList.toggle('open');
     });
     layersMenu.querySelector('.menu-items')!.addEventListener('click', (e) => e.stopPropagation());
+    const alertsMenu = $('#alerts-menu');
+    $('#btn-alerts').addEventListener('click', (e) => {
+      e.stopPropagation();
+      alertsMenu.classList.toggle('open');
+      this.renderAlerts(true);
+    });
+    $('#alerts-list').addEventListener('click', (e) => e.stopPropagation());
     document.addEventListener('click', () => {
+      alertsMenu.classList.remove('open');
       layersMenu.classList.remove('open');
       fileMenu.classList.remove('open');
       $('#context-menu').classList.add('hidden');
@@ -423,12 +519,15 @@ class App {
       const action = (e.target as HTMLElement).dataset.action;
       fileMenu.classList.remove('open');
       if (action === 'new') this.newScenarioDialog();
+      if (action === 'quick-battle') void this.quickBattle();
       if (action === 'open-sample') this.openScenarioDialog();
       if (action === 'import') ($('#file-input') as HTMLInputElement).click();
       if (action === 'export') this.exportScenario();
       if (action === 'save-server') this.saveOnServer();
       if (action === 'review-recording') void this.reviewRecordingDialog();
       if (action === 'settings') void this.settingsDialog();
+      if (action === 'catalog')
+        void new CatalogEditor({ catalog: () => this.catalog, v1: (m, path, body) => this.api.v1(m, path, body), modal: (c) => this.modal(c), toast: (m, info) => this.toast(m, info) }).open();
       if (action === 'undo' || action === 'redo') void this.undoRedo(action);
       if (action === 'batch') void this.batchDialog();
       if (action === 'sessions') void this.sessionsDialog();
@@ -501,7 +600,134 @@ class App {
       }
       if (e.key === 'f' && this.selectedId) this.centerOn(this.selectedId);
       if (e.key === 'm' && !e.ctrlKey && !e.metaKey) this.map.setMode({ kind: 'measure', points: [] });
+      if (e.key === 'n' && !e.ctrlKey && !e.metaKey) this.nextAlert();
+      if (e.key === 'g' && !e.ctrlKey && !e.metaKey && this.entity(this.selectedId)) this.driveMode.start(this.selectedId!);
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && this.quick.key(e.key)) e.preventDefault();
+      if (e.key === '/' && !this.aar.active) {
+        e.preventDefault();
+        this.orderLine.focus();
+      }
     });
+  }
+
+  private viewshedOn = false;
+
+  /** Show what an entity or a point can see (null clears it). */
+  private async showViewshed(from: string | { x: number; y: number; height: number } | null): Promise<void> {
+    const chip = $('#viewshed-chip');
+    if (!from) {
+      this.viewshedOn = false;
+      this.map.setViewshed(null);
+      chip.classList.add('hidden');
+      return;
+    }
+    try {
+      const v = await this.api.v1<Viewshed>('POST', '/terrain/viewshed', { from });
+      this.viewshedOn = true;
+      this.map.setViewshed(v);
+      const who = typeof from === 'string' ? (this.entity(from)?.name ?? from) : fmtGrid(from.x, from.y);
+      clear(chip);
+      chip.append(
+        h('span', { text: `Viewshed from ${who}: ${Math.round(v.visibleFraction * 100)}% of the ground within ${(v.radius / 1000).toFixed(1)} km seen; red is dead ground` }),
+        h('button', { class: 'small', text: '✕', title: 'Clear', onclick: () => void this.showViewshed(null) }),
+      );
+      chip.classList.remove('hidden');
+    } catch (err) {
+      this.toast(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  private catalogVersion: number | undefined;
+
+  private applyCatalog(catalog: Catalog): void {
+    this.catalog = catalog;
+    this.types = new Map(catalog.entityTypes.map((t) => [t.id, t]));
+    this.map.sidcOf = (id) => this.types.get(id)?.sidc;
+    this.map.jammerRange = (id) => this.types.get(id)?.jammer?.range;
+  }
+
+  /** The catalog changed on the server (catalog editor, a scenario with its own entries): fetch it again. */
+  private checkCatalog(s: SimState): void {
+    if (s.catalogVersion === undefined || s.catalogVersion === this.catalogVersion) return;
+    const first = this.catalogVersion === undefined;
+    this.catalogVersion = s.catalogVersion;
+    // The first state comes with the catalog sent on connecting.
+    if (first) return;
+    void this.api.v1<Catalog>('GET', '/catalog').then((c) => {
+      this.applyCatalog(c);
+      this.renderPalette();
+      this.inspectorFor = null;
+    });
+  }
+
+  /** The phase in progress on the toolbar button. */
+  private renderPhase(s: SimState): void {
+    const force = this.role.kind === 'player' ? this.role.force : 1;
+    const m = s.sync?.find((x) => x.force === force) ?? s.sync?.[0];
+    const cur = m?.phases.find((p) => p.id === m.current);
+    const btn = $('#btn-sync');
+    const text = cur ? `Phase: ${cur.name}` : m ? 'Phases (not started)' : 'Phases';
+    if (btn.textContent !== text) btn.textContent = text;
+  }
+
+  // ------------------------------------------------------------ alerts
+
+  /** Alerts already toasted, so each critical one pops up once. */
+  private alertsToasted = new Set<string>();
+  private alertsPrimed = false;
+  private alertsKey = '';
+  private alertCursor = 0;
+
+  /** Badge, list and pop-ups for the attention queue. */
+  private renderAlerts(force = false): void {
+    const alerts = this.state?.alerts ?? [];
+    const count = $('#alerts-count');
+    count.textContent = String(alerts.length);
+    count.classList.toggle('hidden', alerts.length === 0);
+    count.classList.toggle('critical', alerts.some((a) => a.severity === 'critical'));
+    // Critical alerts pop up once, except those already open when the page loaded.
+    for (const a of alerts) {
+      if (a.severity !== 'critical' || this.alertsToasted.has(a.id)) continue;
+      this.alertsToasted.add(a.id);
+      if (this.alertsPrimed) this.toast(`⚠ ${a.text}`);
+    }
+    this.alertsPrimed = true;
+    const key = alerts.map((a) => `${a.id}:${a.count}:${a.text}`).join('|');
+    if (!force && key === this.alertsKey) return;
+    this.alertsKey = key;
+    const list = $('#alerts-list');
+    clear(list);
+    if (!alerts.length) {
+      list.append(h('div', { class: 'hint alert-empty', text: 'Nothing needs your attention.' }));
+      return;
+    }
+    list.append(
+      h('div', { class: 'alerts-head' }, h('span', { class: 'hint', text: `${alerts.length} open · N: next` }), h('button', { class: 'small', text: 'Acknowledge all', onclick: () => void this.cmd({ cmd: 'ackAlert', all: true }) })),
+      ...alerts.map((a) =>
+        h(
+          'div',
+          { class: `alert-row sev-${a.severity}`, title: 'Select and centre' },
+          h('span', { class: 'alert-time', text: fmtTime(a.time) }),
+          h('span', { class: 'alert-text', text: `${a.text}${a.count > 1 ? ` (×${a.count})` : ''}`, onclick: () => this.focusAlert(a.objectId) }),
+          h('button', { class: 'small', text: '✓', title: 'Acknowledge', onclick: () => void this.cmd({ cmd: 'ackAlert', id: a.id }) }),
+        ),
+      ),
+    );
+  }
+
+  private focusAlert(objectId: string): void {
+    if (!this.exists(objectId)) return;
+    this.select(objectId);
+    this.centerOn(objectId);
+  }
+
+  /** Jump to the next open alert (N). */
+  private nextAlert(): void {
+    const alerts = this.state?.alerts ?? [];
+    if (!alerts.length) return this.toast('No alerts', true);
+    const a = alerts[this.alertCursor++ % alerts.length];
+    this.focusAlert(a.objectId);
+    this.toast(a.text, true);
   }
 
   private startDraw(kind: GraphicKind): void {
@@ -561,6 +787,9 @@ class App {
   /** Optional model parts and the environment for the current scenario. */
   private async settingsDialog(): Promise<void> {
     const rules = await this.api.v1<Record<string, boolean>>('GET', '/simulation/rules');
+    const life = await this.api.v1<{ vehicles: number; pedestrians: number }>('GET', '/simulation/pattern-of-life').catch(() => ({ vehicles: 0, pedestrians: 0 }));
+    const cars = h('input', { type: 'number', min: '0', max: '300', step: '1', value: String(life.vehicles) }) as HTMLInputElement;
+    const people = h('input', { type: 'number', min: '0', max: '300', step: '1', value: String(life.pedestrians) }) as HTMLInputElement;
     const env = await this.api.v1<EnvironmentState>('GET', '/simulation/environment');
     const hh = Math.floor(env.time);
     const mm = Math.round((env.time - hh) * 60);
@@ -595,6 +824,9 @@ class App {
         ...field('Wind from (°)', windFrom),
       ),
       h('small', { class: 'hint', text: `Now ${env.localTime} on ${env.localDate}. Night cuts eyes and binoculars to under 10% of their range; night-vision goggles keep 60%; thermal sights are unaffected by darkness. Fog cuts every optical sensor (thermals see about 3× further); rain and snow slow vehicles off roads; wind drifts smoke.` }),
+      h('h4', { text: 'Civilians (pattern of life)' }),
+      h('div', { class: 'env-grid' }, ...field('Cars', cars), ...field('People', people)),
+      h('small', { class: 'hint', text: 'Neutral background traffic: cars drive between the towns along the roads, people walk about the towns. They run from shots and blasts nearby, and any killed are logged.' }),
       h(
         'div',
         { class: 'row' },
@@ -604,9 +836,14 @@ class App {
           onclick: async () => {
             const next: Record<string, boolean> = {};
             for (const el of body.querySelectorAll<HTMLInputElement>('[data-rule]')) next[el.dataset.rule!] = el.checked;
-            const r = await this.cmd({ cmd: 'setRules', rules: next });
             const [th, tm] = time.value.split(':').map(Number);
-            const e = await this.cmd({
+            // One edit: a single undo takes the whole dialog back.
+            const r = await this.cmd({
+              cmd: 'batch',
+              commands: [
+                { cmd: 'setRules', rules: next },
+                { cmd: 'setPatternOfLife', vehicles: Number(cars.value) || 0, pedestrians: Number(people.value) || 0 },
+                {
               cmd: 'setEnvironment',
               environment: {
                 date: date.value || env.date,
@@ -616,8 +853,10 @@ class App {
                 windSpeed: Number(windSpeed.value),
                 windFrom: Number(windFrom.value) % 360,
               },
+                },
+              ],
             });
-            if (r.ok && e.ok) close();
+            if (r.ok) close();
           },
         }),
         h('button', { text: 'Cancel', onclick: () => close() }),
@@ -744,6 +983,34 @@ class App {
     close = this.modal(
       h('div', {}, h('h3', { text: 'Open scenario' }), cards.length ? cards : h('p', { class: 'hint', text: 'No scenarios found in ./scenarios' }), h('div', { class: 'row' }, h('button', { text: 'Cancel', onclick: () => close() }))),
     );
+  }
+
+  private async quickBattle(): Promise<void> {
+    await new QuickBattleDialog({
+      v1: (m, path, body) => this.api.v1(m, path, body),
+      modal: (c) => this.modal(c),
+      toast: (m, info) => this.toast(m, info),
+      hasDataset: () => this.grid?.spec.dataset,
+      built: (b) => {
+        this.select(null);
+        let close = () => {};
+        close = this.modal(
+          h(
+            'div',
+            { class: 'quick-battle-brief' },
+            h('h3', { text: b.name }),
+            h('p', { text: b.description }),
+            h(
+              'div',
+              { class: 'row' },
+              h('button', { class: 'primary', text: 'Start', onclick: () => (close(), void this.cmd({ cmd: 'run' })) }),
+              h('button', { text: 'Show phases', onclick: () => (close(), void this.syncDialog.open()) }),
+              h('button', { text: 'Close', onclick: () => close() }),
+            ),
+          ),
+        );
+      },
+    }).open();
   }
 
   private async newScenarioDialog(): Promise<void> {
@@ -1112,8 +1379,14 @@ class App {
     const el = $('#objects');
     clear(el);
     const match = (s: string) => !filter || s.toLowerCase().includes(filter);
-    const item = (id: string, name: string, icon: HTMLElement | null, dead = false) =>
-      h('div', { class: `tree-item${id === this.selectedId ? ' selected' : ''}${dead ? ' dead' : ''}`, onclick: () => this.select(id), ondblclick: () => this.centerOn(id) }, icon, name);
+    // Under its parent, a name that repeats the parent's ("A Coy 1st Platoon" under "A Coy") shows only the rest; the full name is the tooltip.
+    const item = (id: string, name: string, icon: HTMLElement | null, dead = false, parent?: string) =>
+      h(
+        'div',
+        { class: `tree-item${id === this.selectedId ? ' selected' : ''}${dead ? ' dead' : ''}`, title: name, onclick: () => this.select(id), ondblclick: () => this.centerOn(id) },
+        icon,
+        h('span', { class: 'tree-name', text: parent && name.startsWith(`${parent} `) && name.length > parent.length + 1 ? `… ${name.slice(parent.length + 1)}` : name }),
+      );
     for (const f of [1, 2, 3, 0] as ForceId[]) {
       const units = st.units.filter((u) => u.force === f);
       const loose = st.entities.filter((e) => e.force === f && !e.unitId);
@@ -1124,14 +1397,14 @@ class App {
       const membersOf = (u: UnitSnapshot) => u.memberIds.map((id) => this.entity(id)).filter((e): e is EntitySnapshot => !!e);
       const matches = (u: UnitSnapshot): boolean => match(u.name) || membersOf(u).some((m) => match(m.name)) || subsOf(u).some(matches);
       // Units nest under their superiors; members follow their subordinate units.
-      const renderUnit = (u: UnitSnapshot, into: HTMLElement) => {
+      const renderUnit = (u: UnitSnapshot, into: HTMLElement, parent?: string) => {
         if (!matches(u)) return;
         const members = membersOf(u);
         const lead = members[0];
-        into.append(item(u.id, `${u.name}`, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon, this.sidc(lead.typeId)) : null));
+        into.append(item(u.id, `${u.name}`, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon, this.sidc(lead.typeId)) : null, false, parent));
         const kids = h('div', { class: 'tree-children' });
-        for (const sub of subsOf(u)) renderUnit(sub, kids);
-        kids.append(...members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolCanvas(f, m.domain, m.symbol, 16, undefined, this.sidc(m.typeId)), m.damage === 'destroyed')));
+        for (const sub of subsOf(u)) renderUnit(sub, kids, u.name);
+        kids.append(...members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolCanvas(f, m.domain, m.symbol, 16, undefined, this.sidc(m.typeId)), m.damage === 'destroyed', u.name)));
         into.append(kids);
       };
       for (const u of units) if (!u.parentId || !byId.has(u.parentId)) renderUnit(u, el);
@@ -1178,6 +1451,7 @@ class App {
     this.updateInspector();
     this.renderTree(true);
     this.refreshPath();
+    this.quick.update();
   }
 
   private rangesFor(id: string | null): { radius: number; label: string; color: string }[] {
@@ -1265,9 +1539,9 @@ class App {
       items.push(h('div', { class: 'title', text: `${group.length} selected` }));
       const selForces = new Set(group.map((id) => this.entity(id)?.force ?? this.unit(id)?.force));
       if (hitEntity && hit && !selForces.has(hitEntity.force) && hitEntity.damage !== 'destroyed') {
-        add(`All attack ${hitEntity.name}`, () => this.groupOrder((id) => this.task(id, { type: 'attack', targetId: hitEntity.id })));
+        add(`All attack ${hitEntity.name}`, () => this.groupOrder((targetId) => ({ cmd: 'assignTask', targetId, task: { type: 'attack', targetId: hitEntity.id } })));
       } else if (this.unit(hit) && selForces.has(this.unit(hit)!.force) && group.every((id) => this.unit(id))) {
-        add(`Put under ${this.unit(hit)!.name}`, () => this.groupOrder((id) => this.cmd({ cmd: 'setSuperior', unitId: id, superiorId: hit! })));
+        add(`Put under ${this.unit(hit)!.name}`, () => this.groupOrder((unitId) => ({ cmd: 'setSuperior', unitId, superiorId: hit! })));
       } else {
         add('Move here (keep formation)', () => this.groupTaskAt(world, (t) => ({ type: 'moveTo', target: t }), false));
         add('Move here by a covered route', () => this.groupTaskAt(world, (t) => ({ type: 'moveTo', target: t, covered: true }), false));
@@ -1276,7 +1550,7 @@ class App {
         const guns = group.filter((id) => this.hasIndirect(id));
         if (guns.length) add(`Fire mission here (${guns.length} firing)`, () => void Promise.all(guns.map((id) => this.task(id, { type: 'fireMission', target: world, rounds: 3, radius: this.unit(id) ? 50 : 0 }))));
       }
-      add('Stop all', () => this.groupOrder((id) => this.cmd({ cmd: 'stop', targetId: id })));
+      add('Stop all', () => this.groupOrder((targetId) => ({ cmd: 'stop', targetId })));
       sep();
     } else if (selTaskable && hit !== sel) {
       items.push(h('div', { class: 'title', text: selName ?? '' }));
@@ -1313,8 +1587,8 @@ class App {
         }
         if (this.passengerCount(sel) > 0) {
           add('Move here and dismount', () => {
-            this.planDrafts.set(sel, { name: 'Move and dismount', statements: [{ kind: 'task', task: { type: 'moveTo', target: world } }, { kind: 'task', task: { type: 'dismount' } }] });
-            this.cmd({ cmd: 'assignPlan', targetId: sel, plan: this.planDrafts.get(sel)! });
+            this.plans.set(sel, { name: 'Move and dismount', statements: [{ kind: 'task', task: { type: 'moveTo', target: world } }, { kind: 'task', task: { type: 'dismount' } }] });
+            this.cmd({ cmd: 'assignPlan', targetId: sel, plan: this.plans.get(sel) });
           });
         }
         if (this.hasIndirect(sel)) add('Fire mission here (3 rounds)', () => this.task(sel, { type: 'fireMission', target: world, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
@@ -1334,6 +1608,8 @@ class App {
       sep();
     }
     add('Center map here', () => this.map.centerOn(world));
+    add('What can be seen from here (viewshed)', () => void this.showViewshed({ x: Math.round(world.x), y: Math.round(world.y), height: 2 }));
+    if (this.viewshedOn) add('Clear viewshed', () => this.showViewshed(null));
     add('Place point here', () => this.cmd({ cmd: 'createGraphic', kind: 'point', points: [world], force: this.force }));
     if (this.armed) add('Place armed item here', () => (this.map.mode.kind === 'place' ? this.map.mode.onPlace(world) : undefined));
     for (const it of items) if (it) menu.append(it);
@@ -1395,6 +1671,7 @@ class App {
       else if (g) this.buildGraphicInspector(el, g);
     }
     this.updateLiveFields(el);
+    void this.refreshWhy();
   }
 
   private bind(key: string): HTMLElement {
@@ -1445,6 +1722,16 @@ class App {
     }
     el.append(
       h('div', { class: 'section' }, h('h4', { text: 'Current activity' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
+      this.whySection(e.id),
+      t?.jammer
+        ? h(
+            'div',
+            { class: 'section row' },
+            h('h4', { text: 'Jamming' }),
+            h('span', { class: 'hint', text: `${t.jammer.radio ? 'radios' : ''}${t.jammer.radio && t.jammer.radar ? ' and ' : ''}${t.jammer.radar ? 'radars' : ''} within ${(t.jammer.range / 1000).toFixed(0)} km` }),
+            h('button', { text: e.jamming === false ? 'Switch on' : 'Switch off', onclick: () => void this.cmd({ cmd: 'setJamming', id: e.id, on: this.entity(e.id)?.jamming === false }).then(() => (this.inspectorFor = null)) }),
+          )
+        : '',
       this.roeSection(e.id),
       this.reactionsSection(e.id, false),
       this.taskSection(e.id, e.domain),
@@ -1452,8 +1739,104 @@ class App {
       h('div', { class: 'section' }, h('h4', { text: 'Weapons' }), h('div', { 'data-bind': 'weapons' })),
       h('div', { class: 'section' }, h('h4', { text: 'Sensors' }), h('div', { class: 'hint', text: (t?.sensors ?? []).map((s) => this.catalog?.sensors.find((x) => x.id === s)?.name ?? s).join(', ') || 'none' })),
       h('div', { class: 'section' }, h('h4', { text: 'Contacts' }), h('div', { 'data-bind': 'contacts' })),
-      h('div', { class: 'section row' }, h('button', { text: 'Center', onclick: () => this.centerOn(e.id) }), h('button', { class: 'danger', text: 'Delete', onclick: () => this.deleteSelected() })),
+      h(
+        'div',
+        { class: 'section row' },
+        h('button', { text: 'Center', onclick: () => this.centerOn(e.id) }),
+        h('button', { text: 'Viewshed', title: 'Show the ground it can see, and its dead ground, out to its sensor range', onclick: () => void this.showViewshed(e.id) }),
+        h('button', { text: 'Drive', title: 'Drive it yourself: W/S throttle, A/D turn, T pick a target, Esc hand back (G)', onclick: () => this.driveMode.start(e.id) }),
+        h('button', { class: 'danger', text: 'Delete', onclick: () => this.deleteSelected() }),
+      ),
     );
+  }
+
+  // ------------------------------------------------------------ why?
+
+  private whyAt = 0;
+  private whyBusy = false;
+  private whyOpen = false;
+
+  /** "Why?": the server's explanation of what the selection is doing and what stops it, kept fresh while shown. */
+  private whySection(id: string): HTMLElement {
+    const details = h('div', { class: 'why-details', 'data-why-details': id });
+    details.hidden = !this.whyOpen;
+    const toggle = h('button', { class: 'small', text: this.whyOpen ? 'Less' : 'Details', title: 'Every reason, with what you can do about it' });
+    toggle.addEventListener('click', () => {
+      this.whyOpen = !this.whyOpen;
+      details.hidden = !this.whyOpen;
+      toggle.textContent = this.whyOpen ? 'Less' : 'Details';
+    });
+    const sec = h('div', { class: 'section why' }, h('h4', {}, 'Why? ', toggle), h('div', { class: 'why-summary hint', 'data-why': id, text: '…' }), details);
+    this.whyAt = 0;
+    void this.refreshWhy(true);
+    return sec;
+  }
+
+  private async refreshWhy(force = false): Promise<void> {
+    const id = this.selectedId;
+    const summary = id ? document.querySelector<HTMLElement>(`[data-why="${id}"]`) : null;
+    if (!id || !summary || this.whyBusy) return;
+    if (!force && performance.now() - this.whyAt < 2000) return;
+    this.whyBusy = true;
+    this.whyAt = performance.now();
+    try {
+      const kind = this.unit(id) ? 'units' : 'entities';
+      const ex = await this.api.v1<Explanation>('GET', `/${kind}/${encodeURIComponent(id)}/explain`);
+      if (this.selectedId !== id) return;
+      this.renderWhy(id, ex);
+    } catch {
+      summary.textContent = '';
+    } finally {
+      this.whyBusy = false;
+    }
+  }
+
+  private renderWhy(id: string, ex: Explanation): void {
+    const summary = document.querySelector<HTMLElement>(`[data-why="${id}"]`);
+    const details = document.querySelector<HTMLElement>(`[data-why-details="${id}"]`);
+    if (!summary || !details) return;
+    const worst = [...(ex.unit ?? []), ...ex.movement, ...ex.fire].find((f) => f.severity === 'block') ?? [...ex.movement, ...ex.fire].find((f) => f.severity === 'warn');
+    summary.textContent = ex.summary;
+    summary.className = `why-summary ${worst ? `sev-${worst.severity}` : 'hint'}`;
+    const item = (f: Finding) => {
+      const li = h('li', { class: `sev-${f.severity}` }, h('span', { text: f.text }));
+      if (f.fix) li.append(h('div', { class: 'fix', text: `→ ${f.fix}` }));
+      if (f.at || f.aboutId) {
+        li.classList.add('clickable');
+        li.title = f.at ? 'Show on the map' : 'Select it';
+        li.addEventListener('click', () => {
+          if (f.at) this.showWhyMark(id, f);
+          else if (f.aboutId) this.select(f.aboutId);
+        });
+      }
+      return li;
+    };
+    const group = (title: string, fs: Finding[] | undefined) => (fs && fs.length ? [h('h5', { text: title }), h('ul', { class: 'why-list' }, ...fs.map(item))] : []);
+    clear(details);
+    details.append(...group('Unit', ex.unit), ...group('Moving', ex.movement), ...group('Shooting', ex.fire), ...group('Seeing', ex.sensing));
+  }
+
+  /** Mark what a finding points at (e.g. the crest that blocks a sight line), with the sight line. */
+  private showWhyMark(id: string, f: Finding): void {
+    const from = this.positionOf(id);
+    const to = f.aboutId ? this.positionOf(f.aboutId) : undefined;
+    this.map.explainMarks = [{ at: f.at!, label: f.text.split(':')[0].slice(0, 40), line: from && to ? [from, to] : undefined }];
+    this.map.centerOn(f.at!);
+    this.map.invalidate();
+    window.setTimeout(() => {
+      this.map.explainMarks = [];
+      this.map.invalidate();
+    }, 8000);
+  }
+
+  /** "2.3 km to go, ETA 14:32 local (in 6 min)" for a move. */
+  private travelText(t: Travel | undefined): string {
+    if (!t) return '';
+    const left = t.remaining >= 1000 ? `${(t.remaining / 1000).toFixed(1)} km` : `${t.remaining} m`;
+    if (t.eta === undefined) return `${left} to go, stalled${t.stalled ? `: ${t.stalled}` : ''}`;
+    const secs = Math.max(0, t.eta - (this.state?.time ?? 0));
+    const inText = secs < 90 ? `${Math.round(secs)} s` : secs < 5400 ? `${Math.round(secs / 60)} min` : `${(secs / 3600).toFixed(1)} h`;
+    return `${left} to go, ETA ${t.etaLocal ?? fmtTime(t.eta)}${t.etaLocal ? ' local' : ''} (in ${inText})`;
   }
 
   private pendingOrderText(id: string): string {
@@ -1496,6 +1879,7 @@ class App {
           ]
         : []),
       h('div', { class: 'section' }, h('h4', { text: 'Current activity' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
+      this.whySection(u.id),
       this.roeSection(u.id),
       this.reactionsSection(u.id, true),
       this.taskSection(u.id, lead?.domain ?? 'ground'),
@@ -1695,14 +2079,15 @@ class App {
         'div',
         { class: 'section row' },
         loose.length >= 2 && forces.size === 1 ? h('button', { text: 'Group into a unit', onclick: () => this.cmd({ cmd: 'groupUnit', entityIds: loose }).then((r) => r.ok && r.id && this.select(r.id)) }) : null,
-        h('button', { text: 'Stop all', onclick: () => this.groupOrder((id) => this.cmd({ cmd: 'stop', targetId: id })) }),
+        h('button', { text: 'Stop all', onclick: () => this.groupOrder((targetId) => ({ cmd: 'stop', targetId })) }),
         h('button', { text: 'Clear selection', onclick: () => this.select(null) }),
         h('button', {
           class: 'danger',
           text: 'Delete all',
           onclick: async () => {
             if (!confirm(`Delete ${ids.length} objects?`)) return;
-            for (const id of ids) if (this.exists(id)) await this.cmd({ cmd: 'deleteObject', id });
+            const commands: Command[] = ids.filter((id) => this.exists(id)).map((id) => ({ cmd: 'deleteObject', id }));
+            if (commands.length) await this.cmd({ cmd: 'batch', commands });
             this.select(null);
           },
         }),
@@ -1720,8 +2105,11 @@ class App {
     });
   }
 
-  private async groupOrder(fn: (id: string) => Promise<unknown>): Promise<void> {
-    for (const id of this.orderable()) await fn(id);
+  /** One command per selected thing, sent together: one edit, one undo step. */
+  private async groupOrder(make: (id: string) => Command | null | undefined): Promise<void> {
+    const commands = this.orderable().map(make).filter((c): c is Command => !!c);
+    if (!commands.length) return;
+    await this.cmd(commands.length === 1 ? commands[0] : { cmd: 'batch', commands });
     this.refreshPath();
   }
 
@@ -1759,10 +2147,8 @@ class App {
     } else {
       targets = pos.map((p) => clamp({ x: world.x + p.x - c.x, y: world.y + p.y - c.y }));
     }
-    void (async () => {
-      for (let i = 0; i < ids.length; i++) await this.cmd({ cmd: 'assignTask', targetId: ids[i], task: make(targets[i], Math.round(facing)) });
-      this.refreshPath();
-    })();
+    const commands: Command[] = ids.map((targetId, i) => ({ cmd: 'assignTask', targetId, task: make(targets[i], Math.round(facing)) }));
+    void this.cmd(commands.length === 1 ? commands[0] : { cmd: 'batch', commands }).then(() => this.refreshPath());
   }
 
   private buildGraphicInspector(el: HTMLElement, g: Graphic): void {
@@ -1896,313 +2282,20 @@ class App {
 
   // ------------------------------------------------------------ plan editor
 
-  private draft(id: string): Plan {
-    let p = this.planDrafts.get(id);
-    if (!p) {
-      p = { name: 'Plan', statements: [], loop: false };
-      this.planDrafts.set(id, p);
-    }
-    return p;
-  }
-
   addPlanStep(id: string, st: PlanStatement): void {
-    this.draft(id).statements.push(st);
-    if (this.selectedId === id) this.renderPlanList(id);
+    this.plans.add(id, st);
   }
 
-  private describe(st: PlanStatement): string {
-    const name = (gid: string) => this.graphic(gid)?.name ?? this.entity(gid)?.name ?? gid;
-    switch (st.kind) {
-      case 'task': {
-        const t = st.task;
-        switch (t.type) {
-          case 'moveTo':
-            return `Move to ${fmtGrid(t.target.x, t.target.y)}`;
-          case 'followRoute':
-            return `Follow route ${name(t.routeId)}`;
-          case 'patrol':
-            return `Patrol ${name(t.routeId)}`;
-          case 'wait':
-            return `Wait ${t.duration} s`;
-          case 'attack':
-            return `Attack ${name(t.targetId)}`;
-          case 'follow':
-            return `Follow ${name(t.targetId)}`;
-          case 'orbit':
-            return `Orbit ${fmtGrid(t.center.x, t.center.y)} r ${t.radius} m`;
-          case 'fireMission':
-            return `Fire mission ${fmtGrid(t.target.x, t.target.y)}, ${t.rounds ?? 3} rounds`;
-          case 'mount':
-            return `Mount ${this.unit(t.carrierId)?.name ?? name(t.carrierId)}`;
-          case 'dismount':
-            return 'Dismount passengers';
-          case 'breach':
-            return `Breach ${name(t.graphicId)}`;
-          case 'resupply':
-            return t.supplierId ? `Resupply from ${name(t.supplierId)}` : 'Resupply';
-          case 'overwatch':
-          case 'defend':
-          case 'screen':
-            return `${t.type[0].toUpperCase()}${t.type.slice(1)} ${fmtGrid(t.position.x, t.position.y)}`;
-          case 'ambush':
-            return `Ambush ${name(t.killZoneId)}`;
-          case 'search':
-            return `Search ${name(t.areaId)}`;
-          default:
-            return t.type;
-        }
-      }
-      case 'setRoe':
-        return `Set ROE: ${ROE_LABELS[st.roe]}`;
-      case 'setSpeed':
-        return `Set speed ${Math.round(st.speed * 3.6)} km/h`;
-      case 'setAltitude':
-        return `Set altitude ${st.altitude} m AGL`;
-      case 'setFormation':
-        return `Set formation ${st.formation}`;
-      case 'waitUntil': {
-        const c = st.condition;
-        if (c.type === 'simTime') return `Wait until time ${fmtTime(c.time)}`;
-        if (c.type === 'inArea') return `Wait until in ${name(c.areaId)}`;
-        if (c.type === 'enemyDetected') return 'Wait until enemy detected';
-        if (c.type === 'underFire') return 'Wait until under fire';
-        if (c.type === 'enemyInArea') return `Wait until enemy in ${name(c.areaId)}`;
-        if (c.type === 'strengthBelow') return `Wait until strength below ${Math.round(c.fraction * 100)}%`;
-        if (c.type === 'fuelBelow') return `Wait until fuel below ${Math.round(c.fraction * 100)}%`;
-        if (c.type === 'ammoBelow') return `Wait until ammunition below ${Math.round(c.fraction * 100)}%`;
-        return `Wait until ${name(c.entityId)} destroyed`;
-      }
-      case 'setReactions':
-        if (st.reactions.callForFire !== undefined && st.reactions.onContact === undefined) return `Set reaction: ${st.reactions.callForFire ? 'call for fire' : 'no call for fire'}`;
-        return `Set reaction: ${st.reactions.onContact === 'halt' ? 'halt on contact' : 'continue on contact'}`;
-    }
-  }
-
-  private planSection(id: string, isUnit: boolean): HTMLElement {
-    const kinds: [PlanStepKind, string][] = [
-      ['moveTo', 'Move to (pick)'],
-      ['followRoute', 'Follow route'],
-      ['patrol', 'Patrol route'],
-      ['wait', 'Wait (seconds)'],
-      ['attack', 'Attack (pick)'],
-      ['orbit', 'Orbit (pick)'],
-      ['setRoe', 'Set ROE'],
-      ['setSpeed', 'Set speed (km/h)'],
-      ['setAltitude', 'Set altitude (m AGL)'],
-      ...(isUnit ? ([['setFormation', 'Set formation']] as [PlanStepKind, string][]) : []),
-      ['waitTime', 'Wait until time (s)'],
-      ['waitArea', 'Wait until in area'],
-      ['waitEnemy', 'Wait until enemy detected'],
-      ['waitFire', 'Wait until under fire'],
-      ['waitDestroyed', 'Wait until destroyed (pick)'],
-      ['waitEnemyInArea', 'Wait until enemy in area'],
-      ['waitStrength', 'Wait until strength below (%)'],
-      ['waitFuel', 'Wait until fuel below (%)'],
-      ['waitAmmo', 'Wait until ammunition below (%)'],
-      ['resupply', 'Resupply at the nearest supply vehicle'],
-      ['setReaction', 'Set reaction on contact'],
-      ['setCallForFire', 'Set call for fire'],
-      ...(this.domainOf(id) === 'lifeform' ? ([['mount', 'Mount carrier (pick)']] as [PlanStepKind, string][]) : []),
-      ...(this.isCarrier(id) ? ([['dismount', 'Dismount passengers']] as [PlanStepKind, string][]) : []),
-      ...(this.hasIndirect(id) ? ([['fireMission', 'Fire mission (pick), rounds']] as [PlanStepKind, string][]) : []),
-    ];
-    const kindSel = h('select', {}, kinds.map(([k, l]) => h('option', { value: k, text: l }))) as HTMLSelectElement;
-    const param = h('span', {});
-    let getParam: () => unknown = () => undefined;
-    const renderParam = () => {
-      clear(param);
-      const k = kindSel.value as PlanStepKind;
-      getParam = () => undefined;
-      if (k === 'followRoute' || k === 'patrol') {
-        const s = this.routeSelect();
-        param.append(s);
-        getParam = () => s.value;
-      } else if (k === 'waitArea' || k === 'waitEnemyInArea') {
-        const areas = this.areas();
-        const s = h('select', {}, areas.length ? areas.map((a) => h('option', { value: a.id, text: a.name })) : h('option', { value: '', text: '(no areas)' })) as HTMLSelectElement;
-        param.append(s);
-        getParam = () => s.value;
-      } else if (k === 'setRoe') {
-        const s = h('select', {}, (Object.keys(ROE_LABELS) as Roe[]).map((r) => h('option', { value: r, text: ROE_LABELS[r] }))) as HTMLSelectElement;
-        param.append(s);
-        getParam = () => s.value;
-      } else if (k === 'setFormation') {
-        const s = h('select', {}, FORMATIONS.map((f) => h('option', { value: f, text: f }))) as HTMLSelectElement;
-        param.append(s);
-        getParam = () => s.value;
-      } else if (k === 'setReaction') {
-        const s = h('select', {}, h('option', { value: 'halt', text: 'Halt and fight' }), h('option', { value: 'continue', text: 'Continue' })) as HTMLSelectElement;
-        param.append(s);
-        getParam = () => s.value;
-      } else if (k === 'setCallForFire') {
-        const s = h('select', {}, h('option', { value: 'yes', text: 'Call for fire' }), h('option', { value: 'no', text: 'Stop calling for fire' })) as HTMLSelectElement;
-        param.append(s);
-        getParam = () => s.value;
-      } else if (['wait', 'setSpeed', 'setAltitude', 'waitTime', 'orbit', 'waitStrength', 'waitFuel', 'waitAmmo', 'fireMission'].includes(k)) {
-        const defaults: Record<string, string> = { wait: '60', setSpeed: '30', setAltitude: '150', waitTime: String(Math.round((this.state?.time ?? 0) + 120)), orbit: '2000', waitStrength: '50', waitFuel: '25', waitAmmo: '30', fireMission: '3' };
-        const n = h('input', { type: 'number', value: defaults[k], style: 'width:80px', title: k === 'orbit' ? 'radius (m)' : '' }) as HTMLInputElement;
-        param.append(n);
-        getParam = () => Number(n.value);
-      }
-    };
-    kindSel.addEventListener('change', renderParam);
-    renderParam();
-    const addBtn = h('button', {
-      text: 'Add',
-      onclick: () => {
-        const k = kindSel.value as PlanStepKind;
-        const v = getParam();
-        const push = (st: PlanStatement) => this.addPlanStep(id, st);
-        switch (k) {
-          case 'moveTo':
-            this.map.setMode({ kind: 'pickPoint', label: 'Click the plan waypoint', onPick: (p) => push({ kind: 'task', task: { type: 'moveTo', target: p } }) });
-            return;
-          case 'attack':
-            this.map.setMode({ kind: 'pickEntity', label: 'Click the target', onPick: (t) => push({ kind: 'task', task: { type: 'attack', targetId: this.unit(t)?.leaderId ?? t } }) });
-            return;
-          case 'orbit':
-            this.map.setMode({ kind: 'pickPoint', label: 'Click the orbit centre', onPick: (p) => push({ kind: 'task', task: { type: 'orbit', center: p, radius: Number(v) || 2000 } }) });
-            return;
-          case 'followRoute':
-          case 'patrol':
-            if (!v) return this.toast('Draw a route first');
-            return push({ kind: 'task', task: { type: k, routeId: String(v) } });
-          case 'wait':
-            return push({ kind: 'task', task: { type: 'wait', duration: Number(v) || 0 } });
-          case 'setRoe':
-            return push({ kind: 'setRoe', roe: v as Roe });
-          case 'setSpeed':
-            return push({ kind: 'setSpeed', speed: (Number(v) || 0) / 3.6 });
-          case 'setAltitude':
-            return push({ kind: 'setAltitude', altitude: Number(v) || 0 });
-          case 'setFormation':
-            return push({ kind: 'setFormation', formation: v as Formation });
-          case 'waitTime':
-            return push({ kind: 'waitUntil', condition: { type: 'simTime', time: Number(v) || 0 } });
-          case 'waitArea':
-            if (!v) return this.toast('Draw an area first');
-            return push({ kind: 'waitUntil', condition: { type: 'inArea', areaId: String(v) } });
-          case 'waitEnemy':
-            return push({ kind: 'waitUntil', condition: { type: 'enemyDetected' } });
-          case 'waitFire':
-            return push({ kind: 'waitUntil', condition: { type: 'underFire' } });
-          case 'waitEnemyInArea':
-            if (!v) return this.toast('Draw an area first');
-            return push({ kind: 'waitUntil', condition: { type: 'enemyInArea', areaId: String(v) } });
-          case 'waitStrength':
-            return push({ kind: 'waitUntil', condition: { type: 'strengthBelow', fraction: Math.min(100, Math.max(1, Number(v) || 50)) / 100 } });
-          case 'waitFuel':
-          case 'waitAmmo':
-            return push({ kind: 'waitUntil', condition: { type: k === 'waitFuel' ? 'fuelBelow' : 'ammoBelow', fraction: Math.min(100, Math.max(1, Number(v) || 25)) / 100 } });
-          case 'resupply':
-            return push({ kind: 'task', task: { type: 'resupply' } });
-          case 'setReaction':
-            return push({ kind: 'setReactions', reactions: { onContact: v === 'halt' ? 'halt' : 'continue' } });
-          case 'mount':
-            this.map.setMode({ kind: 'pickEntity', label: 'Click the carrier', onPick: (t) => push({ kind: 'task', task: { type: 'mount', carrierId: t } }) });
-            return;
-          case 'dismount':
-            return push({ kind: 'task', task: { type: 'dismount' } });
-          case 'setCallForFire':
-            return push({ kind: 'setReactions', reactions: { callForFire: v === 'yes' } });
-          case 'fireMission':
-            this.map.setMode({
-              kind: 'pickPoint',
-              label: 'Click the target location',
-              onPick: (p) => push({ kind: 'task', task: { type: 'fireMission', target: p, rounds: Math.max(1, Number(v) || 3), radius: this.unit(id) ? 50 : 0 } }),
-            });
-            return;
-          case 'waitDestroyed':
-            this.map.setMode({
-              kind: 'pickEntity',
-              label: 'Click the entity to wait for',
-              onPick: (t) => push({ kind: 'waitUntil', condition: { type: 'entityDestroyed', entityId: this.unit(t)?.leaderId ?? t } }),
-            });
-            return;
-        }
-      },
-    });
-    const plan = this.draft(id);
-    const loop = h('input', { type: 'checkbox', checked: !!plan.loop, onchange: (ev: Event) => (plan.loop = (ev.target as HTMLInputElement).checked) });
-    return h(
-      'div',
-      { class: 'section' },
-      h('h4', { text: 'Plan editor' }),
-      h(
-        'div',
-        { class: 'row' },
-        'Name',
-        h('input', { type: 'text', value: plan.name ?? 'Plan', 'data-plan-name': id, style: 'flex:1', oninput: (ev: Event) => (plan.name = (ev.target as HTMLInputElement).value.trim() || 'Plan') }),
-      ),
-      h('ol', { class: 'plan-list', 'data-plan-list': id }),
-      h('div', { class: 'row' }, kindSel, param, addBtn),
-      h(
-        'div',
-        { class: 'row' },
-        h('label', {}, loop, ' loop'),
-        h('span', { class: 'spacer' }),
-        h('button', {
-          class: 'primary',
-          text: 'Assign plan',
-          onclick: async () => {
-            const p = this.draft(id);
-            if (!p.statements.length) return this.toast('Add some plan steps first');
-            const r = await this.cmd({ cmd: 'assignPlan', targetId: id, plan: JSON.parse(JSON.stringify(p)) });
-            if (r.ok) this.toast('Plan assigned', true);
-          },
-        }),
-        h('button', {
-          text: 'Clear',
-          onclick: () => {
-            this.draft(id).statements = [];
-            this.renderPlanList(id);
-          },
-        }),
-      ),
-    );
-  }
-
-  private renderPlanList(id: string): void {
-    const list = document.querySelector<HTMLElement>(`[data-plan-list="${id}"]`);
-    if (!list) return;
-    clear(list);
-    const plan = this.draft(id);
-    if (!plan.statements.length) {
-      list.append(h('li', {}, h('span', { class: 'hint', text: 'No steps yet: build a plan from the controls below.' })));
-      return;
-    }
-    plan.statements.forEach((st, i) => {
-      list.append(
-        h(
-          'li',
-          {},
-          h('span', { text: `${i + 1}. ${this.describe(st)}` }),
-          h('button', {
-            text: '↑',
-            title: 'Move up',
-            disabled: i === 0,
-            onclick: () => {
-              [plan.statements[i - 1], plan.statements[i]] = [plan.statements[i], plan.statements[i - 1]];
-              this.renderPlanList(id);
-            },
-          }),
-          h('button', {
-            text: '✕',
-            title: 'Remove',
-            onclick: () => {
-              plan.statements.splice(i, 1);
-              this.renderPlanList(id);
-            },
-          }),
-        ),
-      );
-    });
+  private planSection(id: string, _isUnit: boolean): HTMLElement {
+    const sec = this.plans.section(id);
+    window.setTimeout(() => this.plans.render(id));
+    return sec;
   }
 
   private updateLiveFields(el: HTMLElement): void {
     const id = this.selectedId;
     if (!id) return;
-    if (el.querySelector(`[data-plan-list="${id}"]`)?.childElementCount === 0) this.renderPlanList(id);
+    if (el.querySelector(`[data-plan-list="${id}"]`)?.childElementCount === 0) this.plans.render(id);
     const set = (key: string, value: string | Node, cls?: string) => {
       const n = el.querySelector<HTMLElement>(`[data-bind="${key}"]`);
       if (!n) return;
@@ -2244,9 +2337,14 @@ class App {
           e.withdrawn ? 'WITHDRAWING' : '',
           this.pendingOrderText(e.id),
           e.halted ? 'HALTED (contact)' : '',
+          e.jammed?.includes('radio') ? 'RADIO JAMMED' : '',
+          e.jammed?.includes('radar') ? 'RADAR JAMMED' : '',
+          e.jamming === true ? 'JAMMING' : '',
           e.prepared === 'dugIn' ? 'DUG IN' : e.prepared === 'hullDown' ? 'HULL-DOWN' : '',
           e.plan,
-          e.task,
+          // A plan step already names its task ("QRF 3/3: Move to …").
+          e.plan && e.task && e.plan.endsWith(e.task) ? '' : e.task,
+          this.travelText(e.travel),
         ]
           .filter(Boolean)
           .join(' — ') ||
@@ -2306,7 +2404,8 @@ class App {
           this.pendingOrderText(u.id),
           lead?.halted ? 'HALTED (contact)' : '',
           u.plan,
-          u.task,
+          u.plan && u.task && u.plan.endsWith(u.task) ? '' : u.task,
+          this.travelText(u.travel),
         ]
           .filter(Boolean)
           .join(' — ') || 'idle (in formation)',

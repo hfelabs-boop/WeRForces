@@ -56,6 +56,9 @@ Open **http://127.0.0.1:8080** in your browser.
 5. **Rewind.** ⏮ resets everything to the start of the scenario.
 
 The other bundled scenario is **Lakeside Patrol** (File → Open scenario…).
+For a new battle every time, choose **File → Quick battle…**, pick a mission
+and the two forces, and press **Build battle**
+([Tutorial 16](tutorials/16-quick-battle-and-command-tools.md)).
 
 ## What next
 
@@ -63,6 +66,8 @@ The other bundled scenario is **Lakeside Patrol** (File → Open scenario…).
   scenario from nothing.
 - [User guide](user-guide.md) is a tour of the whole interface.
 - [Concepts](concepts.md) explains how the simulation decides what happens.
+- When a unit doesn't do what you expect, select it and read **Why?** in the
+  inspector.
 
 ## Development mode
 

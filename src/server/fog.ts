@@ -4,7 +4,7 @@
 
 import type { Engine } from '../sim/engine.js';
 import type { Contact } from '../sim/entity.js';
-import type { Command, EntitySnapshot, ForceId, PlanStatement, Role, SimEvent, SimState, TaskSpec } from '../shared/types.js';
+import type { Command, Condition, EntitySnapshot, ForceId, PlanStatement, Role, SimEvent, SimState, TaskSpec } from '../shared/types.js';
 
 export const CONTROLLER: Role = { kind: 'controller' };
 
@@ -69,9 +69,10 @@ export function filterState(engine: Engine, s: SimState, force: ForceId): SimSta
     units: s.units.filter((u) => u.force === force),
     // Obstacles can be seen; an enemy minefield only once this force knows about it.
     graphics: s.graphics.filter((g) => g.force === force || g.force === 0 || g.kind === 'obstacle' || (g.kind === 'minefield' && (g.knownBy ?? []).includes(force))),
-    // Orders and plan timings only for this force's own units and entities.
+    // Orders, plan timings and alerts only for this force's own units and entities.
     orders: s.orders?.filter((o) => forceOf(engine, o.targetId) === force),
     schedule: s.schedule?.filter((o) => forceOf(engine, o.targetId) === force),
+    alerts: s.alerts?.filter((a) => a.force === force),
     dis: undefined,
   };
 }
@@ -136,6 +137,13 @@ const PLAYER_COMMANDS = new Set<Command['cmd']>([
   'deleteObject',
   'embark',
   'disembark',
+  'ackAlert',
+  'sendCodeword',
+  'setSyncMatrix',
+  'startPhase',
+  'setJamming',
+  'drive',
+  'batch',
 ]);
 
 /**
@@ -169,15 +177,24 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
     if (t.type === 'followRoute' || t.type === 'patrol') graphicOk(t.routeId);
     if (t.type === 'formation') ownObject(t.leaderId, 'leader');
   };
+  const condition = (cond: Condition | undefined) => {
+    const c = cond as (Condition & { areaId?: string; entityId?: string; conditions?: Condition[]; condition?: Condition }) | undefined;
+    if (!c || typeof c !== 'object') return;
+    if (c.areaId) graphicOk(c.areaId);
+    if (c.entityId) visible(c.entityId);
+    if (Array.isArray(c.conditions)) c.conditions.forEach(condition);
+    if (c.condition) condition(c.condition);
+  };
   const statement = (st: PlanStatement) => {
     if (st?.kind === 'task') task(st.task);
-    if (st?.kind === 'waitUntil') {
-      const cond = st.condition as { areaId?: string; entityId?: string };
-      if (cond?.areaId) graphicOk(cond.areaId);
-      if (cond?.entityId) visible(cond.entityId);
-    }
+    if (st?.kind === 'waitUntil' || st?.kind === 'if' || st?.kind === 'while') condition(st.condition);
+    if (st?.kind === 'if') [...(st.then ?? []), ...(st.else ?? [])].forEach(statement);
+    if (st?.kind === 'while') (st.body ?? []).forEach(statement);
   };
   switch (c.cmd) {
+    case 'batch':
+      for (const sub of Array.isArray(c.commands) ? c.commands : []) checkCommand(engine, role, sub);
+      return;
     case 'assignTask':
       ownObject(c.targetId, 'object');
       task(c.task);
@@ -194,6 +211,11 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
     case 'setFormation':
       ownObject(c.unitId, 'unit');
       return;
+    case 'drive':
+      ownObject(c.id, 'object');
+      if (c.targetId) visible(c.targetId);
+      return;
+    case 'setJamming':
     case 'rename':
     case 'updateGraphic':
       ownObject(c.id, 'object');
@@ -212,6 +234,27 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
       return;
     case 'disembark':
       ownObject(c.carrierId, 'carrier');
+      return;
+    case 'sendCodeword':
+      if (Number(c.force) !== force) throw new ForbiddenError('players send codewords to their own force only');
+      return;
+    case 'setSyncMatrix':
+    case 'startPhase':
+      if (Number(c.force) !== force) throw new ForbiddenError("players plan for their own force only");
+      if (c.cmd === 'setSyncMatrix') {
+        for (const p of (Array.isArray(c.phases) ? c.phases : []) as { orders?: { targetId?: string; task?: TaskSpec }[]; trigger?: { ownerId?: string; condition?: Condition } }[]) {
+          for (const o of p?.orders ?? []) {
+            ownObject(o?.targetId, 'object');
+            task(o?.task);
+          }
+          if (p?.trigger?.ownerId) ownObject(p.trigger.ownerId, 'object');
+          condition(p?.trigger?.condition);
+        }
+      }
+      return;
+    case 'ackAlert':
+      // Players acknowledge their own force's alerts only.
+      (c as { force?: ForceId }).force = force;
       return;
   }
 }

@@ -33,14 +33,17 @@ These pages are also served by a running server at **`/docs`** (toolbar → **He
 | 13 | [Obstacles, smoke and breaching](tutorials/13-obstacles-smoke-and-breaching.md) | Minefields and obstacle lines, finding mines, breaching lanes with engineers, smoke screens |
 | 14 | [Night, weather and supply](tutorials/14-night-weather-and-supply.md) | Time of day and weather, night vision and thermals, muzzle flashes, fuel, resupply |
 | 15 | [Command, tactics and analysis](tutorials/15-command-tactics-and-analysis.md) | Companies and the chain of command, defend and other tactical tasks, order delay, group orders, undo, batch statistics, AAR export |
+| 16 | [Quick battle and command tools](tutorials/16-quick-battle-and-command-tools.md) | The quick battle wizard, the synchronization matrix and codewords, typed orders, travel estimates, *Why?* and alerts, viewsheds, jammers, driving a vehicle |
 
 ## Guides
 
 - [User guide](user-guide.md): every part of the GUI (2D map, 3D view, panels,
   menus, keyboard).
 - [Concepts](concepts.md): coordinates, terrain, forces, entities and units,
-  the chain of command, tasks and plans, sensors, combat and damage,
-  suppression and morale, night and weather, obstacles, supply, and time.
+  the chain of command, tasks and plans (with if/else, loops and codewords),
+  synchronization matrices, sensors, combat and damage, suppression and morale,
+  night and weather, obstacles, supply, electronic warfare, civilians,
+  explanations and alerts, travel estimates, and time.
 - [Terrain import](terrain-import.md): real elevation data, map features,
   buildings and land cover.
 - [Deployment](deployment.md): Docker, HTTPS, exercise-control and player keys,

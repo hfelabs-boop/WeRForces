@@ -39,6 +39,8 @@ export type SymbolKind =
   | 'artillery'
   | 'engineer'
   | 'supply'
+  /** Electronic warfare (jammers). */
+  | 'ew'
   | 'rotary'
   | 'fixed-wing'
   | 'uav'
@@ -157,6 +159,8 @@ export interface EntityTypeDef {
   endurance?: { km?: number; hours?: number };
   /** Supply vehicles: how many full loads (fuel and ammunition) of other vehicles they carry. */
   supply?: { capacity: number };
+  /** Electronic warfare: while switched on, jams enemy radios and/or radars within `range` m. */
+  jammer?: { range: number; radio?: boolean; radar?: boolean };
   /** Reactions that new entities of this type start with (e.g. observers call for fire). */
   reactions?: Reactions;
 }
@@ -213,7 +217,9 @@ export type TaskSpec =
   /** Infantry walk to a carrier (entity, or any member of a unit with free seats) and board it. */
   | { type: 'mount'; carrierId: string }
   /** A carrier stops and lets all its passengers out. */
-  | { type: 'dismount' };
+  | { type: 'dismount' }
+  /** Direct control: a person drives it (throttle 0..1, turn -1..1) and picks what it shoots at. */
+  | { type: 'manual'; throttle?: number; turn?: number; targetId?: string };
 
 export type Condition =
   | { type: 'simTime'; time: number }
@@ -228,7 +234,14 @@ export type Condition =
   /** Average fuel of the owner's vehicles is below `fraction`. */
   | { type: 'fuelBelow'; fraction: number }
   /** Average ammunition (fraction of full loads) of the owner's members is below `fraction`. */
-  | { type: 'ammoBelow'; fraction: number };
+  | { type: 'ammoBelow'; fraction: number }
+  /** The owner's force has received this codeword (from a plan, exercise control or a player). */
+  | { type: 'codeword'; codeword: string }
+  /** Every condition holds. */
+  | { type: 'all'; conditions: Condition[] }
+  /** At least one condition holds. */
+  | { type: 'any'; conditions: Condition[] }
+  | { type: 'not'; condition: Condition };
 
 /** Automatic behaviours that run alongside tasks and plans. */
 export interface Reactions {
@@ -249,7 +262,15 @@ export type PlanStatement =
   | { kind: 'setAltitude'; altitude: number }
   | { kind: 'setFormation'; formation: Formation }
   | { kind: 'waitUntil'; condition: Condition }
-  | { kind: 'setReactions'; reactions: Reactions };
+  | { kind: 'setReactions'; reactions: Reactions }
+  /** Run `then` if the condition holds now, else `else`. */
+  | { kind: 'if'; condition: Condition; then: PlanStatement[]; else?: PlanStatement[] }
+  /** Repeat `body` for as long as the condition holds (checked before each pass). */
+  | { kind: 'while'; condition: Condition; body: PlanStatement[] }
+  /** Send a codeword to the owner's force (plans waiting on it go on). */
+  | { kind: 'sendCodeword'; codeword: string }
+  /** A radio report from the owner. */
+  | { kind: 'report'; text: string };
 
 export interface Plan {
   name?: string;
@@ -408,6 +429,10 @@ export interface EntityState {
   /** Supply vehicles: loads left. */
   supplies?: number;
   prepared?: 'dugIn' | 'hullDown';
+  /** A background civilian (pattern of life), managed by the engine. */
+  ambient?: boolean;
+  /** Jammers switched off. */
+  jamming?: false;
 }
 
 export interface UnitRecord {
@@ -465,6 +490,20 @@ export interface ScenarioFile {
   environment?: Environment;
   /** Checkpoint only: orders still on their way. */
   orders?: PendingOrder[];
+  /** Checkpoint only: codewords sent so far. */
+  codewords?: { force: ForceId; codeword: string; time: number }[];
+  /** Background civilians to keep on the map. */
+  patternOfLife?: PatternOfLife;
+  /** Catalog entries this scenario adds or changes (made in the catalog editor). */
+  catalog?: Partial<Catalog>;
+  /** Global plans: one synchronization matrix per force (with, in checkpoints, which phases started). */
+  syncMatrices?: (SyncMatrix & { started?: Record<string, number> })[];
+}
+
+/** Background civilians: cars on the roads and people in the towns (neutral, force 3). */
+export interface PatternOfLife {
+  vehicles?: number;
+  pedestrians?: number;
 }
 
 /** Optional parts of the model, for comparison runs. Missing fields mean on. */
@@ -519,6 +558,119 @@ export interface EnvironmentState extends Required<Environment> {
   period: 'day' | 'twilight' | 'night';
 }
 
+// ---------------------------------------------------------------- synchronization matrix
+
+/** What starts a phase of a synchronization matrix. */
+export type PhaseTrigger =
+  /** Exercise control or the force's player starts it. */
+  | { type: 'manual' }
+  /** At a simulation time. */
+  | { type: 'time'; time: number }
+  /** When the force receives a codeword. */
+  | { type: 'codeword'; codeword: string }
+  /** When the previous phase's orders are all carried out (and `delay` s more). */
+  | { type: 'previousDone'; delay?: number }
+  /** When a condition holds for a unit or entity (`ownerId`). */
+  | { type: 'condition'; ownerId: string; condition: Condition };
+
+/** One order of a phase: a task, a change of ROE, or stop. `text` is the order as typed. */
+export interface PhaseOrder {
+  targetId: string;
+  task?: TaskSpec;
+  roe?: Roe;
+  stop?: boolean;
+  text?: string;
+}
+
+export interface Phase {
+  id: string;
+  name: string;
+  trigger: PhaseTrigger;
+  orders: PhaseOrder[];
+}
+
+/**
+ * A force's global plan: phases that start one after another, each giving its units
+ * their orders at once. When a phase starts its name goes out as a codeword
+ * ("PHASE 2 ASSAULT"), so unit plans can wait for it.
+ */
+export interface SyncMatrix {
+  force: ForceId;
+  phases: Phase[];
+}
+
+/** A matrix as seen while running: which phases have started, and when. */
+export interface SyncMatrixState extends SyncMatrix {
+  started: Record<string, number>;
+  /** The phase in progress (the last one started). */
+  current?: string;
+}
+
+/** What an observer can see: a grid of cells, 0 out of range (or water), 1 hidden (dead ground), 2 seen. */
+export interface Viewshed {
+  /** Centre of cell (0, 0), and the spacing. Row r, column c is at (x0 + c*cell, y0 + r*cell). */
+  x0: number;
+  y0: number;
+  cell: number;
+  cols: number;
+  rows: number;
+  eye: Vec3;
+  radius: number;
+  targetHeight: number;
+  cellsB64: string;
+  /** Share of the ground in range that is seen. */
+  visibleFraction: number;
+}
+
+// ---------------------------------------------------------------- diagnostics
+
+/** One reason in an explanation. `block` stops the activity; `warn` hampers it; `info` explains it. */
+export interface Finding {
+  code: string;
+  severity: 'block' | 'warn' | 'info';
+  text: string;
+  /** What the operator can do about it, when there is something. */
+  fix?: string;
+  /** A place on the map the finding is about (e.g. what blocks the line of sight). */
+  at?: Vec2;
+  /** An entity the finding is about. */
+  aboutId?: string;
+}
+
+/** Why an entity or unit is (or is not) moving, shooting and seeing: the answer to "why isn't it doing that?". */
+export interface Explanation {
+  id: string;
+  name: string;
+  kind: 'entity' | 'unit';
+  /** One line: what it is doing, and the main thing stopping it. */
+  summary: string;
+  /** Its current task or plan step, in words. */
+  activity: string;
+  movement: Finding[];
+  fire: Finding[];
+  sensing: Finding[];
+  /** Units: members, morale, orders. */
+  unit?: Finding[];
+}
+
+export type AlertKind = 'taskFailed' | 'idle' | 'broken' | 'outOfFuel' | 'lowFuel' | 'outOfAmmo' | 'leaderLost' | 'losses' | 'underFire' | 'contact' | 'jammed';
+
+/** Something that needs the operator's attention: a unit idle, broken, out of fuel... */
+export interface Alert {
+  id: string;
+  kind: AlertKind;
+  severity: 'critical' | 'warning' | 'info';
+  /** The unit or entity it is about. */
+  objectId: string;
+  force: ForceId;
+  text: string;
+  /** Simulation time it was raised (or last raised again). */
+  time: number;
+  /** How many times it was raised while open (e.g. losses). */
+  count: number;
+  acknowledged?: boolean;
+}
+
 // ---------------------------------------------------------------- runtime snapshots
 
 export interface EntitySnapshot {
@@ -569,6 +721,26 @@ export interface EntitySnapshot {
   supplies?: number;
   /** In a prepared position: infantry dug in, or a vehicle hull-down (harder to see and hit). */
   prepared?: 'dugIn' | 'hullDown';
+  /** Moving along a planned path: what is left of it and when it should arrive. */
+  travel?: Travel;
+  /** A background civilian (pattern of life). */
+  ambient?: boolean;
+  /** Jammers: switched on. */
+  jamming?: boolean;
+  /** What enemy jamming denies it now. */
+  jammed?: ('radio' | 'radar')[];
+}
+
+/** Estimate for a move: distance left on the planned path, and simulation time of arrival. */
+export interface Travel {
+  /** Metres left along the planned path. */
+  remaining: number;
+  /** Simulation time it should arrive, at the speeds the ground allows (absent when it cannot move on). */
+  eta?: number;
+  /** Why there is no arrival time (e.g. out of fuel). */
+  stalled?: string;
+  /** Local time of day it should arrive (HH:MM), from the scenario's environment. */
+  etaLocal?: string;
 }
 
 export interface UnitSnapshot {
@@ -591,6 +763,8 @@ export interface UnitSnapshot {
   /** 0..1 cohesion; see moraleState. */
   morale?: number;
   moraleState?: MoraleState;
+  /** The unit's move (its leader's): distance left and time of arrival. */
+  travel?: Travel;
 }
 
 export type SimEventKind =
@@ -640,6 +814,12 @@ export interface SimState {
   history?: { undo: number; redo: number };
   /** Share of wall-clock time the server spends simulating (near 1: it cannot keep up with the time scale). */
   load?: number;
+  /** Open alerts, newest first. */
+  alerts?: Alert[];
+  /** Synchronization matrices (global plans), per force. */
+  sync?: SyncMatrixState[];
+  /** Changes when the catalog does (clients fetch it again). */
+  catalogVersion?: number;
   /** Plan steps waiting for a set time, soonest first (for the timeline). */
   schedule?: { targetId: string; time: number; text: string }[];
   dis?: DisStatus;
@@ -697,6 +877,27 @@ export type Command =
   | { cmd: 'assignPlan'; targetId: string; plan: Plan }
   | { cmd: 'stop'; targetId: string }
   | { cmd: 'setRoe'; targetId: string; roe: Roe }
+  /** Acknowledge an alert, or all of them (players: their own force's). */
+  | { cmd: 'ackAlert'; id?: string; all?: boolean }
+  /** Add or change a catalog entry (validated), or remove a custom one. */
+  /** Several commands as one edit (one undo step); all or nothing. */
+  | { cmd: 'batch'; commands: Command[] }
+  /** Replace the scenario with a generated quick battle (see sim/wizard.ts for the options). */
+  | { cmd: 'quickBattle'; options: unknown }
+  | { cmd: 'setCatalogEntry'; section: 'entityTypes' | 'weapons' | 'sensors' | 'unitTemplates'; entry: unknown }
+  | { cmd: 'removeCatalogEntry'; section: 'entityTypes' | 'weapons' | 'sensors' | 'unitTemplates'; id: string }
+  /** Direct control: drive an entity and pick its target. Starts manual control if it is not under it. */
+  | { cmd: 'drive'; id: string; throttle?: number; turn?: number; targetId?: string | null }
+  /** Switch a jammer on or off. */
+  | { cmd: 'setJamming'; id: string; on: boolean }
+  /** Background civilians to keep on the map (0 for none). */
+  | { cmd: 'setPatternOfLife'; vehicles?: number; pedestrians?: number }
+  /** Replace a force's synchronization matrix (an empty list of phases removes it). */
+  | { cmd: 'setSyncMatrix'; force: ForceId; phases: Phase[] }
+  /** Start a phase now, whatever its trigger. */
+  | { cmd: 'startPhase'; force: ForceId; phaseId: string }
+  /** Send a codeword to a force (players: their own). Plans waiting for it go on. */
+  | { cmd: 'sendCodeword'; force: ForceId; codeword: string }
   | { cmd: 'setReactions'; targetId: string; reactions: Reactions }
   /** Put infantry (entity or unit) into a carrier (entity or unit) instantly, e.g. when setting up a scenario. */
   | { cmd: 'embark'; passengerId: string; carrierId: string }

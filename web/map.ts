@@ -1,7 +1,7 @@
 // 2D tactical map: terrain, tactical graphics, entities/units, effects and editing tools.
 
-import { FORCE_NAMES, type Building, type EntitySnapshot, type Graphic, type GraphicKind, type SimEvent, type SimState, type TerrainData, type UnitSnapshot, type Vec2 } from '../src/shared/types.js';
-import { TerrainGrid } from '../src/shared/terrainGrid.js';
+import { FORCE_NAMES, type Building, type EntitySnapshot, type Graphic, type GraphicKind, type SimEvent, type SimState, type TerrainData, type UnitSnapshot, type Vec2, type Viewshed } from '../src/shared/types.js';
+import { base64ToBytes, TerrainGrid } from '../src/shared/terrainGrid.js';
 import { drawSymbol, FORCE_COLORS } from './symbols.js';
 import { renderTerrain } from './terrainRender.js';
 
@@ -63,6 +63,63 @@ export class MapView {
   selectedPath: Vec2[] = [];
   mode: MapMode = { kind: 'select' };
   layers: MapLayers = { labels: true, grid: true, contacts: true, ranges: false, paths: true, aggregate: 'auto' };
+  /** A viewshed overlay: seen ground clear, dead ground shaded. */
+  private viewshed: { v: Viewshed; image: HTMLCanvasElement } | null = null;
+
+  setViewshed(v: Viewshed | null): void {
+    if (!v) {
+      this.viewshed = null;
+      this.invalidate();
+      return;
+    }
+    const cells = base64ToBytes(v.cellsB64);
+    const image = document.createElement('canvas');
+    image.width = v.cols;
+    image.height = v.rows;
+    const ctx = image.getContext('2d')!;
+    const img = ctx.createImageData(v.cols, v.rows);
+    for (let r = 0; r < v.rows; r++) {
+      for (let c = 0; c < v.cols; c++) {
+        const val = cells[r * v.cols + c];
+        // Image rows run north to south; grid rows south to north.
+        const i = ((v.rows - 1 - r) * v.cols + c) * 4;
+        if (val === 2) img.data.set([90, 220, 120, 70], i);
+        else if (val === 1) img.data.set([200, 40, 40, 120], i);
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    this.viewshed = { v, image };
+    this.invalidate();
+  }
+
+  private drawViewshed(): void {
+    if (!this.viewshed) return;
+    const { v, image } = this.viewshed;
+    const ctx = this.ctx;
+    // Cell centres are at x0 + c*cell: the image spans half a cell beyond them.
+    const nw = this.toScreen({ x: v.x0 - v.cell / 2, y: v.y0 + (v.rows - 0.5) * v.cell });
+    const w = v.cols * v.cell * this.scale;
+    const hgt = v.rows * v.cell * this.scale;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(image, nw.x, nw.y, w, hgt);
+    ctx.restore();
+    const eye = this.toScreen(v.eye);
+    ctx.beginPath();
+    ctx.arc(eye.x, eye.y, v.radius * this.scale, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.setLineDash([3, 5]);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(eye.x, eye.y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+  }
+
+  /** Places an explanation points at (what blocks a sight line), with the sight line itself. */
+  explainMarks: { at: Vec2; label: string; line?: [Vec2, Vec2] }[] = [];
   /** Weapon/sensor range rings for the selected entity, metres. */
   selectedRanges: { radius: number; label: string; color: string }[] = [];
 
@@ -474,11 +531,14 @@ export class MapView {
     this.drawTowns();
     this.drawBuildings();
     this.drawNight();
+    this.drawViewshed();
+    this.drawJammers();
     this.drawSmoke();
     this.drawGraphics();
     this.drawSelectionOverlays();
     this.drawSymbols();
     this.drawEffects();
+    this.drawExplainMarks();
     this.drawModeOverlay();
     this.drawScale();
   }
@@ -690,6 +750,12 @@ export class MapView {
       ctx.setLineDash([4, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
+      // Arrival time at the end of the path.
+      const travel = sel.travel ?? (this.selectedId ? this.unitById.get(this.selectedId)?.travel : undefined);
+      if (travel?.eta !== undefined) {
+        const end = this.toScreen(this.selectedPath[this.selectedPath.length - 1]);
+        label(ctx, `ETA ${travel.etaLocal ?? ''}`.trim(), end.x + 8, end.y + 10, '#ffffff', 'bold 11px system-ui');
+      }
     }
     if (this.layers.contacts) {
       for (const cid of sel.contacts) {
@@ -703,6 +769,63 @@ export class MapView {
         ctx.lineWidth = cid === sel.engagingId ? 2 : 1;
         ctx.stroke();
       }
+    }
+  }
+
+  /** Reach of active jammers: faint dashed circles. */
+  private drawJammers(): void {
+    if (!this.state) return;
+    const ctx = this.ctx;
+    for (const e of this.state.entities) {
+      if (e.jamming !== true || e.damage === 'destroyed') continue;
+      const range = this.jammerRange(e.typeId);
+      if (!range) continue;
+      const p = this.toScreen(e);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, range * this.scale, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(190,120,255,0.55)';
+      ctx.fillStyle = 'rgba(190,120,255,0.05)';
+      ctx.setLineDash([8, 6]);
+      ctx.lineWidth = 1.5;
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  /** Jammer reach by entity type (set by the app from the catalog). */
+  jammerRange: (typeId: string) => number | undefined = () => undefined;
+
+  private drawExplainMarks(): void {
+    const ctx = this.ctx;
+    for (const m of this.explainMarks) {
+      const p = this.toScreen(m.at);
+      if (m.line) {
+        const a = this.toScreen(m.line[0]);
+        const b = this.toScreen(m.line[1]);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(p.x, p.y);
+        ctx.strokeStyle = 'rgba(120,220,255,0.9)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.strokeStyle = 'rgba(255,90,90,0.8)';
+        ctx.setLineDash([5, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.beginPath();
+      ctx.moveTo(p.x - 7, p.y - 7);
+      ctx.lineTo(p.x + 7, p.y + 7);
+      ctx.moveTo(p.x + 7, p.y - 7);
+      ctx.lineTo(p.x - 7, p.y + 7);
+      ctx.strokeStyle = '#ff5a5a';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      label(ctx, m.label, p.x + 10, p.y - 8, '#ffd0d0', 'bold 11px system-ui');
     }
   }
 
@@ -735,14 +858,16 @@ export class MapView {
           ctx.lineWidth = e.pinned ? 3 : 2;
           ctx.stroke();
         }
-        drawSymbol(ctx, p.x, p.y, symSize, e.force, e.domain, e.symbol, {
+        // Background civilians: small, faint and unlabelled unless selected.
+        const bg = e.ambient && e.id !== this.selectedId;
+        drawSymbol(ctx, p.x, p.y, bg ? symSize * 0.6 : symSize, e.force, e.domain, e.symbol, {
           selected: e.id === this.selectedId || this.selectedIds.has(e.id) || (this.selectedIds.size > 1 && !!e.unitId && this.selectedIds.has(e.unitId)),
           destroyed: e.damage === 'destroyed',
           damaged: e.damage === 'mobility' || e.damage === 'firepower',
           remote: e.remote,
           sidc: this.sidcOf(e.typeId),
           // Fog of war: contacts fade as they go stale.
-          alpha: e.contactAge !== undefined ? (e.contactAge > 5 ? 0.45 : 0.8) : inSelUnit || !selUnit ? 1 : 0.9,
+          alpha: bg ? 0.6 : e.contactAge !== undefined ? (e.contactAge > 5 ? 0.45 : 0.8) : inSelUnit || !selUnit ? 1 : 0.9,
         });
         if (inSelUnit) {
           ctx.beginPath();
@@ -751,7 +876,7 @@ export class MapView {
           ctx.lineWidth = 1;
           ctx.stroke();
         }
-        if (this.layers.labels && (!agg || e.id === this.selectedId || this.metresPerPixel < 6)) {
+        if (this.layers.labels && !bg && (!agg || e.id === this.selectedId || this.metresPerPixel < 6)) {
           label(ctx, e.passengers ? `${e.name} +${e.passengers.length}` : e.name, p.x + symSize * 1.5, p.y + 4, FORCE_COLORS[e.force].text, '11px system-ui');
           if (e.domain === 'air') label(ctx, `${Math.round(e.agl)}m`, p.x + symSize * 1.5, p.y + 16, '#ddd', '10px system-ui');
         }

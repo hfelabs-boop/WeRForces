@@ -35,6 +35,13 @@ export abstract class Task {
     return this.status;
   }
 
+  /** Start it now rather than on the next tick, so its route is planned (and shown) at once. */
+  begin(engine: Engine, entity: Entity): void {
+    if (this.started || this.status !== 'running') return;
+    this.started = true;
+    this.start({ engine, entity, dt: 0 });
+  }
+
   /** Called when the task is replaced or the entity is destroyed. */
   cancel(entity: Entity): void {
     entity.steer = null;
@@ -656,14 +663,16 @@ export class ResupplyTask extends Task {
   private path = new PathFollower();
   private replanIn = 0;
   private plannedTo?: Vec2;
+  /** A helicopter's altitude setting before it set down beside the supply vehicle. */
+  private landedFrom?: number | null;
 
   constructor(private supplierId?: string) {
     super({ type: 'resupply', supplierId });
   }
 
   protected override start({ engine, entity }: TaskContext): void {
-    if (entity.domain === 'air' || entity.domain === 'surface') {
-      this.fail('only ground vehicles and troops resupply in the field');
+    if (entity.domain === 'surface' || (entity.domain === 'air' && (entity.type.minSpeed ?? 0) > 0)) {
+      this.fail('only ground vehicles, troops and helicopters resupply in the field');
     } else if (this.supplierId) {
       const s = engine.entities.get(this.supplierId);
       if (!s || !s.type.supply) this.fail('not a supply vehicle');
@@ -678,14 +687,19 @@ export class ResupplyTask extends Task {
   }
 
   protected tick({ engine, entity, dt }: TaskContext): TaskStatus {
-    if (!needsSupply(engine, entity)) return 'done';
+    if (!needsSupply(engine, entity)) return this.takeOff(entity, 'done');
     const s = this.supplierId ? engine.entities.get(this.supplierId) : undefined;
-    if (!s || s.destroyed) return this.fail('supply vehicle lost');
-    if (s.supplies <= 1e-6) return this.fail(`${s.name} has run out of supplies`);
+    if (!s || s.destroyed) return this.takeOff(entity, this.fail('supply vehicle lost'));
+    if (s.supplies <= 1e-6) return this.takeOff(entity, this.fail(`${s.name} has run out of supplies`));
     const d = dist2d(entity, s);
-    if (d <= RESUPPLY_RANGE * 0.6) {
-      // Close enough: halt; supplies flow once both have stopped.
+    // Helicopters stop a little further off (they arrive within 40 m of a point).
+    if (d <= RESUPPLY_RANGE * (entity.domain === 'air' ? 0.85 : 0.6)) {
+      // Close enough: halt (a helicopter sets down); supplies flow once both have stopped.
       entity.steer = { x: entity.x, y: entity.y, speed: 0, arrive: true };
+      if (entity.domain === 'air' && this.landedFrom === undefined) {
+        this.landedFrom = entity.altitudeOverride ?? null;
+        entity.altitudeOverride = 0;
+      }
       return 'running';
     }
     // Pull up 20 m short, on this side of it.
@@ -698,6 +712,20 @@ export class ResupplyTask extends Task {
     }
     this.path.step(entity, engine, dt, entity.cruiseSpeed, true);
     return 'running';
+  }
+
+  /** A helicopter that set down goes back up to the height it flew at. */
+  private takeOff(entity: Entity, status: TaskStatus): TaskStatus {
+    if (this.landedFrom !== undefined) {
+      entity.altitudeOverride = this.landedFrom ?? undefined;
+      this.landedFrom = undefined;
+    }
+    return status;
+  }
+
+  override cancel(entity: Entity): void {
+    this.takeOff(entity, 'done');
+    super.cancel(entity);
   }
 
   describe(engine: Engine): string {
@@ -752,6 +780,67 @@ export function createTask(spec: TaskSpec): Task {
       return new ScreenTask(spec);
     case 'search':
       return new SearchTask(spec);
+    case 'manual':
+      return new ManualTask(spec);
+  }
+}
+
+/** Seconds without input after which a held turn is let go (the keys were released). */
+const MANUAL_INPUT_TIMEOUT = 1.5;
+
+/**
+ * Direct control: a person steers it with a throttle and a turn, and chooses what it
+ * fires at (it shoots only at that target, on its own ROE otherwise held).
+ */
+export class ManualTask extends Task {
+  throttle: number;
+  turn: number;
+  targetId?: string;
+  private lastInput = -Infinity;
+
+  constructor(spec: Extract<TaskSpec, { type: 'manual' }>) {
+    super(spec);
+    this.throttle = spec.throttle ?? 0;
+    this.turn = spec.turn ?? 0;
+    this.targetId = spec.targetId;
+  }
+
+  input(engine: Engine, i: { throttle?: number; turn?: number; targetId?: string | null }): void {
+    if (i.throttle !== undefined) this.throttle = Math.max(0, Math.min(1, i.throttle));
+    if (i.turn !== undefined) this.turn = Math.max(-1, Math.min(1, i.turn));
+    if (i.targetId !== undefined) this.targetId = i.targetId ?? undefined;
+    this.lastInput = engine.time;
+  }
+
+  protected override start({ engine }: TaskContext): void {
+    this.lastInput = engine.time;
+  }
+
+  protected tick({ engine, entity }: TaskContext): TaskStatus {
+    if (engine.time - this.lastInput > MANUAL_INPUT_TIMEOUT) this.turn = 0;
+    const heading = entity.heading + this.turn * (Math.PI / 3);
+    const speed = this.throttle * entity.type.maxSpeed;
+    const ahead = { x: entity.x + Math.sin(heading) * 200, y: entity.y + Math.cos(heading) * 200 };
+    // Stopped, a turn pivots it on the spot (vehicles that can).
+    entity.steer = speed > 0.2 ? { ...ahead, speed, arrive: false } : { x: entity.x, y: entity.y, speed: 0, arrive: true, finalHeading: this.turn ? heading : undefined };
+    if (entity.domain === 'air' && speed <= 0.2) entity.steer = { ...ahead, speed: entity.type.minSpeed ?? 0, arrive: false };
+    const t = this.targetId ? engine.entities.get(this.targetId) : undefined;
+    entity.attackTargetId = t && t.alive ? t.id : undefined;
+    return 'running';
+  }
+
+  override cancel(entity: Entity): void {
+    super.cancel(entity);
+    entity.attackTargetId = undefined;
+  }
+
+  override resumeSpec(): TaskSpec {
+    return { type: 'manual', throttle: this.throttle, turn: 0, targetId: this.targetId };
+  }
+
+  describe(engine: Engine): string {
+    const t = this.targetId ? engine.entities.get(this.targetId) : undefined;
+    return `Direct control${this.throttle > 0 ? `, ${Math.round(this.throttle * 100)}% throttle` : ', stopped'}${t ? `, engaging ${t.name}` : ''}`;
   }
 }
 
@@ -945,17 +1034,21 @@ export class ScreenTask extends HoldPositionTask {
     const { engine, entity, dt } = ctx;
     if (this.falling) return this.retreat.step(entity, engine, dt, entity.type.maxSpeed * 0.8) ? 'done' : 'running';
     this.hold(ctx);
-    const breakAt = this.s.breakContact ?? 1500;
+    // By default, break contact before coming within reach of the enemy's direct fire
+    // (at least 1500 m), or as soon as it comes under fire.
+    const engaged = this.s.breakContact === undefined && entity.underFireUntil > engine.time;
     for (const id of entity.contacts.keys()) {
       const t = engine.entities.get(id);
-      if (!t || !t.alive || !engine.isHostile(entity.force, t.force) || dist2d(entity, t) > breakAt) continue;
+      if (!t || !t.alive || !engine.isHostile(entity.force, t.force)) continue;
+      const breakAt = this.s.breakContact ?? Math.max(1500, directReach(engine, t, entity) + 200);
+      if (!engaged && dist2d(entity, t) > breakAt) continue;
       const fb = this.fallback();
       const edge = engine.terrain.spec.size - 50;
       const to = { x: Math.max(50, Math.min(edge, fb.x)), y: Math.max(50, Math.min(edge, fb.y)) };
       this.falling = true;
       entity.prepared = undefined;
       if (!this.retreat.plan(entity, engine, to)) return this.fail('no route to fall back');
-      engine.log('task', `${entity.name}: enemy within ${Math.round(dist2d(entity, t))} m, screen falling back`, entity.id, t.id);
+      engine.log('task', `${entity.name}: ${engaged ? 'under fire' : `enemy within ${Math.round(dist2d(entity, t))} m`}, screen falling back`, entity.id, t.id);
       return 'running';
     }
     return 'running';
@@ -968,6 +1061,17 @@ export class ScreenTask extends HoldPositionTask {
   override get remainingPath(): Vec2[] {
     return this.falling ? this.retreat.remaining : this.arrived ? [] : this.path.remaining;
   }
+}
+
+/** How far `shooter` can reach `target` with direct fire (0 if it cannot). */
+function directReach(engine: Engine, shooter: Entity, target: Entity): number {
+  let reach = 0;
+  for (const id of shooter.type.weapons) {
+    const w = engine.catalog.weapon(id);
+    if (w.indirect || !w.targets.includes(target.domain) || (w.pk[target.type.armor] ?? 0) < 0.02) continue;
+    reach = Math.max(reach, w.maxRange);
+  }
+  return reach;
 }
 
 /** Search an area: sweep it in parallel tracks spaced to the entity's sensor range. */

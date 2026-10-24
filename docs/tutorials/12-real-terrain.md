@@ -141,19 +141,18 @@ The event log:
 00:02:27  Red Mech 2 destroyed by Team TANK Lead
 00:02:29  Team TANK Lead detected Red Mech Lead
 00:02:29  Team TANK Lead detected Red Mech 3
-00:02:33  Red Mech Lead destroyed by Team TANK 3
-00:02:34  Red Mech: Red Mech Lead lost, Red Mech 3 takes command
+00:02:33  Red Mech 3 destroyed by Team TANK Lead
+00:02:33  Red Mech Lead suffered a firepower kill
 00:02:34  Red Mech broke and is falling back
-…
-00:03:50  Team TANK 2 destroyed by Red Mech 3
-00:05:05  Red Mech rallied
-00:06:05  Red Mech 3 destroyed by Team TANK Lead
+00:02:36  Red Mech Lead detected Team TANK Lead
+00:02:45  Red Mech Lead destroyed by Team TANK Lead
 ```
 
-The BMPs are seen when the tanks come over a rise about 2.7 km out, and two of
-them are destroyed within eight seconds. The third breaks and falls back. The
-tanks, still driving towards the objective, miss it again and again, and one of
-its Konkurs missiles destroys a tank before the platoon leader hits it at 6:05. Positions given as latitude/longitude
+The BMPs are seen when the tanks come over a rise about 2.7 km out. The lead
+tank destroys two of them within six seconds while *Team TANK 3* takes on the
+third, which loses its weapons to a hit and breaks. It only sees the tanks as
+it falls back, and is destroyed at 2:45, twenty seconds after the first
+contact, without firing a shot. Positions given as latitude/longitude
 land where you expect, and everything the simulator sends out (DIS, Cursor on
 Target, GeoJSON, KML) lines up with real maps: open
 `/api/v1/export/scene.kml` in Google Earth to check.

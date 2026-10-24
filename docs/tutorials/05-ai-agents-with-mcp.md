@@ -77,9 +77,10 @@ connect. You can list the tools and call them by hand.
 
 | Purpose | Tools |
 | --- | --- |
-| Awareness | `get_situation`, `list_entities`, `get_entity`, `get_unit`, `list_catalog`, `get_events`, `query_terrain`, `check_line_of_sight` |
-| Creation | `create_entity`, `create_unit`, `create_graphic`, `delete_object` |
-| Tasking | `assign_task`, `assign_plan`, `embark`, `stop`, `set_roe`, `set_reactions`, `set_unit_superior` |
+| Awareness | `get_situation`, `list_entities`, `get_entity`, `get_unit`, `list_catalog`, `get_events`, `query_terrain`, `check_line_of_sight`, `viewshed`, `explain` (why something is or is not moving, firing or seeing), `get_alerts` (what needs attention) |
+| Creation | `create_entity`, `create_unit`, `create_graphic`, `delete_object`, `quick_battle` (a generated, ready-to-run battle), `set_pattern_of_life` (civilian traffic), `edit_catalog` |
+| Tasking | `assign_task`, `assign_plan`, `give_order` (an order in plain words, e.g. *"Team ARMOR move to Calloway covered"*), `embark`, `stop`, `set_roe`, `set_reactions`, `set_unit_superior`, `set_jamming` |
+| Phases | `set_sync_matrix` (a force's plan in phases), `start_phase`, `send_codeword` |
 | Time and conditions | `control_simulation` (run/pause/rewind/speed), `advance_time` (simulate *N* seconds now and summarise), `set_environment` (time of day, weather), `set_simulation_rules` (suppression, morale, fuel, order delay on/off) |
 | Review and analysis | `after_action_report`, `replay_state`, `add_bookmark`, `run_batch` (Monte Carlo replications on the server) |
 | Scenarios | `manage_scenario` (list/load/save/new) |

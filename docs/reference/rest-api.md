@@ -45,6 +45,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | POST | `/simulation/step` | `{"seconds": 300}` (≤ 3600) | Status after stepping immediately |
 | PUT | `/simulation/time-scale` | `{"scale": 8}` | Status |
 | GET / PUT | `/simulation/rules` | `{"suppression": true, "morale": true, "fuel": true, "orderDelay": false}` (any subset) | The rules ([optional models](../concepts.md#optional-models)) |
+| GET / PUT | `/simulation/pattern-of-life` | `{"vehicles": 20, "pedestrians": 40}` (0–300 each; either) | The numbers of background civilians kept on the map ([pattern of life](../concepts.md#pattern-of-life)) |
 | GET / PUT | `/simulation/environment` | `{"date": "2026-06-21", "time": 4.5, "visibility": 800, "precipitation": "rain", "windSpeed": 6, "windFrom": 270}` (any subset) | The environment plus `localDate`, `localTime`, `sunAltitude`, `light`, `period` |
 
 ### Scenarios
@@ -58,6 +59,8 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | GET / PUT | `/scenarios/{name}` | Read one / save the current state under that name |
 | POST | `/scenarios/{name}/load` | Load a stored scenario |
 | POST | `/scenario/undo` · `/scenario/redo` | Take back the last edit, or redo it (30 steps). Returns `{undo, redo, time}` |
+| GET | `/scenario/quick-battle` | The choices a quick battle takes: `missions` (with their text), `compositions`, `sizes`, `support`, `weather`, `nations` |
+| POST | `/scenario/quick-battle` | Replace the scenario with a generated battle (below). 201 with the simulation status plus `description` (the brief) and `seed`. One edit: undo brings the old scenario back |
 
 ### Objects
 
@@ -65,19 +68,28 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | --- | --- | --- |
 | GET | `/entities` | `?force=1\|blue&domain=air&unit=U1&alive=true&remote=false` |
 | POST | `/entities` | `{"typeId", "force", "position", "heading"?, "name"?, "altitude"?}` |
-| GET / PATCH / DELETE | `/entities/{id}` | PATCH: `{"name"?, "roe"?, "reactions"?, "position"?, "heading"?}` |
+| GET / PATCH / DELETE | `/entities/{id}` | PATCH: `{"name"?, "roe"?, "reactions"?, "position"?, "heading"?, "jamming"?}` (`jamming`: switch a jammer on or off) |
 | POST | `/entities/{id}/task` | a [task](#tasks) |
 | POST | `/entities/{id}/plan` | a [plan](#plans) |
 | POST | `/entities/{id}/stop` | |
 | POST | `/entities/{id}/embark` | `{"carrierId": "E4"}` or a carrier unit id: put this soldier inside now (scenario set-up) |
 | POST | `/entities/{id}/disembark` | let this carrier's passengers out now |
 | GET | `/entities/{id}/path` | remaining planned waypoints |
+| GET | `/entities/{id}/explain` · `/units/{id}/explain` | why it is or is not moving, firing and detecting ([below](#explanations)) |
+| POST | `/entities/{id}/drive` | direct control: `{"throttle"?: 0..1, "turn"?: -1..1, "targetId"?: "E12" or null}`. The first call replaces its task and plan with a `manual` task; a turn is let go after 1.5 s without another call; any other order ends it. Returns the entity |
 | GET | `/units` | `?force=` |
 | POST | `/units` | `{"templateId", "force", "position", "heading"?, "name"?}` or `{"entityIds": [...], "name"?, "formation"?}` |
 | GET / PATCH / DELETE | `/units/{id}` | PATCH: `{"name"?, "formation"?, "roe"?, "reactions"?, "superiorId"?}` (`superiorId`: put under another unit, `null` for none). DELETE removes the members too; its subordinates become independent |
 | POST | `/units/{id}/task` · `/plan` · `/stop` · `/embark` · `/disembark` | as for entities. A unit embarking into a carrier unit shares out the seats |
 | GET / POST | `/graphics` | POST `{"kind": "route\|area\|phaseLine\|point\|minefield\|obstacle", "points": [...], "name"?, "force"?, "density"?}` (`density`: minefields, strikes per 100 m) |
 | GET / PATCH / DELETE | `/graphics/{id}` | PATCH `{"name"?, "points"?, "density"?}` |
+
+Entity and unit responses carry `travel` while moving along a planned path:
+`{"remaining": 1378, "eta": 252.4, "etaLocal": "10:04"}` (metres left, the
+simulation time and local time of arrival), or `{"remaining": ..., "stalled":
+"out of fuel"}` ([travel estimates](../concepts.md#travel-estimates)). Jammers
+carry `jamming` (on or off), and entities whose radio or radar is jammed
+`jammed: ["radio"]`. Background civilians carry `ambient: true`.
 
 ### Tasks
 
@@ -101,7 +113,10 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 {"type": "ambush", "position": {"x": 6000, "y": 9000}, "killZoneId": "G2"}
 {"type": "screen", "position": {"x": 6000, "y": 9000}, "facing": 90, "breakContact": 2000, "fallback": {"x": 3000, "y": 9000}}
 {"type": "search", "areaId": "G3", "spacing": 600}
+{"type": "manual"}
 ```
+
+`manual` is direct control; steer it with `POST /entities/{id}/drive`.
 
 See [Concepts](../concepts.md#tasks) for what each one does. Positions can be
 `{"x", "y"}`, `{"lat", "lon"}` or `{"town"}`.
@@ -134,10 +149,129 @@ reactions; a plan's `setReactions` step changes only those it names:
 Setting statements: `setRoe` (`fireAtWill|returnFire|holdFire`), `setSpeed` (m/s),
 `setAltitude` (m above ground), `setFormation` (`column|line|wedge|vee|echelonRight`),
 `setReactions` (`{"reactions": {...}}`).
+Control statements: `if` (`{"condition", "then": [...], "else"?: [...]}`),
+`while` (`{"condition", "body": [...]}`), `sendCodeword` (`{"codeword": "BRAVO"}`)
+and `report` (`{"text": "..."}`, up to 200 characters). Blocks nest up to 8 deep,
+with at most 200 statements in a plan.
 Conditions: `simTime {time}`, `inArea {areaId}`, `enemyInArea {areaId}`,
 `enemyDetected`, `underFire`, `strengthBelow {fraction}`, `fuelBelow {fraction}`,
-`ammoBelow {fraction}`, `entityDestroyed {entityId}`.
+`ammoBelow {fraction}`, `entityDestroyed {entityId}`, `codeword {codeword}`,
+`all {conditions: [...]}`, `any {conditions: [...]}` (1–20 each), `not {condition}`.
+
+```json
+{
+  "name": "Probe",
+  "statements": [
+    {"kind": "task", "task": {"type": "moveTo", "target": {"town": "Brenham"}}},
+    {"kind": "if", "condition": {"type": "any", "conditions": [{"type": "enemyDetected"}, {"type": "underFire"}]},
+     "then": [{"kind": "report", "text": "contact at Brenham"}, {"kind": "sendCodeword", "codeword": "BRAVO"}],
+     "else": [{"kind": "task", "task": {"type": "moveTo", "target": {"town": "Calloway"}}}]},
+    {"kind": "while", "condition": {"type": "not", "condition": {"type": "codeword", "codeword": "EXECUTE"}},
+     "body": [{"kind": "task", "task": {"type": "wait", "duration": 30}}]},
+    {"kind": "task", "task": {"type": "defend", "position": {"town": "Brenham"}, "facing": 90}}
+  ]
+}
+```
+
 Semantics are described in [Concepts](../concepts.md#plans).
+
+### Orders in words
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| POST | `/orders` | `{"text": "Team ARMOR move to Calloway covered", "dryRun"?: true}` → `{description, targets, commands, executed}`. Players may only order their own force. An order to several units is one edit (one undo step). 400 with a message when it can't be understood |
+
+```json
+{"description":"US Combined Arms Team: move to ATK POS by a covered route","targets":["U1"],
+ "commands":[{"cmd":"assignTask","targetId":"U1","task":{"type":"moveTo","target":{"x":8922,"y":6668},"covered":true}}],
+ "executed":false}
+```
+
+The grammar is in the [user guide](../user-guide.md#typed-orders).
+
+### Synchronization matrices and codewords
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/sync-matrix` | Every force's matrix (players: their own) with `started` (phase id → time) and `current` |
+| PUT | `/sync-matrix/{force}` | `{"phases": [...]}` replaces the force's matrix (`blue`, `red`, `neutral` or 0–3); an empty list removes it. Returns the matrix |
+| POST | `/sync-matrix/{force}/phases/{id}/start` | Start a phase now, whatever its trigger |
+| GET | `/codewords` | `[{force, codeword, time}]` sent so far (players: their own force) |
+| POST | `/codewords` | `{"codeword": "execute", "force"?: 1}` → 201 `{"force":1,"codeword":"EXECUTE","time":300}`. Players send to their own force |
+
+A phase:
+
+```json
+{"id": "P2", "name": "Assault", "trigger": {"type": "codeword", "codeword": "EXECUTE"},
+ "orders": [{"targetId": "U1", "text": "move to 9382 7938"},
+            {"targetId": "U5", "task": {"type": "fireMission", "target": {"x": 9382, "y": 7938}, "rounds": 4}},
+            {"targetId": "U2", "roe": "holdFire"}]}
+```
+
+Triggers: `{"type": "manual"}`, `{"type": "time", "time": 600}`, `{"type":
+"codeword", "codeword": "EXECUTE"}`, `{"type": "previousDone", "delay"?: 30}`,
+`{"type": "condition", "ownerId": "U1", "condition": {...}}`. Each order names a
+`targetId` of that force and one of `task`, `roe`, `stop: true`, or `text`: the
+order in words without the name, as on the order line. A `text` order with no
+task is turned into one when the matrix is stored, and a 400 names the unit and
+phase it could not understand. Up to 20 phases of 100 orders. See
+[Concepts](../concepts.md#synchronization-matrix).
+
+### Alerts
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/alerts` | Open alerts, newest first (players: their own force's). `?all=true` adds acknowledged ones |
+| POST | `/alerts/acknowledge` | Acknowledge every open alert; returns the open alerts left |
+| POST | `/alerts/{id}/acknowledge` | Acknowledge one |
+
+```json
+{"id":"A6","kind":"jammed","severity":"warning","objectId":"U1","force":1,"text":"US Combined Arms Team: radio jammed","time":241,"count":1}
+```
+
+`kind` is `taskFailed`, `idle`, `broken`, `outOfFuel`, `lowFuel`, `outOfAmmo`,
+`leaderLost`, `losses`, `underFire`, `contact` or `jammed`; `severity` is
+`critical`, `warning` or `info`; `count` is how many times it was raised while
+open. See [Concepts](../concepts.md#explanations-and-alerts).
+
+### Explanations
+
+`GET /entities/{id}/explain` (or `/units/{id}/explain`):
+
+```json
+{"id":"E2","name":"US Combined Arms Team 1st Platoon Lead","kind":"entity",
+ "activity":"Move to (8848, 6827) by a covered route",
+ "summary":"Move to (8848, 6827) by a covered route.",
+ "movement":[],
+ "fire":[{"code":"noContacts","severity":"info","text":"No enemy detected: it can only shoot at what its side has seen."}],
+ "sensing":[{"code":"hidden","severity":"info","text":"RU Mech Platoon 2 (2.4 km) is hidden from it by the ground (a crest or ridge) at (9070, 7813).","at":{"x":9070,"y":7813},"aboutId":"E11"}]}
+```
+
+Findings have a `code`, a `severity` (`block`, `warn`, `info`), `text`, and
+optionally `fix`, `at` and `aboutId`. Units add `unit` findings. Exercise
+control also hears about enemies not detected; players only about what their
+side knows.
+
+### Quick battle
+
+`POST /scenario/quick-battle` body (every field optional):
+
+```json
+{"mission": "attack", "seed": 3,
+ "blue": {"nation": "us", "composition": "combined", "size": "platoon", "support": ["artillery"]},
+ "red": {"nation": "ru", "composition": "mech", "size": "platoon", "support": ["engineers"]},
+ "time": 10, "weather": "clear", "distance": 3000, "civilians": false,
+ "terrain": {"seed": 7, "size": 16000}, "name": "Attack at dawn"}
+```
+
+`mission`: `meeting`, `attack` (default), `defend`, `delay` or `recon`, from
+Blue's side. `composition`: `armor`, `mech` (default), `infantry` or `combined`.
+`size`: `platoon` (default) or `company`. `support`: any of `artillery`,
+`recon`, `engineers`, `supply`, `air`, `airDefense`. `weather`: `clear`,
+`haze`, `fog` or `rain`. `distance` 1000–20000 m (default 3000, or 5000 with a
+company). `terrain` as for `/scenario/new` (default: the current terrain).
+Without `seed` a random one is used and returned. A 400 says why a battle could
+not be placed.
 
 ### Recording and after-action review
 
@@ -188,8 +322,12 @@ under `/s/{id}/api/v1`; the unprefixed paths are the `main` session.
 | GET | `/terrain` | spec, towns, road polylines |
 | GET | `/terrain/point` | `?x=&y=` / `?lat=&lon=` / `?town=` → elevation, water, forest, road, slope, nearest town |
 | POST | `/terrain/line-of-sight` | `{"from": "E1" or position, "to": ..., "radar"?: true}`. Positions take an optional `height` above ground (default 2 m). Terrain, forest, buildings and smoke block it (`radar` sees through smoke) |
+| POST | `/terrain/viewshed` | `{"from": "E2" or position, "radius"?: 3000, "targetHeight"?: 2, "radar"?: false}` → a grid of cells around the eye (`x0`, `y0`, `cell`, `cols`, `rows`, `cellsB64`: one byte per cell, row by row from the south-west, 0 out of range or water, 1 hidden, 2 seen), `eye`, `radius` and `visibleFraction`. From an entity the radius defaults to its best sensor's range now (1–10 km); from a point (2 m above the ground, or `height`), 3 km. 100–20000 m. At most 161 cells across |
 | POST | `/terrain/route` | `{"from", "to", "domain": "ground\|lifeform\|surface\|air", "force"?, "covered"?}` → waypoints and length. With `force`, round obstacles and the minefields it knows; with `covered` too, out of sight of the enemies it knows |
 | GET | `/catalog` · `/catalog/entity-types` · `/catalog/unit-templates` | see the [catalog](catalog.md) |
+| GET | `/catalog/custom` | The entries this scenario adds or changes (its `catalog` field) |
+| PUT | `/catalog/{section}/{id}` | Add or change an entry; `section` is `entity-types`, `weapons`, `sensors` or `unit-templates`, the body an entry as in `GET /catalog`. Every field is checked, and references (weapons, sensors, member types) must exist. Entities already on the map keep their definition. Returns the entry |
+| DELETE | `/catalog/{section}/{id}` | Remove a custom entry (a built-in one it replaced comes back). 400 while entities still need it |
 | GET | `/terrains` | Imported terrain datasets ([Terrain import](../terrain-import.md)) |
 | PUT | `/terrains/{name}` | Upload a dataset made with `werforces-terrain` (body: the dataset JSON, up to 8 MB) |
 
@@ -215,7 +353,9 @@ The browser app uses a few unversioned endpoints, which you can also use:
 - `GET /api/terrain` returns the terrain grid (base64);
 - `GET /api/path/{id}`;
 - `POST /api/command` takes a command object (see `Command` in
-  `src/shared/types.ts`);
+  `src/shared/types.ts`). `{"cmd": "batch", "commands": [...]}` runs several
+  (up to 500) as one edit and one undo step, all or nothing: if one fails, the
+  ones before it are undone;
 - `GET /auth/config` says whether sign-in is used and who is signed in; `/auth/login`,
   `/auth/callback` and `/auth/logout` are the sign-in flow;
 - the **`/ws`** WebSocket:
@@ -240,9 +380,11 @@ The browser app uses a few unversioned endpoints, which you can also use:
   the player role: listings and the WebSocket state show only its force and its
   contacts, events are filtered, commands are limited to its own force, and
   every exercise-control route (time, scenarios, recordings, export,
-  integrations, creating or moving entities) answers **403**. The routes a
-  player may use are the object, task, plan, graphics, events, terrain and
-  catalog routes.
+  integrations, creating or moving entities, the catalog editor, quick battles,
+  civilians) answers **403**. The routes a player may use are the object,
+  task, plan, drive, explain, graphics, events, terrain (with viewshed) and
+  catalog reading routes, plus orders, alerts, codewords and their own force's
+  synchronization matrix.
 - **OpenID Connect.** With `--oidc-issuer`, browsers sign in with your identity
   provider and get an HttpOnly, SameSite=Lax session cookie, accepted on `/api`,
   `/ws` and `/mcp` with the role their claims map to (see

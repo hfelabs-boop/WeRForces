@@ -75,13 +75,19 @@ export function checkCallsForFire(engine: Engine): void {
   for (const obs of engine.entities.values()) {
     if (!obs.reactions.callForFire || !obs.alive || obs.remote || obs.embarkedIn) continue;
     if (engine.time < obs.callForFireAt) continue;
+    // A jammed observer cannot get a call for fire through.
+    if (engine.ew.radioJammed(obs)) continue;
     for (const c of obs.contacts.values()) {
       if (engine.time - c.lastSeen > 2) continue;
       const t = engine.entities.get(c.id);
       if (!t || !t.alive || t.domain === 'air' || !engine.isHostile(obs.force, t.force)) continue;
       const p = { x: c.x, y: c.y };
       if (covered(engine, p) || dangerClose(engine, obs.force, p)) continue;
-      const fu = availableFireUnits(engine, obs.force, p)[0];
+      // Nor can a jammed battery hear it.
+      const fu = availableFireUnits(engine, obs.force, p).find((f) => {
+        const lead = engine.units.get(f.id)?.leader ?? engine.entities.get(f.id);
+        return !lead || !engine.ew.radioJammed(lead);
+      });
       if (!fu) continue;
       const spec: TaskSpec = { type: 'fireMission', target: { x: Math.round(p.x), y: Math.round(p.y) }, rounds: DEFAULT_MISSION_ROUNDS, radius: fu.tubes > 1 ? BATTERY_SHEAF : 0 };
       engine.radio(obs, `${obs.name}: fire mission, ${t.type.name} at ${spec.target.x} ${spec.target.y}, ${DEFAULT_MISSION_ROUNDS} rounds, over`, t.id);

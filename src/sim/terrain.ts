@@ -466,6 +466,40 @@ export class Terrain extends TerrainGrid {
     return true;
   }
 
+  /**
+   * What blocks a sight line, and where: the same test as lineOfSight, sample by sample,
+   * for explanations (slower; not for the simulation loop). Null when the line is clear.
+   */
+  sightBlocker(a: Vec3, b: Vec3): { cause: 'terrain' | 'forest' | 'buildings'; x: number; y: number } | null {
+    const d = dist2d(a, b);
+    if (d < 1) return null;
+    const n = Math.ceil(d / (this.spec.cellSize / 2));
+    const stepLen = d / n;
+    let underCanopy = 0;
+    let amongBuildings = 0;
+    for (let k = 1; k < n; k++) {
+      const t = k / n;
+      const x = a.x + (b.x - a.x) * t;
+      const y = a.y + (b.y - a.y) * t;
+      const z = a.z + (b.z - a.z) * t;
+      const ground = this.surfaceHeight(x, y);
+      const at = { x: Math.round(x), y: Math.round(y) };
+      if (ground > z) return { cause: 'terrain', ...at };
+      if (ground + CANOPY_HEIGHT > z && this.isForest(x, y)) {
+        underCanopy += stepLen;
+        if (underCanopy > FOREST_SEE_THROUGH) return { cause: 'forest', ...at };
+      }
+      if (this.urbanCover) {
+        const p = this.nearestPost(x, y);
+        if (this.urbanCover[p] >= URBAN_COVERAGE * 100 && ground + this.urbanHeight![p] > z) {
+          amongBuildings += stepLen;
+          if (amongBuildings > URBAN_SEE_THROUGH) return { cause: 'buildings', ...at };
+        }
+      }
+    }
+    return null;
+  }
+
   /** Highest terrain-or-canopy top per block of LOS_BLOCK x LOS_BLOCK posts (blocks share their edge posts). */
   private obstacleTops(): { cols: number; max: Float32Array } {
     if (this.tops) return this.tops;

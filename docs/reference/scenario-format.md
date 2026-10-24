@@ -14,8 +14,10 @@ A scenario saved at time 0 is a clean starting point. Saved while running
 (time > 0) it is a full **checkpoint**: entities also carry a `state` with
 damage, ammunition, contacts and plan/task progress, units carry their leader
 and plan progress, and the file adds munitions in flight (`shots`) and the
-random generator state (`rngState`), smoke clouds (`smoke`) and orders still
-on their way (`orders`). Loading a checkpoint continues the run from that
+random generator state (`rngState`), smoke clouds (`smoke`), orders still
+on their way (`orders`), the codewords sent so far (`codewords`), which
+phases of each synchronization matrix have started, and the background
+civilians themselves. Loading a checkpoint continues the run from that
 state. Moving entities plan their route again from where they are, so the run
 soon drifts from the one that was saved: two loads of the same checkpoint play
 out identically, but not necessarily like the original run. Destroyed entities
@@ -39,6 +41,10 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
   "graphics": [ ... ],
   "rules": { "suppression": true, "morale": true, "fuel": true, "orderDelay": false },
   "environment": { "date": "2026-11-02", "time": 5.5, "visibility": 3000, "precipitation": "rain", "windSpeed": 4, "windFrom": 250 },
+  "patternOfLife": { "vehicles": 20, "pedestrians": 40 },
+  "catalog": { "entityTypes": [ ... ] },
+  "syncMatrices": [ ... ],
+  "codewords": [ ... ],
   "shots": [ ... ],
   "rngState": 1234567890
 }
@@ -55,6 +61,10 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
 | `entities`, `units`, `graphics` | yes | May be empty arrays |
 | `rules` | | Optional models, for comparison runs: `suppression`, `morale`, `fuel` (missing means on) and `orderDelay` (missing means off) ([Concepts](../concepts.md#optional-models)) |
 | `environment` | | Time of day and weather at the start (below). Missing fields keep their defaults |
+| `patternOfLife` | | Background civilians to keep on the map: `vehicles` and `pedestrians`, 0–300 each (missing means none) ([Concepts](../concepts.md#pattern-of-life)) |
+| `catalog` | | Catalog entries this scenario adds or changes, made in the catalog editor: `entityTypes`, `weapons`, `sensors`, `unitTemplates`, each a list of entries as in `GET /api/v1/catalog`. Checked on load and merged by id over the server's catalog, before the entities are created ([below](#catalog)) |
+| `syncMatrices` | | One synchronization matrix per force ([below](#syncmatrices)) |
+| `codewords` | | Checkpoints: codewords sent so far, `{force, codeword, time}` |
 | `shots` | | Checkpoints: munitions in flight (`shooterId`, `targetId`, `weaponId`, `from`, `to`, `fireTime`, `impactTime`, `range`) |
 | `smoke` | | Checkpoints: smoke clouds (`id`, `x`, `y`, `radius`, `until`: the simulation time it is gone) |
 | `orders` | | Checkpoints: orders on their way down the chain of command (`targetId`, `task` or `plan`, `due`) |
@@ -131,7 +141,7 @@ See [Concepts → Night and weather](../concepts.md#night-and-weather).
 | `roe` | `fireAtWill` (default), `returnFire`, `holdFire` |
 | `plan` / `task` | Optional. Assigned when the scenario loads. If both are given, the plan wins |
 | `reactions` | Optional: `onContact`, `withdrawBelow`, `withdrawTo`, `callForFire` ([Concepts](../concepts.md#reactions)) |
-| `state` | Optional. Saved at time 0 it holds only `destroyed`, `mobilityKill`, `firepowerKill` and `embarkedIn` (carrier id: starts mounted). Fields added by hand are applied on load too, for example `fuel` (litres), `ammo` (rounds by weapon id), `supplies` (supply loads left) or `prepared` (`dugIn` or `hullDown`: starts in a prepared position). Checkpoints add `speed`, `z`, `ammo`, `weaponReadyAt`, `contacts`, `attackers`, `underFireUntil`, `lastFiredAt`, `sensorDue`, `speedOverride`, `altitudeOverride`, `planIndex`, `taskState` (a task spec that resumes the running task), `taskDone`, `withdrawn`, `callForFireAt`, `smokeLeft`, `suppression`, `morale`, `moraleState` |
+| `state` | Optional. Saved at time 0 it holds only `destroyed`, `mobilityKill`, `firepowerKill`, `embarkedIn` (carrier id: starts mounted) and `jamming: false` (a jammer that starts switched off; jammers start on). Fields added by hand are applied on load too, for example `fuel` (litres), `ammo` (rounds by weapon id), `supplies` (supply loads left) or `prepared` (`dugIn` or `hullDown`: starts in a prepared position). Checkpoints add `speed`, `z`, `ammo`, `weaponReadyAt`, `contacts`, `attackers`, `underFireUntil`, `lastFiredAt`, `sensorDue`, `speedOverride`, `altitudeOverride`, `planIndex`, `taskState` (a task spec that resumes the running task), `taskDone`, `withdrawn`, `callForFireAt`, `smokeLeft`, `suppression`, `morale`, `moraleState`, and `ambient: true` for a background civilian (taken back under the pattern of life's control on load) |
 
 Ground and dismounted entities must be on land, and surface vessels on water.
 Otherwise loading fails and the previous scenario stays loaded.
@@ -190,6 +200,64 @@ These use the same JSON as the REST API: see
 [REST API → Tasks](rest-api.md#tasks) and [Plans](rest-api.md#plans). In files,
 positions must be `{x, y}`. The `{town}` and `{lat, lon}` shortcuts only work
 through the API.
+
+Plan statements are `task`, `setRoe`, `setSpeed`, `setAltitude`,
+`setFormation`, `setReactions`, `waitUntil`, and the control statements:
+
+```json
+{ "kind": "if", "condition": { "type": "enemyDetected" }, "then": [ ... ], "else": [ ... ] }
+{ "kind": "while", "condition": { "type": "not", "condition": { "type": "codeword", "codeword": "EXECUTE" } }, "body": [ ... ] }
+{ "kind": "sendCodeword", "codeword": "BRAVO" }
+{ "kind": "report", "text": "crossing PL LD" }
+```
+
+Conditions are `simTime`, `inArea`, `enemyInArea`, `enemyDetected`,
+`underFire`, `strengthBelow`, `fuelBelow`, `ammoBelow`, `entityDestroyed`,
+`codeword` (`{"type": "codeword", "codeword": "EXECUTE"}`), and the
+combinations `all` and `any` (`"conditions": [...]`) and `not`
+(`"condition": {...}`). In checkpoints, a plan's `planIndex` counts the plan's
+steps after `if`/`while` blocks are flattened, not its top-level statements.
+
+## `syncMatrices`
+
+A force's operation in phases ([Concepts](../concepts.md#synchronization-matrix)):
+
+```json
+{
+  "force": 1,
+  "phases": [
+    { "id": "P1", "name": "Move", "trigger": { "type": "time", "time": 1 },
+      "orders": [ { "targetId": "U1", "task": { "type": "moveTo", "target": { "x": 8922, "y": 6668 } }, "text": "move to ATK POS" } ] },
+    { "id": "P2", "name": "Assault", "trigger": { "type": "codeword", "codeword": "EXECUTE" },
+      "orders": [ { "targetId": "U1", "task": { "type": "moveTo", "target": { "x": 9382, "y": 7938 } } },
+                  { "targetId": "U5", "task": { "type": "fireMission", "target": { "x": 9382, "y": 7938 }, "rounds": 4, "radius": 150 } } ] }
+  ],
+  "started": { "P1": 1 }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `force` | The force it belongs to (one matrix per force) |
+| `phases[].id`, `name` | A unique id (letters, digits, `-`, `_`) and the name, which is also the codeword the phase sends when it starts |
+| `phases[].trigger` | `manual`, `time` (`time`), `codeword` (`codeword`), `previousDone` (`delay`?) or `condition` (`ownerId`, `condition`) |
+| `phases[].orders` | `targetId` (a unit or entity of the force) with a `task`, an `roe`, or `stop: true`; `text` is the order as typed, kept for the GUI. In files, orders need a `task`, `roe` or `stop`: words are only turned into tasks through the API |
+| `started` | Checkpoints: phase id → simulation time it started |
+
+## `catalog`
+
+Entries made in the catalog editor (or with `PUT /api/v1/catalog/...`) travel
+with the scenario:
+
+```json
+"catalog": {
+  "entityTypes": [ { "id": "us-m1a2-sep", "name": "M1A2 SEPv3", "domain": "ground", "armor": "armored", "maxSpeed": 18, "cruiseSpeed": 12, "acceleration": 2.5, "turnRate": 0.6, "weapons": ["gun-120mm", "mg-762"], "sensors": ["thermal-sight", "eye"], ... } ]
+}
+```
+
+Every entry is checked as in the editor, and an entry with the id of a
+built-in one replaces it in this scenario. The same JSON works as a
+`--catalog` file ([Tutorial 9](../tutorials/09-extending-the-catalog.md)).
 
 ## Generating scenarios with code
 

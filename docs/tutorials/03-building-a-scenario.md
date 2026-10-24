@@ -46,8 +46,8 @@ Then organise them:
   recon to **Patrol**, and a **Phase line** along the river.
 - **Set ROE.** For example, Red recon on *Return fire* so it observes rather
   than fights.
-- **Give plans** with timed starts: *Wait until time 300*, then *Move to…*. Red
-  attacks five minutes in.
+- **Give plans** with timed starts: *Wait until…* with *time is (s)* `300`,
+  then *Move to (pick)*. Red attacks five minutes in.
 
 Any entity can be **moved** later with **Alt+drag**, and **deleted** with the
 **Delete** key.

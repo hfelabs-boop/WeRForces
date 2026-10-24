@@ -67,6 +67,26 @@ export function buildOpenApi(baseUrl: string): Schema {
       '/api/v1/scenario/new': {
         post: op('Scenario', 'Start an empty scenario', body({ type: 'object', properties: { name: { type: 'string' }, terrain: { type: 'object', description: 'generation settings (seed, size, cellSize, relief, waterFraction, forestFraction, towns, origin) or {"dataset": name} for imported terrain' } } })),
       },
+      '/api/v1/scenario/quick-battle': {
+        get: op('Scenario', 'The choices a quick battle takes: missions, force compositions and sizes, support, weather'),
+        post: op('Scenario', 'Replace the scenario with a generated battle: both forces placed on land either side of an objective (a town near the middle when there is one), the graphics for the mission, and a synchronization matrix per force, so it runs when started. Same seed and options, same battle', {
+          ...body({
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              seed: { type: 'integer', description: 'random when left out (returned)' },
+              mission: { type: 'string', enum: ['meeting', 'attack', 'defend', 'delay', 'recon'], description: 'attack, defend, delay and recon are from Blue\'s side (default attack)' },
+              blue: { $ref: '#/components/schemas/QuickBattleSide' },
+              red: { $ref: '#/components/schemas/QuickBattleSide' },
+              terrain: { type: 'object', description: 'as for POST /scenario/new; the current terrain when left out' },
+              distance: { type: 'number', minimum: 1000, maximum: 20000, description: 'metres between the sides at the start (default 3000, or 5000 with a company)' },
+              time: { type: 'number', minimum: 0, maximum: 24, description: 'local time at the start, hours (default 10)' },
+              weather: { type: 'string', enum: ['clear', 'haze', 'fog', 'rain'] },
+              civilians: { type: 'boolean', description: 'civilian traffic and pedestrians' },
+            },
+          }),
+        }),
+      },
       '/api/v1/scenario/undo': { post: op('Scenario', 'Take back the last edit (anything but run, pause, step and time scale); up to 30 steps') },
       '/api/v1/scenario/redo': { post: op('Scenario', 'Redo an edit taken back with undo') },
       '/api/v1/scenarios': { get: op('Scenario', 'List scenarios stored on the server') },
@@ -77,6 +97,12 @@ export function buildOpenApi(baseUrl: string): Schema {
       '/api/v1/scenarios/{name}/load': { post: op('Scenario', 'Load a stored scenario', { parameters: [idParam('name')] }) },
       '/api/v1/terrains': { get: op('Terrain', 'Imported real-world terrain datasets (use one with POST /scenario/new {"terrain":{"dataset":name}})') },
       '/api/v1/terrains/{name}': { put: op('Terrain', 'Upload a terrain dataset made with werforces-terrain', { parameters: [idParam('name')], ...body({ type: 'object' }) }) },
+      '/api/v1/simulation/pattern-of-life': {
+        get: op('Simulation', 'How many background civilians the simulation keeps on the map'),
+        put: op('Simulation', 'Set the number of civilian cars (driving between towns along the roads) and pedestrians (walking about the towns), 0-300 each. They are neutral, run from shots and blasts nearby, and are kept topped up', {
+          ...body({ type: 'object', properties: { vehicles: { type: 'integer', minimum: 0, maximum: 300 }, pedestrians: { type: 'integer', minimum: 0, maximum: 300 } } }),
+        }),
+      },
       '/api/v1/simulation/rules': {
         get: op('Simulation', 'Which optional models are on'),
         put: op('Simulation', 'Turn optional models on or off', {
@@ -178,6 +204,43 @@ export function buildOpenApi(baseUrl: string): Schema {
         delete: { tags: ['Entities'], summary: 'Delete an entity', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } },
       },
       '/api/v1/entities/{id}/path': { get: op('Entities', 'Remaining planned waypoints', { parameters: [idParam()] }) },
+      '/api/v1/sync-matrix': { get: op('Simulation', 'Synchronization matrices (global plans) per force, with the phases started and when (players: their own)') },
+      '/api/v1/sync-matrix/{force}': {
+        put: op('Simulation', 'Replace a force\'s synchronization matrix. Body: {phases:[{id, name, trigger, orders:[{targetId, task | roe | stop | text}]}]}. Triggers: {type:"manual"}, {type:"time",time}, {type:"codeword",codeword}, {type:"previousDone",delay?}, {type:"condition",ownerId,condition}. An order can be written in words ({targetId, text:"move to Calloway covered"}). Phases start in order; each gives its orders and announces its name as a codeword. `{phases: []}` removes the matrix', {
+          parameters: [idParam('force')],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['phases'], properties: { phases: { type: 'array', items: { type: 'object' } } } } } } },
+        }),
+      },
+      '/api/v1/sync-matrix/{force}/phases/{id}/start': { post: op('Simulation', 'Start a phase now, whatever its trigger (also out of turn; phases already started are not started again)', { parameters: [idParam('force'), idParam()] }) },
+      '/api/v1/terrain/viewshed': {
+        post: op('Terrain', 'What an entity or a point can see out to a radius: a grid of cells (0 out of range or water, 1 hidden, 2 seen), base64 bytes row by row from (x0, y0) at `cell` m spacing, plus the share seen. Body: {from: entity id or position (with optional height), radius?, targetHeight? (default 2 m), radar?}. An entity\'s radius defaults to its sensor range in the current light and weather', {
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['from'], properties: { from: {}, radius: { type: 'number' }, targetHeight: { type: 'number' }, radar: { type: 'boolean' } } } } } },
+        }),
+      },
+      '/api/v1/catalog/custom': { get: op('Catalog', 'The entries this scenario adds to or changes in the catalog (saved with it)') },
+      '/api/v1/catalog/{section}/{id}': {
+        put: op('Catalog', 'Add or change a catalog entry (section: entity-types, weapons, sensors or unit-templates; the body as in GET /catalog). Every field is checked; references to weapons, sensors and types must exist. Entities already on the map keep their old definition', { parameters: [idParam('section'), idParam()], ...body({ type: 'object' }) }),
+        delete: op('Catalog', 'Remove a custom entry (the built-in one it replaced comes back). Refused while entities use it', { parameters: [idParam('section'), idParam()] }),
+      },
+      '/api/v1/codewords': {
+        get: op('Simulation', 'Codewords sent so far, per force (players: their own)'),
+        post: op('Simulation', 'Send a codeword to a force: plans waiting for it go on. Body: {codeword, force} (players: their own force)', {
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['codeword'], properties: { codeword: { type: 'string' }, force: { type: 'integer', enum: [0, 1, 2, 3] } } } } } },
+        }),
+      },
+      '/api/v1/orders': {
+        post: op('Entities', 'Give an order in words, e.g. "Team ARMOR move to Calloway covered", "Scout 1 screen 2 km north of Brenham facing north", "Paladin Platoon fire 4 rounds on 9800 12300", "Team MECH hold fire". Places: towns, graphics, objects, "x y" or "2 km north of …". Returns the order as understood and the commands run; `dryRun: true` only parses', {
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['text'], properties: { text: { type: 'string' }, dryRun: { type: 'boolean' } } } } } },
+        }),
+      },
+      '/api/v1/alerts': { get: op('Events', 'The attention queue: open alerts (unit idle, broken, out of fuel or ammunition, leader lost, losses, task failed, under fire, first contact), newest first. `?all=true` includes acknowledged ones', { parameters: [{ name: 'all', in: 'query', schema: { type: 'boolean' } }] }) },
+      '/api/v1/alerts/acknowledge': { post: op('Events', 'Acknowledge every open alert (players: their own force\'s)') },
+      '/api/v1/alerts/{id}/acknowledge': { post: op('Events', 'Acknowledge one alert', { parameters: [idParam()] }) },
+      '/api/v1/entities/{id}/drive': {
+        post: op('Entities', 'Direct control: drive an entity by hand. Body: {throttle 0..1, turn -1..1 (let go after 1.5 s without input), targetId: entity to fire at, or null}. The first call puts it under direct control (replacing its task and plan); any other task ends it', { parameters: [idParam()], ...body({ type: 'object', properties: { throttle: { type: 'number' }, turn: { type: 'number' }, targetId: { type: ['string', 'null'] } } }) }),
+      },
+      '/api/v1/entities/{id}/explain': { get: op('Entities', 'Why the entity is or is not moving, firing and detecting: findings by severity (block, warn, info), with fixes. Exercise control is also told about enemies the entity has not detected, and why', { parameters: [idParam()] }) },
+      '/api/v1/units/{id}/explain': { get: op('Units', "Why the unit is or is not moving and firing: its strength, morale and orders, its leader's findings, and how many members share each problem", { parameters: [idParam()] }) },
       ...taskable('entities', 'Entities'),
       '/api/v1/units': {
         get: op('Units', 'List units', { parameters: [{ name: 'force', in: 'query', schema: { type: 'string' } }] }),
@@ -284,6 +347,15 @@ export function buildOpenApi(baseUrl: string): Schema {
         apiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
       },
       schemas: {
+        QuickBattleSide: {
+          type: 'object',
+          properties: {
+            nation: { type: 'string', enum: ['us', 'ru'], description: 'default us for blue, ru for red' },
+            composition: { type: 'string', enum: ['armor', 'mech', 'infantry', 'combined'], description: 'default mech; combined is tanks with mechanised infantry' },
+            size: { type: 'string', enum: ['platoon', 'company'], description: 'a company is three platoons and an HQ (default platoon)' },
+            support: { type: 'array', items: { type: 'string', enum: ['artillery', 'recon', 'engineers', 'supply', 'air', 'airDefense'] }, description: 'artillery: mortars with a platoon, howitzers with a company; engineers: a minefield in front of a defence, or sappers with an attack' },
+          },
+        },
         Error: { type: 'object', properties: { error: { type: 'object', properties: { status: { type: 'integer' }, message: { type: 'string' } } } } },
         Position: {
           description: 'A location: local metres, geodetic degrees, or a town name',

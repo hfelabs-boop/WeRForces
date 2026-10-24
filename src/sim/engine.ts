@@ -34,14 +34,16 @@ import type {
   Vec3,
   WeaponDef,
 } from '../shared/types.js';
-import { CatalogIndex, DEFAULT_CATALOG } from './catalog.js';
+import { FORCE_NAMES } from '../shared/types.js';
+import { CatalogIndex, DEFAULT_CATALOG, mergeCatalog } from './catalog.js';
+import { type CatalogSection, validateCatalogExtension } from './catalogEdit.js';
 import { applyBlast, applyDamage, type Detonation, effectivePk, resolveImpact, type Shot, updateCombat } from './combat.js';
 import { Entity } from './entity.js';
 import { DEFAULT_ENVIRONMENT, environmentAt, groundFactor, normalizeEnvironment, windVector } from './environment.js';
 import { checkCallsForFire } from './fires.js';
 import { decaySuppression, isPinned, updateMorale } from './morale.js';
 import { stepMovement } from './movement.js';
-import { describeStatement, PlanExecutor, type Taskable } from './plans.js';
+import { describeStatement, PlanExecutor, planTasks, type Taskable } from './plans.js';
 import { Rng } from './rng.js';
 import { SENSOR_INTERVAL, updateSensors } from './sensors.js';
 import { Obstacles } from './obstacles.js';
@@ -49,9 +51,14 @@ import { Smoke } from './smoke.js';
 import { ThreatMap } from './threats.js';
 import { burnFuel, updateResupply } from './supply.js';
 import { SpatialIndex } from './spatial.js';
-import { createTask, MountTask, type Task, type TaskStatus } from './tasks.js';
+import { createTask, ManualTask, MountTask, type Task, type TaskStatus } from './tasks.js';
 import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
 import { formationOffset, perMemberTask, splitOrder, Unit } from './units.js';
+import { Alerts } from './alerts.js';
+import { TravelCache } from './eta.js';
+import { SyncPlans } from './sync.js';
+import { Life } from './life.js';
+import { Ew, JAMMED_ORDER_DELAY } from './ew.js';
 
 export const DEFAULT_DT = 0.1;
 export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
@@ -82,6 +89,8 @@ export interface CreateEntityOptions {
   /** Altitude above ground for aircraft. */
   altitude?: number;
   id?: string;
+  /** No "created" event (background civilians). */
+  quiet?: boolean;
 }
 
 export interface RemoteEntityUpdate {
@@ -121,7 +130,13 @@ class EntityTaskable implements Taskable {
 }
 
 export class Engine {
-  readonly catalog: CatalogIndex;
+  catalog: CatalogIndex;
+  /** The catalog the engine was made with (defaults plus any --catalog extension). */
+  readonly baseCatalog: Catalog;
+  /** Entries added or changed in the catalog editor, saved with the scenario. */
+  customCatalog: Partial<Catalog> = {};
+  /** Bumped when the catalog changes, so clients fetch it again. */
+  catalogVersion = 0;
   terrain: Terrain;
   terrainVersion = 1;
   time = 0;
@@ -140,6 +155,15 @@ export class Engine {
   readonly threats = new ThreatMap(this);
   readonly graphics = new Map<string, Graphic>();
   readonly listeners: EngineListeners = { event: [], fire: [], detonation: [], removed: [], reset: [], step: [] };
+  /** Things the operator should look at (idle, broken, out of fuel...). Read-only toward the simulation. */
+  readonly alerts: Alerts = new Alerts(this);
+  private readonly travel = new TravelCache(this);
+  /** Global plans: a synchronization matrix per force. */
+  readonly sync = new SyncPlans(this);
+  /** Pattern of life: civilian traffic and pedestrians. */
+  readonly life = new Life(this);
+  /** Electronic warfare: who is jammed. */
+  readonly ew = new Ew(this);
 
   private hostilities = new Set<string>(['1-2']);
   private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
@@ -165,7 +189,8 @@ export class Engine {
 
   constructor(opts: { catalog?: Catalog; terrain?: Terrain; seed?: number; terrainLoader?: (name: string) => TerrainData } = {}) {
     this.terrainLoader = opts.terrainLoader;
-    this.catalog = new CatalogIndex(opts.catalog ?? DEFAULT_CATALOG);
+    this.baseCatalog = opts.catalog ?? DEFAULT_CATALOG;
+    this.catalog = new CatalogIndex(this.baseCatalog);
     this.terrain = opts.terrain ?? Terrain.generate();
     this.rng = new Rng(opts.seed ?? this.terrain.spec.seed);
   }
@@ -257,7 +282,7 @@ export class Engine {
     }
     this.entities.set(id, e);
     this.sensorDue.set(id, this.time + this.rng.range(0, SENSOR_INTERVAL));
-    this.log('created', `${name} created`, id);
+    if (!opts.quiet) this.log('created', `${name} created`, id);
     return e;
   }
 
@@ -401,24 +426,48 @@ export class Engine {
   issueOrder(targetId: string, order: { task?: TaskSpec; plan?: Plan }): number {
     const t = this.resolveTarget(targetId);
     if (order.task) this.validateTask(order.task);
-    if (order.plan) for (const st of order.plan.statements) if (st.kind === 'task') this.validateTask(st.task);
+    if (order.plan) for (const t of planTasks(order.plan.statements)) this.validateTask(t);
     // A new order replaces one still on its way.
     this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== targetId);
     const base = this.rules.orderDelay ? ORDER_DELAY[t instanceof Unit ? t.echelon : 'entity'] : 0;
-    if (base <= 0) {
+    // A jammed radio: the order gets through late (by relay or runner).
+    const lead = t instanceof Unit ? t.leader : t;
+    const jam = lead && this.ew.radioJammed(lead) ? JAMMED_ORDER_DELAY : 0;
+    if (base <= 0 && !jam) {
       if (order.plan) this.assignPlan(targetId, order.plan);
       else if (order.task) this.assignTask(targetId, order.task);
       return 0;
     }
-    const delay = Math.round(base * (0.8 + 0.4 * this.rng.next()));
+    const delay = (base > 0 ? Math.round(base * (0.8 + 0.4 * this.rng.next())) : 0) + jam;
     this.pendingOrders.push({ targetId, task: order.task, plan: order.plan, due: Math.round((this.time + delay) * 10) / 10 });
-    this.log('task', `Order to ${t.name}: ${this.describeOrder(order)} (arrives in ${delay} s)`, t.id);
+    this.log('task', `Order to ${t.name}: ${this.describeOrder(order)} (arrives in ${delay} s${jam ? ', radio jammed' : ''})`, t.id);
     return delay;
   }
 
   /** A radio message from an entity (DIS gateways send it as a Signal PDU). */
+  /** Codewords a force has received: "force|WORD" -> time. */
+  readonly codewords = new Map<string, number>();
+
+  /** Send a codeword to a force: plans waiting for it go on. `from` names the sender in the log. */
+  sendCodeword(force: ForceId, codeword: string, from?: string): void {
+    const word = codeword.trim().toUpperCase();
+    const key = `${force}|${word}`;
+    if (!this.codewords.has(key)) this.codewords.set(key, this.time);
+    const sender = from ? this.entities.get(from) ?? this.units.get(from)?.leader : undefined;
+    const speaker = sender && !sender.remote && sender.alive ? sender : undefined;
+    const text = `${from ? `${this.nameOf(from)}: ` : ''}codeword ${word}`;
+    if (speaker) this.radio(speaker, text);
+    else this.log('info', `${FORCE_NAMES[force]} ${text}`, undefined);
+  }
+
+  hasCodeword(force: ForceId, codeword: string): boolean {
+    return this.codewords.has(`${force}|${codeword.trim().toUpperCase()}`);
+  }
+
   radio(from: Entity, text: string, aboutId?: string): void {
     if (from.remote || !from.alive) return;
+    // A jammed radio gets nothing out.
+    if (this.ew.radioJammed(from)) return;
     this.log('radio', text, from.id, aboutId);
   }
 
@@ -487,7 +536,73 @@ export class Engine {
     return g;
   }
 
-  deleteObject(id: string): void {
+  /**
+   * Replace the custom catalog (editor entries): checked as a whole, and refused if it
+   * would leave live entities without their weapons or sensors. Entities already on the
+   * map keep the definition they were made with; new ones get the new one.
+   */
+  setCustomCatalog(ext: Partial<Catalog>): void {
+    const index = new CatalogIndex(mergeCatalog(this.baseCatalog, ext));
+    for (const e of this.entities.values()) {
+      if (e.remote) continue;
+      for (const w of e.type.weapons) if (!index.weapons.has(w)) throw new Error(`${e.name} still uses weapon ${w}`);
+      for (const s of e.type.sensors) if (!index.sensors.has(s)) throw new Error(`${e.name} still uses sensor ${s}`);
+      if (!index.types.has(e.type.id)) throw new Error(`${e.name} is a ${e.type.id}: delete it first`);
+    }
+    this.catalog = index;
+    this.customCatalog = ext;
+    this.catalogVersion++;
+  }
+
+  /** Add or change one catalog entry (it goes into the custom catalog). */
+  setCatalogEntry(section: CatalogSection, entry: { id: string }): void {
+    const before = (this.customCatalog[section] ?? []) as { id: string }[];
+    const known = before.some((x) => x.id === entry.id) || this.catalog.catalog[section].some((x) => x.id === entry.id);
+    this.setCustomCatalog({ ...this.customCatalog, [section]: [...before.filter((x) => x.id !== entry.id), entry] });
+    this.log('info', `catalog: ${entry.id} ${known ? 'changed' : 'added'}`, undefined);
+  }
+
+  /** Remove a custom entry (a built-in one it replaced comes back). */
+  removeCatalogEntry(section: CatalogSection, id: string): void {
+    const list = (this.customCatalog[section] ?? []) as { id: string }[];
+    if (!list.some((x) => x.id === id)) throw new Error(`${id} is not a custom ${section} entry`);
+    const next = { ...this.customCatalog, [section]: list.filter((x) => x.id !== id) };
+    if (!next[section]!.length) delete next[section];
+    this.setCustomCatalog(next);
+    this.log('info', `catalog: ${id} removed`, undefined);
+  }
+
+  /** Direct control: start it (logged once) or update the throttle, turn and target. */
+  drive(e: Entity, input: { throttle?: number; turn?: number; targetId?: string | null }): void {
+    if (!(e.task instanceof ManualTask) || e.task.status !== 'running') {
+      // Driving a unit's leader drives the unit: its own orders stop.
+      const u = e.unit;
+      if (u && u.leader === e) {
+        u.plan = null;
+        u.assignedPlan = undefined;
+        u.assignedTask = undefined;
+        u.taskSpec = null;
+        u.leaderTask = null;
+        this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== u.id);
+      }
+      this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== e.id);
+      e.plan = null;
+      e.assignedPlan = undefined;
+      e.assignedTask = { type: 'manual' };
+      this.setEntityTask(e, new ManualTask({ type: 'manual' }));
+      // Members holding their own tasks (defend, overwatch...) drop them and follow in formation.
+      if (u && u.leader === e) u.formUp(this);
+      this.log('task', `${e.name}: under direct control`, e.id);
+    }
+    (e.task as ManualTask).input(this, input);
+  }
+
+  /** Remove an entity without a "deleted" event (background civilians). */
+  removeEntity(id: string): void {
+    this.deleteObject(id, true);
+  }
+
+  deleteObject(id: string, quiet = false): void {
     const e = this.entities.get(id);
     if (e) {
       e.task?.cancel(e);
@@ -498,7 +613,7 @@ export class Engine {
       this.sensorDue.delete(id);
       for (const other of this.entities.values()) other.contacts.delete(id);
       for (const fn of this.listeners.removed) fn(e);
-      this.log('deleted', `${e.name} deleted`, id);
+      if (!quiet) this.log('deleted', `${e.name} deleted`, id);
       return;
     }
     const u = this.units.get(id);
@@ -624,6 +739,7 @@ export class Engine {
     }
     e.task = task;
     e.steer = null;
+    if (task && e.alive && !e.remote) task.begin(this, e);
   }
 
   private resolveTarget(id: string): Entity | Unit {
@@ -649,7 +765,7 @@ export class Engine {
 
   assignPlan(targetId: string, plan: Plan): void {
     const t = this.resolveTarget(targetId);
-    for (const st of plan.statements) if (st.kind === 'task') this.validateTask(st.task);
+    for (const task of planTasks(plan.statements)) this.validateTask(task);
     t.plan = new PlanExecutor(plan);
     t.assignedPlan = plan;
     t.assignedTask = undefined;
@@ -1138,6 +1254,10 @@ export class Engine {
       checkCallsForFire(this);
       updateMorale(this);
       updateResupply(this);
+      this.ew.update();
+      this.life.update();
+      this.alerts.update();
+      this.sync.update();
     }
     for (const e of this.entities.values()) updateCombat(this, e);
     this.processImpacts();
@@ -1159,6 +1279,10 @@ export class Engine {
     this.graphics.clear();
     this.shots = [];
     this.pendingOrders = [];
+    this.codewords.clear();
+    this.sync.clear();
+    this.life.clear();
+    this.ew.clear();
     this.sensorDue.clear();
     this.losMemo.clear();
     this.smoke.clear();
@@ -1205,6 +1329,8 @@ export class Engine {
     }
     this.rng = new Rng(spec.seed);
     this.rules = { ...DEFAULT_RULES };
+    // The scenario's own catalog entries (none: the plain catalog), before anything uses them.
+    if (s.catalog || Object.keys(this.customCatalog).length) this.setCustomCatalog(s.catalog ? validateCatalogExtension(s.catalog) : {});
     this.setRules(s.rules ?? {});
     this.environment = normalizeEnvironment(s.environment);
     this.events = [];
@@ -1245,6 +1371,9 @@ export class Engine {
     }
     for (const u of s.units ?? []) if (u.parentId && this.units.has(u.parentId) && this.units.has(u.id)) this.units.get(u.id)!.parentId = u.parentId;
     this.pendingOrders = (s.orders ?? []).filter((o) => this.entities.has(o.targetId) || this.units.has(o.targetId)).map((o) => ({ ...o }));
+    for (const c of s.codewords ?? []) this.codewords.set(`${c.force}|${c.codeword.toUpperCase()}`, c.time);
+    for (const m of s.syncMatrices ?? []) this.sync.set({ force: m.force, phases: m.phases }, m.started);
+    this.life.set(s.patternOfLife ?? {});
     // Tasks and plans last, since they can reference any object. Checkpoints resume them part-way.
     for (const r of s.entities ?? []) {
       const e = this.entities.get(r.id)!;
@@ -1317,6 +1446,8 @@ export class Engine {
     if (st.fuel !== undefined) e.fuel = st.fuel;
     if (st.prepared) e.prepared = st.prepared;
     if (st.supplies !== undefined) e.supplies = st.supplies;
+    if (st.ambient) this.life.adopt(e);
+    if (st.jamming === false) e.jamming = false;
   }
 
   private authoredState(e: Entity): EntityRecord['state'] {
@@ -1369,6 +1500,8 @@ export class Engine {
         moraleState: e.moraleState !== 'steady' ? e.moraleState : undefined,
         fuel: e.fuel < 1 ? e.fuel : undefined,
         prepared: e.prepared,
+        ambient: e.ambient || undefined,
+        jamming: e.type.jammer && !e.jamming ? false : undefined,
         supplies: e.type.supply && e.supplies !== e.type.supply.capacity ? e.supplies : undefined,
       },
     };
@@ -1412,7 +1545,8 @@ export class Engine {
    * so loading it continues the run. Route planning restarts from current positions.
    */
   toScenario(): ScenarioFile {
-    const local = [...this.entities.values()].filter((e) => !e.remote);
+    // Background civilians are made afresh from the settings, except in checkpoints.
+    const local = [...this.entities.values()].filter((e) => !e.remote && !(e.ambient && this.time === 0));
     return {
       format: 'werforces-scenario',
       version: 1,
@@ -1459,7 +1593,11 @@ export class Engine {
       })),
       rngState: this.time === 0 ? undefined : this.rng.state,
       rules: JSON.stringify(this.rules) === JSON.stringify(DEFAULT_RULES) ? undefined : { ...this.rules },
+      catalog: Object.keys(this.customCatalog).length ? JSON.parse(JSON.stringify(this.customCatalog)) : undefined,
+      patternOfLife: this.life.settings.vehicles || this.life.settings.pedestrians ? { ...this.life.settings } : undefined,
       orders: this.pendingOrders.length ? this.pendingOrders.map((o) => ({ ...o })) : undefined,
+      syncMatrices: this.sync.all().length ? this.sync.states().map((m) => ({ force: m.force, phases: m.phases, ...(this.time > 0 && Object.keys(m.started).length ? { started: m.started } : {}) })) : undefined,
+      codewords: this.codewords.size ? [...this.codewords].map(([k, time]) => ({ force: Number(k.split('|')[0]) as ForceId, codeword: k.slice(k.indexOf('|') + 1), time })) : undefined,
       environment: JSON.stringify(this.environment) === JSON.stringify(DEFAULT_ENVIRONMENT) ? undefined : { ...this.environment },
       smoke: this.smoke.clouds.length ? this.smoke.clouds.map((c) => ({ ...c })) : undefined,
     };
@@ -1506,6 +1644,10 @@ export class Engine {
       fuel: e.type.endurance && this.rules.fuel ? Math.round(e.fuel * 1000) / 1000 : undefined,
       supplies: e.type.supply ? Math.round(e.supplies * 100) / 100 : undefined,
       prepared: e.prepared,
+      travel: !e.unit || e.unit.leader === e ? this.travel.get(e) : undefined,
+      ambient: e.ambient || undefined,
+      jamming: e.type.jammer ? e.jamming : undefined,
+      jammed: this.ew.status(e),
     };
   }
 
@@ -1545,6 +1687,7 @@ export class Engine {
         withdrawn: u.withdrawn || undefined,
         morale: this.rules.morale ? Math.round(u.morale * 100) / 100 : undefined,
         moraleState: this.rules.morale ? u.moraleState : undefined,
+        travel: u.leader ? this.travel.get(u.leader) : undefined,
       };
     });
     return {
@@ -1561,6 +1704,9 @@ export class Engine {
         ? this.pendingOrders.map((o) => ({ targetId: o.targetId, text: this.describeOrder(o), due: o.due }))
         : undefined,
       schedule: this.schedule(),
+      alerts: this.alerts.open().slice(0, 50),
+      sync: this.sync.all().length ? this.sync.states() : undefined,
+      catalogVersion: this.catalogVersion,
     };
   }
 
@@ -1571,11 +1717,11 @@ export class Engine {
     for (const o of owners) {
       const p = o.plan;
       if (!p || p.finished) continue;
-      const sts = p.plan.statements;
-      for (let i = p.index; i < sts.length; i++) {
-        const st = sts[i];
-        if (st.kind !== 'waitUntil' || st.condition.type !== 'simTime' || st.condition.time <= this.time) continue;
-        const next = sts[i + 1];
+      for (let i = p.index; i < p.ops.length; i++) {
+        const op = p.ops[i];
+        const st = op.op === 'do' ? op.st : undefined;
+        if (!st || st.kind !== 'waitUntil' || st.condition.type !== 'simTime' || st.condition.time <= this.time) continue;
+        const next = p.statementAt(i + 1);
         out.push({ targetId: o.id, time: st.condition.time, text: `${this.nameOf(o.id)}: ${next ? describeStatement(next, this) : 'plan continues'}` });
       }
     }

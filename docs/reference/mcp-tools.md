@@ -37,6 +37,67 @@ Full details of one entity: kinematics, damage, ROE, task/plan, ammunition and c
 | --- | --- | --- | --- |
 | `id` | string | yes |  |
 
+## `explain` _(read-only)_
+
+Why an entity or unit is or is not moving, shooting or seeing the enemy: blockers (no line of sight and what blocks it, out of range, ROE, out of ammo or fuel, pinned, halted on contact, broken, order still on its way...) with suggested fixes. Use it whenever something does not do what you ordered.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | yes | Entity or unit id |
+
+## `give_order`
+
+Give an order in plain words, the way a commander would say it: "<who> <verb> <where/what> [modifiers]". Who: unit or entity names (join several with "and"). Verbs: move to (covered, fast, slowly, at N km/h), attack, follow, defend/overwatch/screen <place> [facing <direction>] [width <m>], ambush <area> [from <place>], search <area>, patrol <route>, follow route <route>, fire [N rounds] on <place>, smoke <place>, orbit <place> [radius N km], mount <carrier>, dismount, resupply [from X], breach <minefield>, wait N min, stop, hold fire, return fire, fire at will. Places: town or graphic names, objects, "x y", or "2 km north of Brenham". Use dryRun to check how it is understood. Prefer this for simple orders; use assign_task for details it cannot express.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `text` | string | yes | The order, e.g. "Team ARMOR move to Calloway covered" |
+| `dryRun` | boolean |  |  |
+
+## `viewshed` _(read-only)_
+
+What an entity (or a point) can see: the share of the ground within the radius that is in its line of sight, and the dead ground. Use it to choose observation posts, overwatch positions or covered approaches.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `from` | string or {x, y, height} | yes | entity id, or a position |
+| `radius` | number |  |  |
+
+## `set_sync_matrix`
+
+Plan an operation in phases for a force (a synchronization matrix, or global plan). Each phase has a trigger and orders for units; phases start in order, each giving all its orders at once and announcing its name as a codeword (e.g. phase "Phase 2 Assault" sends codeword "PHASE 2 ASSAULT", which unit plans can wait for). Triggers: {type:"manual"} (start_phase), {type:"time",time} (s), {type:"codeword",codeword}, {type:"previousDone",delay?} (when the previous phase's orders are carried out), {type:"condition",ownerId,condition} (plan conditions). Orders: {targetId, text} with the order in words as for give_order without the name ("move to Calloway covered", "defend OBJ CALLOWAY facing north", "hold fire"), or {targetId, task}. An empty phases list removes the matrix.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `force` | `"blue"` \| `"red"` \| `"neutral"` | yes |  |
+| `phases` | array of {id, name, trigger, orders} | yes |  |
+
+## `start_phase`
+
+Start a phase of a synchronization matrix now, whatever its trigger.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `force` | `"blue"` \| `"red"` \| `"neutral"` | yes |  |
+| `phaseId` | string | yes |  |
+
+## `send_codeword`
+
+Send a codeword to a force (players: their own). Plans waiting for it ({type:"codeword"} conditions) go on: use it to trigger phases ("EXECUTE", "PHASE 2"). Also lists codewords sent so far.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `codeword` | string | yes |  |
+| `force` | `"blue"` \| `"red"` \| `"neutral"` |  | default blue (exercise control only) |
+
+## `get_alerts`
+
+The attention queue: what needs looking at now (units idle after finishing their orders, broken, out of fuel or ammunition, leader lost, losses, failed tasks, under fire, first contact), newest first. Pass acknowledge: true to clear them once handled.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `acknowledge` | boolean |  | Acknowledge all open alerts after reading them |
+
 ## `get_unit` _(read-only)_
 
 Details of a unit and its members.
@@ -127,7 +188,7 @@ Delete an entity, a unit (with its members) or a graphic.
 
 ## `assign_task`
 
-Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm. Tactical tasks: overwatch/defend/screen need `to` (the position) and take `facing` (degrees) and `width` (units deploy in a line); ambush also needs `graphicId` (the kill zone area) and opens fire only when an enemy enters it; screen falls back when an enemy comes within 1.5 km; search needs `graphicId` (an area) and sweeps it. Holding still, infantry dig in and vehicles go hull-down. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
+Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm (helicopters land beside it). Tactical tasks: overwatch/defend/screen need `to` (the position) and take `facing` (degrees) and `width` (units deploy in a line); ambush also needs `graphicId` (the kill zone area) and opens fire only when an enemy enters it; screen falls back before an enemy gets within reach of its direct fire (at least 1.5 km) or as soon as it comes under fire; search needs `graphicId` (an area) and sweeps it. Holding still, infantry dig in and vehicles go hull-down. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -148,7 +209,7 @@ Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMiss
 
 ## `assign_plan`
 
-Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: {kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), {kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, {kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, {kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"fuelBelow",fraction}|{type:"ammoBelow",fraction}|{type:"entityDestroyed",entityId}}.
+Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: {kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), {kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, {kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, {kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"fuelBelow",fraction}|{type:"ammoBelow",fraction}|{type:"entityDestroyed",entityId}|{type:"codeword",codeword}|{type:"all"|"any",conditions:[...]}|{type:"not",condition}}, {kind:"if", condition, then:[statements], else:[statements]}, {kind:"while", condition, body:[statements]} (repeats while the condition holds), {kind:"sendCodeword", codeword} (plans of the same force waiting for it go on), {kind:"report", text} (a radio message). Codewords coordinate units: e.g. one unit sends "PHASE 2" when it reaches a phase line, others wait for it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -203,6 +264,51 @@ Turn optional parts of the model on or off for this scenario. Suppression (fire 
 | `morale` | boolean |  |  |
 | `fuel` | boolean |  |  |
 | `orderDelay` | boolean |  |  |
+
+## `edit_catalog`
+
+Add or change a catalog entry for this scenario (entity type, weapon, sensor or unit template), e.g. a new vehicle variant: start from list_catalog's fields of a similar entry, change what differs, give it a new id. Fields are checked; new entities use it at once. remove: true deletes a custom entry.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `section` | `"entity-types"` \| `"weapons"` \| `"sensors"` \| `"unit-templates"` | yes |  |
+| `id` | string | yes |  |
+| `entry` | object |  |  |
+| `remove` | boolean |  |  |
+
+## `set_jamming`
+
+Switch a jammer (an electronic warfare entity, e.g. R-330Zh Zhitel, Krasukha-2, Stryker MFEW) on or off. While on, enemy radios within its range are jammed: orders to them arrive a minute late, they do not share contacts within their unit, cannot call for fire and do not hear codewords; radar jammers cut enemy radars' range.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | yes |  |
+| `on` | boolean | yes |  |
+
+## `quick_battle`
+
+Replace the scenario with a generated, ready-to-run battle: pick the mission (from Blue's side), each force's nation, composition, size and support, time and weather. Both forces are placed on land either side of an objective (a town near the middle when there is one), with the mission's graphics and a synchronization matrix per force; start the simulation to fight it. Returns the mission brief.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `mission` | `"meeting"` \| `"attack"` \| `"defend"` \| `"delay"` \| `"recon"` |  | default attack |
+| `blue` | {nation, composition, size, support} |  |  |
+| `red` | {nation, composition, size, support} |  |  |
+| `time` | number (0–24) |  | local time at the start, hours (default 10) |
+| `weather` | `"clear"` \| `"haze"` \| `"fog"` \| `"rain"` |  |  |
+| `distance` | number (1000–20000) |  | metres between the sides at the start |
+| `civilians` | boolean |  |  |
+| `seed` | integer (-9007199254740991–9007199254740991) |  | same seed and options, same battle |
+| `name` | string |  |  |
+
+## `set_pattern_of_life`
+
+Fill the map with background civilians: cars driving between towns along the roads and people walking about the towns (neutral, force 3). They run from shots and blasts nearby; any killed are logged. Set both to 0 to remove them.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `vehicles` | integer (0–300) |  |  |
+| `pedestrians` | integer (0–300) |  |  |
 
 ## `set_environment` _(idempotent)_
 

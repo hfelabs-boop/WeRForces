@@ -37,6 +37,61 @@ describe('command-guided missiles', () => {
   });
 });
 
+describe('direct fire', () => {
+  it('leads a target crossing at speed, and misses one that stops dead while the round is in flight', () => {
+    const shots = (turn: boolean) => {
+      const eng = engine(5);
+      const tank = eng.createEntity({ typeId: 'us-m1a2', force: 1, x: 500, y: 2000, heading: Math.PI / 2 });
+      eng.setRoe(tank.id, 'holdFire');
+      // A truck driving north across the tank's front at 2 km.
+      const truck = eng.createEntity({ typeId: 'ru-ural', force: 2, x: 2500, y: 800 });
+      eng.assignTask(truck.id, { type: 'moveTo', target: { x: 2500, y: 3900 } });
+      eng.runFor(30);
+      const results: string[] = [];
+      eng.on('event', (ev) => ev.kind === 'detonation' && results.push(ev.text));
+      eng.setRoe(tank.id, 'fireAtWill');
+      if (turn) {
+        // Stop dead (a jink) as soon as the first round is on its way: it lands ahead.
+        eng.on('event', (ev) => {
+          if (ev.kind !== 'fire') return;
+          eng.stop(truck.id);
+          truck.speed = 0;
+        });
+      }
+      eng.runFor(4);
+      return results;
+    };
+    expect(shots(false)[0]).toMatch(/destroyed|hit/);
+    expect(shots(true)[0]).toMatch(/missed/);
+  });
+
+  it('spreads a unit\'s fire over the targets it can see', () => {
+    const eng = engine(2);
+    const plt = eng.createUnitFromTemplate('us-tank-platoon', 1, 2000, 500);
+    eng.setRoe(plt.id, 'holdFire');
+    for (let i = 0; i < 4; i++) eng.setRoe(eng.createEntity({ typeId: 'ru-t72b3', force: 2, x: 1700 + i * 200, y: 2500, heading: Math.PI }).id, 'holdFire');
+    eng.runFor(30);
+    expect(plt.memberList.every((m) => m.contacts.size === 4)).toBe(true);
+    eng.setRoe(plt.id, 'fireAtWill');
+    eng.runFor(0.5);
+    const targets = new Set(plt.memberList.map((m) => m.engagingId).filter(Boolean));
+    expect(targets.size).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('orders while paused', () => {
+  it('plan the route at once, so it shows before the clock runs', () => {
+    const eng = engine();
+    const tank = eng.createEntity({ typeId: 'us-m1a2', force: 1, x: 500, y: 500 });
+    const plt = eng.createUnitFromTemplate('us-mech-platoon', 1, 1000, 500);
+    eng.assignTask(tank.id, { type: 'moveTo', target: { x: 3000, y: 3000 } });
+    eng.assignTask(plt.id, { type: 'moveTo', target: { x: 3000, y: 1000 } });
+    expect(eng.plannedPath(tank.id).at(-1)).toEqual({ x: 3000, y: 3000 });
+    expect(eng.plannedPath(plt.leader!.id).length).toBeGreaterThan(0);
+    expect(eng.snapshot().entities.find((e) => e.id === tank.id)!.travel?.remaining).toBeGreaterThan(3000);
+  });
+});
+
 describe('plan conditions', () => {
   it('enemyInArea fires when a hostile enters the area', () => {
     const eng = engine();

@@ -41,7 +41,9 @@ export function updateSensors(engine: Engine, observer: Entity): void {
     const flashEnv = engine.env.light < FLASH_LIGHT ? { ...engine.env, light: FLASH_LIGHT } : engine.env;
     const sensors = observer.type.sensors.map((sid) => {
       const s = engine.catalog.sensors.get(sid)!;
-      return { s, range: sensorRange(s, engine.env), flashRange: sensorRange(s, flashEnv) };
+      // Enemy radar jamming cuts a radar's range.
+      const jam = s.radar ? engine.ew.radarFactor(observer) : 1;
+      return { s, range: sensorRange(s, engine.env) * jam, flashRange: sensorRange(s, flashEnv) * jam };
     });
     let reach = 0;
     for (const { flashRange } of sensors) reach = Math.max(reach, flashRange);
@@ -78,7 +80,8 @@ export function updateSensors(engine: Engine, observer: Entity): void {
 
 function recordContact(engine: Engine, observer: Entity, target: Entity, now: number): void {
   const isNew = !observer.contacts.has(target.id);
-  const share = observer.unit ? observer.unit.alive() : [observer];
+  // Contacts go round the unit on the radio, unless it is jammed.
+  const share = observer.unit && !engine.ew.radioJammed(observer) ? observer.unit.alive() : [observer];
   for (const m of share) {
     const existing = m.contacts.get(target.id);
     m.contacts.set(target.id, {

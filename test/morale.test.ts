@@ -27,9 +27,13 @@ function ambush(eng: Engine) {
 describe('suppression', () => {
   it('builds up under fire, pins infantry down and wears off', () => {
     const eng = engine();
-    const { squad, log } = ambush(eng);
-    eng.runFor(20);
-    expect(log.some((t) => t.endsWith('pinned down'))).toBe(true);
+    const { squad } = ambush(eng);
+    let pinned = false;
+    for (let t = 0; t < 30 && !pinned; t++) {
+      eng.runFor(1);
+      pinned = squad.alive().some((m) => m.pinned);
+    }
+    expect(pinned).toBe(true);
     const victim = squad.alive().find((m) => m.suppression > 0)!;
     expect(victim).toBeDefined();
     // Take the guns away: suppression halves every few seconds.

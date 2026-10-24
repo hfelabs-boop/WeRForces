@@ -26,6 +26,19 @@ export function stepMovement(e: Entity, terrain: Terrain, dt: number, offroadSca
   else stepSurfaceBound(e, terrain, dt, offroadScale);
 }
 
+/** A passable step at up to 60° off the heading, preferring directions closest to `toward`. */
+function slideAround(e: Entity, terrain: Terrain, offroad: number, step: number, toward: number): { x: number; y: number } | null {
+  const tries = [0.35, -0.35, 0.7, -0.7, 1.05, -1.05]
+    .map((d) => e.heading + d)
+    .sort((a, b) => Math.abs(angleDiff(a, toward)) - Math.abs(angleDiff(b, toward)));
+  for (const h of tries) {
+    const x = clamp(e.x + Math.sin(h) * step, 0, terrain.spec.size);
+    const y = clamp(e.y + Math.cos(h) * step, 0, terrain.spec.size);
+    if (terrain.mobilityFactor(x, y, e.domain, offroad) > 0) return { x, y };
+  }
+  return null;
+}
+
 function stepSurfaceBound(e: Entity, terrain: Terrain, dt: number, offroadScale: number): void {
   const t = e.type;
   const offroad = t.offroadFactor * offroadScale;
@@ -58,8 +71,17 @@ function stepSurfaceBound(e: Entity, terrain: Terrain, dt: number, offroadScale:
     const nx = clamp(e.x + Math.sin(e.heading) * step, 0, terrain.spec.size);
     const ny = clamp(e.y + Math.cos(e.heading) * step, 0, terrain.spec.size);
     if (terrain.mobilityFactor(nx, ny, e.domain, offroad) <= 0) {
-      e.blocked = true;
-      e.speed = 0;
+      // Skirt the edge (a route leg can clip the corner of a lake between its check
+      // points): edge along at a slant toward where it is steering, if it can.
+      const slide = cmd ? slideAround(e, terrain, offroad, step, bearing(e, cmd)) : null;
+      if (slide) {
+        e.x = slide.x;
+        e.y = slide.y;
+        e.speed *= 0.7;
+      } else {
+        e.blocked = true;
+        e.speed = 0;
+      }
     } else {
       e.x = nx;
       e.y = ny;
