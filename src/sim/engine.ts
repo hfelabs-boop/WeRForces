@@ -36,6 +36,7 @@ import { stepMovement } from './movement.js';
 import { PlanExecutor, type Taskable } from './plans.js';
 import { Rng } from './rng.js';
 import { SENSOR_INTERVAL, updateSensors } from './sensors.js';
+import { SpatialIndex } from './spatial.js';
 import { createTask, type Task, type TaskStatus } from './tasks.js';
 import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
 import { formationOffset, Unit } from './units.js';
@@ -112,6 +113,8 @@ export class Engine {
 
   readonly entities = new Map<string, Entity>();
   readonly units = new Map<string, Unit>();
+  /** Grid of entity positions for neighbourhood queries, rebuilt on demand each tick. */
+  readonly spatial = new SpatialIndex();
   readonly graphics = new Map<string, Graphic>();
   readonly listeners: EngineListeners = { event: [], fire: [], detonation: [], removed: [], reset: [] };
 
@@ -614,6 +617,7 @@ export class Engine {
   step(dt = DEFAULT_DT): void {
     // Round so repeated 0.1 s steps don't accumulate floating-point noise (900.0000000001).
     this.time = Math.round((this.time + dt) * 1e6) / 1e6;
+    this.spatial.invalidate();
     for (const u of this.units.values()) u.update(this);
     for (const u of this.units.values()) u.plan?.update(this, u);
 

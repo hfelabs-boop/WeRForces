@@ -72,12 +72,14 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
     return;
   }
   // Keep the current target first, then nearest.
+  const dist = new Map<Entity, number>();
+  for (const t of candidates) dist.set(t, dist2d(shooter, t));
   candidates.sort((a, b) => {
     if (a === explicit) return -1;
     if (b === explicit) return 1;
     if (a.id === shooter.engagingId) return -1;
     if (b.id === shooter.engagingId) return 1;
-    return dist2d(shooter, a) - dist2d(shooter, b);
+    return dist.get(a)! - dist.get(b)!;
   });
 
   for (const target of candidates.slice(0, 6)) {
