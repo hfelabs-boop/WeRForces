@@ -30,6 +30,7 @@ The WeRForces window has five areas:
 | **Integrations** | API and MCP connection details, TAK output, webhooks, GIS feeds |
 | **?** | This documentation |
 | **Phases** | The [synchronization matrix](#synchronization-matrix). The button shows the phase in progress (*Phase: Assault*), or *Phases (not started)* |
+| **Commander** | The [Commander dialog](#commanders): hand a force to the rule-based or an LLM commander and follow its decisions. The button names the forces that have one (*Commander: Red*; *…* while an LLM thinks, *!* on an error) |
 | **Alerts** | The [attention queue](#alerts), with the number of open alerts (red when one is critical) |
 | Role pill | *Blue player · fog of war* when you joined with a player key (see [below](#playing-one-force-fog-of-war)) |
 | DIS pill | DIS status when started with `--dis`: exercise, site:application, PDUs sent and received, remote entities |
@@ -471,6 +472,35 @@ waiting for it go on. A started phase shows *started 00:05:01*.
 Exercise control picks the force at the top; a player plans for their own.
 See [Concepts](concepts.md#synchronization-matrix).
 
+## Commanders
+
+**Commander** in the toolbar opens a force's commander (exercise control picks
+Blue or Red; a player sees their own):
+
+- **Commander**: *None* (people and plans run the force), *Rule-based*
+  (the offline doctrinal commander) or *Language model* (only when the server
+  has one [configured](deployment.md#llm-commanders), and only for exercise
+  control).
+- **Aggressiveness** (0 cautious … 1 bold): how strong the force must feel
+  before it attacks.
+- **Decide every (s)**: the interval between decisions. Contact, losses, a new
+  phase or a unit done with its order bring a decision forward.
+- **Leave others' orders (s)**: how long an order the commander did not give
+  is left alone. Order a unit yourself (by hand, on the order line, in a plan
+  or the synchronization matrix) and the commander works around it for this
+  long, then takes it back once the order is done or the time is up.
+- **Intent (LLM)**: the commander's intent in a sentence, for a language model.
+
+**Apply** sets it (one edit: **Undo** takes it back); **Decide now** asks for a
+decision at the next simulated second (the clock must run). Below, the latest
+decisions, newest first: the time, what brought it on, the rationale (*Attack
+(3 contacts, enemy power 2.4 against our 6.1); concentrating on BMP-2 (E15)*),
+the orders given and any refused, with the reason. The same lines appear in the
+[event log](#event-log) as *Red commander: …*, for that force only. With an
+LLM commander the dialog also shows the model calls and tokens used. A quick
+battle can give either side a rule-based commander (*Run by* in the side's
+box). See [Concepts](concepts.md#commanders).
+
 ## Viewshed
 
 **Viewshed** in an entity's inspector shades the ground around it: clear where
@@ -584,7 +614,9 @@ scenario:
 3. **Time** (dawn, day, dusk or night), **Weather** (clear, haze, fog, rain),
    **Distance** between the sides (automatic: 3 km, or 5 km with a company),
    **Terrain** (the current one or a new generated one), **Civilians**, and a
-   **Seed**. The same seed and choices give the same battle; leave it empty for
+   **Seed**. **Run by** in each side's box: its *Phase plan*, or the
+   *Rule-based commander* (that side then gets no synchronization matrix: the
+   [commander](#commanders) runs it from the graphics). The same seed and choices give the same battle; leave it empty for
    a random one.
 
 **Build battle** places both forces on land either side of an objective (a town

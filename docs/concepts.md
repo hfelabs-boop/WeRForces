@@ -646,6 +646,108 @@ gives each player key a **player role**:
 
 This applies to the GUI, the REST API and MCP alike.
 
+## Commanders
+
+A force can be run by software: a **commander**. It decides at an interval
+(default every 45 simulated seconds) and sooner when something happens:
+a new enemy contact, a loss, a new phase of the force's
+[synchronization matrix](#synchronization-matrix), or one of its units done
+with the commander's order. Such early decisions come at most once every 10
+seconds, or every quarter of the interval if that is longer.
+
+Each decision starts from the **force's view**, the same one a
+[player](#fog-of-war-and-roles) of that force gets: its own units in full
+(strength, combat power, fuel, ammunition, morale, under fire or pinned, what
+each is doing and whose order that is), the enemy only as the force's contacts
+at their last seen positions with their age, its graphics, the towns, its
+phases and codewords, and the time. The orders go through the **same commands
+and permission check as a player of that force** (`checkCommand`): own units
+only, enemy entities only if the force has seen them, no editing or time
+control. Typed orders are read by the [order line](user-guide.md#typed-orders)
+parser. Refused orders are recorded with the reason.
+
+Orders a commander did not give (a person's, a plan's or a phase's) are left
+alone for `holdOff` seconds (default 300) while they last, so people can
+**override** it: order a unit by hand and the commander works around it.
+Its decisions go to the event log as *Red commander: Attack (3 contacts, enemy
+power 2.4 against our 6.1); concentrating on BMP-2 (E15). Orders: …*, from the
+force's headquarters, so only that force's players (and exercise control) see
+them. The latest decisions are kept with the commander's status (in the
+**Commander** dialog, `GET /api/v1/forces/{force}/commander`, MCP
+`get_commander`). Commanders are saved with the scenario (settings only, plus
+where each is in its cycle in checkpoints) and are off unless set.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `interval` | 45 | Seconds between decisions (10–600) |
+| `aggressiveness` | 0.5 | 0 cautious … 1 bold: how strong the force must feel before attacking |
+| `holdOff` | 300 | Seconds an order the commander did not give is left alone (0–3600) |
+| `seed` | from the terrain seed and force | The commander's own random choices |
+| `intent` | — | LLM: the commander's intent, added to what the model is told |
+| `maxCallsPerMinute` | 4 | LLM: model calls per simulated minute |
+| `maxTokens` | 2048 | LLM: output tokens per call |
+| `maxToolCalls` | 12 | LLM: tool calls per decision |
+| `tokenBudget` | 500000 | LLM: tokens in and out in all; it stops when they are spent |
+
+### Rule-based commander
+
+The doctrinal commander works offline and is deterministic: the same scenario
+and seed give the same decisions, also after loading a checkpoint. It weighs
+**combat power**: each entity type's best direct-fire weapon (mostly its
+lethality against armour), scaled by its reach, times how hard the type is to
+kill (an M1A2 counts about 2.8, a T-72B3 1.9, an M2A3 or BMP-2 1.2, a rifleman
+0.08), less for damage and low ammunition. Enemy contacts count fully for a
+minute after they were last seen and fade to 30 % over 15 minutes, after which
+it forgets them. What is seen is rarely all there is, so it allows for more:
+the enemy's power it knows times 1 + 1 / (1 + *n*/2) for *n* contacts (half as
+much again with two, a fifth more with eight). The ratio of its power to that
+estimate sets the posture; holding an objective it has taken, or a battle
+position, it needs half as much again to attack:
+
+| Posture | When | What the force does |
+| --- | --- | --- |
+| Advance | No enemy known and an objective to take | Scouts go ahead to watch the objective from 1.5 km short of it; the main body waits until they are there (or 2 minutes) and then moves on the objective, units side by side, set to halt on contact |
+| Attack | Ratio ≥ 2.2 − 1.4 × aggressiveness (1.5 by default) | The longest-reaching, strongest element supports by fire from a flank; the others concentrate on the strongest contact of the group nearest the objective (or close on where it was last seen) |
+| Defend | Ratio ≥ 0.6 − 0.35 × aggressiveness | Hold the objective once taken, a battle position (*BP …*) or the ground it stands on, in a line facing the enemy; the element least engaged reinforces one facing a group over 1.5 times its strength |
+| Delay | Weaker still | Screen and fall back to the next phase line away from the enemy (or 2 km back), then defend there |
+| Hold | Nothing to do | Defend where it is, facing the expected enemy |
+
+Objectives are its own force's areas and points named *OBJ …*, nearest first;
+one is taken when its units are within 450 m of it and no enemy has been seen
+within a kilometre of it in the last two minutes. Whatever the posture:
+
+- **Fires**: artillery and mortars fire on the group of contacts (within 500 m
+  of one another, seen in the last 90 s) worth most, 3–6 rounds over 50 m, never
+  within 450 m of its own units nor where rounds went in 90 s ago, each battery
+  at most once in 45 s;
+- **Resupply**: units below 25 % fuel or 30 % ammunition go to a supply vehicle
+  when no enemy is within 2.5 km; supply vehicles follow 1.5 km behind the main
+  body;
+- **Casualties**: broken units, and units down to a third with the enemy within
+  3 km, pull back 1.5 km by a covered route;
+- **Helicopters** attack the strongest ground contact more than 4.5 km from any
+  known air defence, else hold behind the main body.
+
+It does not order units with subordinates (orders to them would pass down and
+replace the subordinates' own).
+
+### LLM commander
+
+The LLM commander gets the same situation, as JSON in the first message of a
+short conversation with a large language model through the Messages API, and
+answers with tools: `give_order` (an order in words, as on the order line),
+`set_roe`, `call_fire`, `start_phase`, `send_codeword` and `report` (its
+assessment, which becomes the decision's rationale). Each tool call is carried
+out as the force's player would give it, and the result (the order as
+understood, or why it was refused) goes back to the model, until it ends its
+turn or reaches `maxToolCalls`. The model calls run in the background: the
+simulation goes on, and the orders are carried out at the next simulated second
+after the reply arrives (while paused, they wait). Calls are limited per
+simulated minute and by the token budget; errors (no answer, a refusal, a bad
+reply) are logged, and it tries again after twice its interval. It needs a key
+and a model configured on the server ([Deployment](deployment.md#llm-commanders));
+without them it shows as *unavailable*. Only exercise control can start one.
+
 ## Recording and after-action review
 
 The server records the run as it goes: every entity's position, heading, speed
