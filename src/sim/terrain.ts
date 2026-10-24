@@ -19,6 +19,8 @@ export const DEFAULT_TERRAIN: TerrainSpec = {
 };
 
 const CANOPY_HEIGHT = 15;
+/** Metres of forest a sight line can pass through before it is blocked. */
+const FOREST_SEE_THROUGH = 150;
 const TOWN_NAMES = [
   'Alderford',
   'Brenham',
@@ -285,22 +287,29 @@ export class Terrain extends TerrainGrid {
     return f * Math.max(0.2, 1 - s * 1.4);
   }
 
-  /** Terrain/canopy line of sight between two points (z = altitude MSL). */
+  /**
+   * Line of sight between two points (z = altitude MSL). Terrain blocks outright; forest
+   * canopy only blocks once the sight line has passed through more than
+   * FOREST_SEE_THROUGH metres of it, so vehicles at short range or at a wood's edge
+   * can still see each other.
+   */
   lineOfSight(a: Vec3, b: Vec3): boolean {
     const d = dist2d(a, b);
     if (d < 1) return true;
-    const step = this.spec.cellSize / 2;
-    const n = Math.ceil(d / step);
-    const canopyClear = 60;
+    const n = Math.ceil(d / (this.spec.cellSize / 2));
+    const stepLen = d / n;
+    let underCanopy = 0;
     for (let k = 1; k < n; k++) {
       const t = k / n;
       const x = a.x + (b.x - a.x) * t;
       const y = a.y + (b.y - a.y) * t;
       const z = a.z + (b.z - a.z) * t;
-      let ground = this.surfaceHeight(x, y);
-      const along = t * d;
-      if (along > canopyClear && d - along > canopyClear && this.isForest(x, y)) ground += CANOPY_HEIGHT;
+      const ground = this.surfaceHeight(x, y);
       if (ground > z) return false;
+      if (ground + CANOPY_HEIGHT > z && this.isForest(x, y)) {
+        underCanopy += stepLen;
+        if (underCanopy > FOREST_SEE_THROUGH) return false;
+      }
     }
     return true;
   }

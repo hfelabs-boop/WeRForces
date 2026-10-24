@@ -300,6 +300,25 @@ describe('scenarios', () => {
     expect(dist2d(eng.entities.get(e.id)!, a)).toBeLessThan(1);
   });
 
+  it('rewinds to the last saved state when a rewind point is marked', () => {
+    const eng = engine();
+    const a = landNear(0);
+    eng.createEntity({ typeId: 'us-hmmwv', force: 1, ...a });
+    eng.markRewindPoint();
+    eng.createEntity({ typeId: 'us-hmmwv', force: 1, ...landNear(1) });
+    eng.runFor(10);
+    eng.rewind();
+    expect(eng.entities.size).toBe(1);
+    expect(eng.time).toBe(0);
+  });
+
+  it('saves the current time and replays identically after reseeding', () => {
+    const eng = engine();
+    eng.runFor(12.3);
+    expect(eng.toScenario().startTime).toBeCloseTo(12.3, 6);
+    expect(eng.time).toBe(12.3); // no floating-point drift from repeated 0.1 s steps
+  });
+
   it('loads the bundled sample scenarios', async () => {
     const { readFileSync, readdirSync } = await import('node:fs');
     const files = readdirSync('scenarios').filter((f) => f.endsWith('.json'));

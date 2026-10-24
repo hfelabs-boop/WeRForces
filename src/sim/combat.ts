@@ -145,7 +145,10 @@ export function applyDamage(engine: Engine, target: Entity, pk: number): Detonat
   }
   if (KILL_ONLY.includes(target.type.armor) || roll >= Math.min(1, pk * 1.8)) return 'miss';
   // Partial kill: mobility or firepower, escalating to a kill if both are lost.
-  const mobility = engine.rng.chance(0.5);
+  let mobility = engine.rng.chance(0.5);
+  // A system that is already knocked out cannot be knocked out again: hit the other one.
+  if (mobility && target.mobilityKill) mobility = false;
+  else if (!mobility && target.firepowerKill) mobility = true;
   if (mobility) {
     if (target.firepowerKill) target.destroyed = true;
     target.mobilityKill = true;

@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "WeRForces - an open computer-generated forces (CGF) simulator inspired by VR-Forces: scenario editor, tasking, sensors, combat and DIS interoperability.",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hfelabs-boop/WeRForces.git"
+  },
   "type": "module",
   "bin": {
     "werforces": "dist/server/cli.js",
@@ -18,13 +22,15 @@
     "test": "vitest run",
     "scenarios": "tsx scripts/make-scenarios.ts",
     "check": "npm run typecheck && npm test && npm run build",
-    "mcp": "node dist/mcp/stdio.js"
+    "mcp": "node dist/mcp/stdio.js",
+    "docs:gen": "tsx scripts/docs-gen.ts"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "marked": "^18.1.1",
     "three": "^0.186.1",
     "ws": "^8.22.0",
     "zod": "^4.6.7"

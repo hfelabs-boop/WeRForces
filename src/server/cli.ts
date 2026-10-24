@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createUdpTransport, DisGateway } from '../dis/gateway.js';
+import { DEFAULT_CATALOG, mergeCatalog } from '../sim/catalog.js';
 import { Engine } from '../sim/engine.js';
 import type { ScenarioFile } from '../shared/types.js';
 import { IntegrationHub, type IntegrationOptions } from '../integrations/hub.js';
@@ -19,6 +20,7 @@ Usage: werforces [options]
 
 Options:
   -s, --scenario <file|name>  Scenario JSON file, or a name from ./scenarios
+      --catalog <file>        JSON catalog extension: extra/replacement entity types, weapons, sensors, unit templates
   -p, --port <n>              HTTP/WebSocket port (default 8080)
       --host <addr>           Interface to listen on (default 127.0.0.1)
       --run                   Start the simulation running immediately
@@ -39,7 +41,9 @@ Options:
   -h, --help                  Show this help
 
 MCP: the server exposes an MCP endpoint at /mcp (streamable HTTP). For stdio clients run
-\`werforces-mcp --url http://127.0.0.1:8080\`.
+\`node dist/mcp/stdio.js --url http://127.0.0.1:8080\`.
+
+Documentation: docs/ in the repository, or /docs on the running server.
 `;
 
 function projectRoot(): string {
@@ -49,6 +53,18 @@ function projectRoot(): string {
     dir = path.dirname(dir);
   }
   return process.cwd();
+}
+
+/** https://github.com/owner/repo/blob/main from package.json's repository field, if any. */
+function repoBlobUrl(root: string): string | undefined {
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+    const url = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url;
+    const m = /github\.com[/:]([^/]+\/[^/.]+)/.exec(url ?? '');
+    return m ? `https://github.com/${m[1]}/blob/main` : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function loadScenarioArg(arg: string, scenarioDir: string): ScenarioFile {
@@ -67,6 +83,7 @@ async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
       scenario: { type: 'string', short: 's' },
+      catalog: { type: 'string' },
       port: { type: 'string', short: 'p', default: '8080' },
       host: { type: 'string', default: '127.0.0.1' },
       run: { type: 'boolean', default: false },
@@ -93,7 +110,12 @@ async function main(): Promise<void> {
   }
   const root = projectRoot();
   const scenarioDir = path.join(root, 'scenarios');
-  const engine = new Engine();
+  let catalog = DEFAULT_CATALOG;
+  if (values.catalog) {
+    catalog = mergeCatalog(DEFAULT_CATALOG, JSON.parse(readFileSync(values.catalog, 'utf8')));
+    console.log(`Catalog extension: ${values.catalog}`);
+  }
+  const engine = new Engine({ catalog });
   if (values.scenario) engine.loadScenario(loadScenarioArg(values.scenario, scenarioDir));
   else engine.newScenario('Untitled');
 
@@ -156,12 +178,14 @@ async function main(): Promise<void> {
       webRoot: path.join(root, 'dist', 'web'),
       scenarioDir,
       apiKey: values['api-key'] || undefined,
+      docsDir: path.join(root, 'docs'),
+      repoBlobUrl: repoBlobUrl(root),
       corsOrigins: values.cors,
       integrations,
     });
     await server.listen();
     console.log(`WeRForces running at ${server.address}  (scenario: ${engine.scenarioName})`);
-    console.log(`  REST API docs ${server.address}/api/docs  ·  MCP endpoint ${server.address}/mcp${values['api-key'] ? '  ·  API key required' : ''}`);
+    console.log(`  Docs ${server.address}/docs/  ·  REST API ${server.address}/api/docs  ·  MCP ${server.address}/mcp${values['api-key'] ? '  ·  API key required' : ''}`);
   }
   const shutdown = () => {
     runner.stop();

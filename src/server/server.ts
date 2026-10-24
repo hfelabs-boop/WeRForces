@@ -13,6 +13,7 @@ import { createMcpServer, type ApiCaller } from '../mcp/tools.js';
 import type { ClientMessage, ServerMessage, SimEvent } from '../shared/types.js';
 import { ApiV1 } from './apiV1.js';
 import { executeCommand } from './commands.js';
+import { DocsSite } from './docs.js';
 import { docsPage } from './openapi.js';
 import type { RouteResponse } from './router.js';
 import type { SimRunner } from './runner.js';
@@ -40,6 +41,10 @@ export interface ServerOptions {
   apiKey?: string;
   /** Browser origins allowed to call the API cross-origin ('*' for any). */
   corsOrigins?: string[];
+  /** Markdown documentation folder served at /docs. */
+  docsDir?: string;
+  /** Repository blob URL used for doc links to files outside docs/. */
+  repoBlobUrl?: string;
   integrations?: IntegrationOptions;
 }
 
@@ -86,6 +91,7 @@ export class SimServer {
   private lastTerrainVersion: number;
   private pendingEvents: SimEvent[] = [];
   private frameCount = 0;
+  private docs: DocsSite | null;
 
   constructor(
     readonly runner: SimRunner,
@@ -94,6 +100,7 @@ export class SimServer {
     this.lastTerrainVersion = runner.engine.terrainVersion;
     this.integrations = new IntegrationHub(runner, opts.integrations);
     this.api = new ApiV1({ runner, integrations: this.integrations, scenarioDir: opts.scenarioDir });
+    this.docs = opts.docsDir ? new DocsSite(opts.docsDir, opts.repoBlobUrl) : null;
     this.http = http.createServer((req, res) => {
       this.handle(req, res).catch((err) => {
         if (!res.headersSent) this.send(res, { status: 500, json: { error: { status: 500, message: String(err?.message ?? err) } } });
@@ -228,6 +235,17 @@ export class SimServer {
     if (denied) return this.send(res, denied, corsHeaders);
 
     if (p === '/api/docs') return this.send(res, { status: 200, text: docsPage(), contentType: 'text/html; charset=utf-8' });
+    if (this.docs && (p === '/docs' || p.startsWith('/docs/'))) {
+      if (p === '/docs') {
+        res.writeHead(302, { Location: '/docs/' });
+        res.end();
+        return;
+      }
+      const d = this.docs.serve(p);
+      res.writeHead(d.status, { 'Content-Type': d.contentType, 'Cache-Control': 'no-store' });
+      res.end(d.body);
+      return;
+    }
 
     const isApi = p.startsWith('/api/') || p === '/mcp';
     if (!isApi) return this.serveStatic(p, res);
@@ -312,9 +330,9 @@ export class SimServer {
       }
       if (msg?.type !== 'command') return;
       const result = executeCommand(this.runner, msg.command);
-      ws.send(JSON.stringify({ type: 'result', reqId: msg.reqId, result } satisfies ServerMessage));
-      // Push state right away so the UI reflects the change without waiting a frame.
+      // Push state first, so clients already know about any object the result refers to.
       this.broadcast({ type: 'state', state: this.runner.state() });
+      ws.send(JSON.stringify({ type: 'result', reqId: msg.reqId, result } satisfies ServerMessage));
     });
   }
 

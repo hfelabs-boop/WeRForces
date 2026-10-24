@@ -1,0 +1,46 @@
+{
+  "weapons": [
+    {
+      "id": "gun-120mm-l55",
+      "name": "120mm L55 smoothbore",
+      "munition": { "kind": 2, "domain": 2, "country": 78, "category": 2, "subcategory": 1, "specific": 0, "extra": 0 },
+      "minRange": 50,
+      "maxRange": 4500,
+      "reloadTime": 6,
+      "ammo": 42,
+      "projectileSpeed": 1750,
+      "pk": { "armored": 0.75, "light": 0.9, "soft": 0.9, "lifeform": 0.3, "ship": 0.15 },
+      "targets": ["ground", "lifeform", "surface"]
+    }
+  ],
+  "entityTypes": [
+    {
+      "id": "de-leopard2a6",
+      "name": "Leopard 2A6",
+      "description": "German main battle tank",
+      "domain": "ground",
+      "symbol": "armor",
+      "armor": "armored",
+      "dis": { "kind": 1, "domain": 1, "country": 78, "category": 1, "subcategory": 1, "specific": 0, "extra": 0 },
+      "maxSpeed": 19,
+      "cruiseSpeed": 12,
+      "acceleration": 2.6,
+      "turnRate": 0.61,
+      "offroadFactor": 0.72,
+      "sensorHeight": 2.5,
+      "sensors": ["thermal-sight", "eye"],
+      "weapons": ["gun-120mm-l55", "mg-762"],
+      "crew": 4
+    }
+  ],
+  "unitTemplates": [
+    {
+      "id": "de-tank-platoon",
+      "name": "DE Tank Platoon",
+      "echelon": "platoon",
+      "members": ["de-leopard2a6", "de-leopard2a6", "de-leopard2a6", "de-leopard2a6"],
+      "formation": "wedge",
+      "spacing": 90
+    }
+  ]
+}

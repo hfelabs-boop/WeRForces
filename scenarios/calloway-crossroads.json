@@ -16,6 +16,7 @@
     "forestFraction": 0.28,
     "towns": 7
   },
+  "startTime": 0,
   "hostilities": [
     [
       1,

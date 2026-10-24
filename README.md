@@ -20,8 +20,32 @@ It also connects to other systems:
 > project, not affiliated with or derived from MAK's software. It reimplements
 > the general CGF concepts from public descriptions.
 
-![Calloway Crossroads scenario, 2D](docs/screenshot.png)
-![Calloway Crossroads scenario, 3D](docs/screenshot-3d.png)
+![Calloway Crossroads scenario, 2D](docs/images/screenshot-2d.png)
+![Calloway Crossroads scenario, 3D](docs/images/screenshot-3d.png)
+
+## Documentation
+
+The full documentation is in [`docs/`](docs/README.md). A running server also
+serves it at **`/docs`** (toolbar → **Help**).
+
+- [Getting started](docs/getting-started.md)
+- **Tutorials:**
+  [1 First engagement](docs/tutorials/01-first-engagement.md) ·
+  [2 Routes, plans and conditions](docs/tutorials/02-routes-plans-and-conditions.md) ·
+  [3 Building a scenario](docs/tutorials/03-building-a-scenario.md) ·
+  [4 REST API scripting](docs/tutorials/04-scripting-with-the-rest-api.md) ·
+  [5 AI agents with MCP](docs/tutorials/05-ai-agents-with-mcp.md) ·
+  [6 DIS](docs/tutorials/06-dis-interoperability.md) ·
+  [7 TAK, webhooks, GIS](docs/tutorials/07-tak-webhooks-and-gis.md) ·
+  [8 Monte Carlo analysis](docs/tutorials/08-batch-and-monte-carlo.md) ·
+  [9 Extending the catalog](docs/tutorials/09-extending-the-catalog.md)
+- [User guide](docs/user-guide.md) · [Concepts](docs/concepts.md) · [Architecture](docs/architecture.md) · [FAQ](docs/faq.md)
+- **Reference:**
+  [CLI](docs/reference/cli.md) · [REST API](docs/reference/rest-api.md) ·
+  [MCP tools](docs/reference/mcp-tools.md) · [Catalog](docs/reference/catalog.md) ·
+  [Scenario format](docs/reference/scenario-format.md) · [DIS](docs/reference/dis.md) ·
+  [Integrations](docs/reference/integrations.md)
+- Runnable [examples](examples/) in Node.js, Python and TypeScript
 
 ## Quick start
 
@@ -47,6 +71,7 @@ Useful options (`npm start -- --help` lists all of them):
 | `--cors <origin>` | Allow cross-origin browser access from an origin (`*` for any). Repeatable |
 | `--cot <url>`, `--cot-interval <s>` | Stream Cursor-on-Target to `udp://239.2.3.1:6969` (ATAK multicast) or `tcp://host:8087` (TAK Server) |
 | `--webhook <url>` | POST simulation events to a URL. Slack and Discord webhook URLs get chat formatting. Repeatable |
+| `--catalog <file>` | Add or replace entity types, weapons, sensors and unit templates from a JSON file ([Tutorial 9](docs/tutorials/09-extending-the-catalog.md)) |
 | `--headless [--duration <s>]` | No GUI. With `--duration`, runs as fast as possible and prints the event log and losses |
 
 ## VR-Forces concepts mapped to WeRForces

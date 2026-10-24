@@ -719,6 +719,25 @@ const unitTemplates: UnitTemplate[] = [
 
 export const DEFAULT_CATALOG: Catalog = { entityTypes, weapons, sensors, unitTemplates };
 
+/**
+ * Merge a catalog extension into a base catalog: entries whose id already exists are
+ * replaced, new ids are appended. Used by `--catalog <file.json>`.
+ */
+export function mergeCatalog(base: Catalog, ext: Partial<Catalog>): Catalog {
+  const merge = <T extends { id: string }>(a: T[], b: T[] | undefined): T[] => {
+    if (!b) return a;
+    if (!Array.isArray(b)) throw new Error('catalog extension sections must be arrays');
+    const out = a.filter((x) => !b.some((y) => y.id === x.id));
+    return [...out, ...b];
+  };
+  return {
+    entityTypes: merge(base.entityTypes, ext.entityTypes),
+    weapons: merge(base.weapons, ext.weapons),
+    sensors: merge(base.sensors, ext.sensors),
+    unitTemplates: merge(base.unitTemplates, ext.unitTemplates),
+  };
+}
+
 /** Indexed view over a catalog for fast lookups. */
 export class CatalogIndex {
   readonly types = new Map<string, EntityTypeDef>();

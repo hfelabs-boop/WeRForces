@@ -544,7 +544,8 @@ export class Engine {
   // ------------------------------------------------------------ simulation loop
 
   step(dt = DEFAULT_DT): void {
-    this.time += dt;
+    // Round so repeated 0.1 s steps don't accumulate floating-point noise (900.0000000001).
+    this.time = Math.round((this.time + dt) * 1e6) / 1e6;
     for (const u of this.units.values()) u.update(this);
     for (const u of this.units.values()) u.plan?.update(this, u);
 
@@ -644,7 +645,21 @@ export class Engine {
     this.log('info', `scenario "${s.name}" loaded`);
   }
 
-  /** Restore the scenario as it was last loaded (VR-Forces "rewind"). */
+  /**
+   * Replace the random number generator. Loading a scenario seeds it from the terrain
+   * seed, so runs are repeatable; reseed after loading to get a different replication
+   * (e.g. for Monte Carlo analysis).
+   */
+  reseed(seed: number): void {
+    this.rng = new Rng(seed);
+  }
+
+  /** Make the current state the point that rewind() returns to (done when a scenario is saved). */
+  markRewindPoint(): void {
+    this.initialScenario = JSON.parse(JSON.stringify(this.toScenario()));
+  }
+
+  /** Restore the scenario as it was last loaded or saved (VR-Forces "rewind"). */
   rewind(): void {
     if (this.initialScenario) this.loadScenario(this.initialScenario);
   }
@@ -658,6 +673,7 @@ export class Engine {
       name: this.scenarioName,
       description: this.description,
       terrain: this.terrain.spec,
+      startTime: Math.round(this.time * 10) / 10,
       hostilities: [...this.hostilities].map((k) => k.split('-').map(Number) as [ForceId, ForceId]),
       entities: local.map((e) => ({
         id: e.id,

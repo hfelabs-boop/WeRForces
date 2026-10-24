@@ -170,6 +170,8 @@ export class ApiV1 {
       const name = req.params.name;
       if (!SCENARIO_NAME.test(name)) throw new HttpError(400, 'invalid scenario name');
       writeFileSync(path.join(this.ctx.scenarioDir, `${name}.json`), JSON.stringify(this.engine.toScenario(), null, 2));
+      // Rewind now returns to what was just saved.
+      this.engine.markRewindPoint();
       return { json: { saved: name } };
     });
 

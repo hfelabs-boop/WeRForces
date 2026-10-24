@@ -192,7 +192,8 @@ export class FollowRouteTask extends Task {
 
   describe(engine: Engine): string {
     const name = engine.graphics.get(this.routeId)?.name ?? this.routeId;
-    return `${this.loop ? 'Patrol' : 'Follow route'} ${name} (wp ${this.index + 1}/${this.points.length || '?'})`;
+    const total = this.points.length || engine.graphics.get(this.routeId)?.points.length || 0;
+    return `${this.loop ? 'Patrol' : 'Follow route'} ${name} (wp ${this.index + 1}/${total})`;
   }
 }
 

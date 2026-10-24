@@ -35,7 +35,10 @@ import type { Webhook as WebhookView } from '../src/integrations/webhooks.js';
 const ROE_LABELS: Record<Roe, string> = { fireAtWill: 'Fire at will', returnFire: 'Return fire', holdFire: 'Hold fire' };
 const FORMATIONS: Formation[] = ['column', 'line', 'wedge', 'vee', 'echelonRight'];
 const DOMAIN_LABELS: Record<string, string> = { ground: 'Ground vehicles', lifeform: 'Dismounted', air: 'Aircraft', surface: 'Surface vessels' };
-const FORCE_PREFIX: Record<number, string> = { 1: 'us-', 2: 'ru-', 3: 'civ-' };
+/** Which force's palette shows a type, from its DIS country: 222 Russia -> Red, 0 civilian -> Neutral, others -> Blue. */
+function paletteForce(country: number): ForceId {
+  return country === 222 ? 2 : country === 0 ? 3 : 1;
+}
 const LOG_LIMIT = 600;
 
 type PlanStepKind =
@@ -52,7 +55,8 @@ type PlanStepKind =
   | 'waitTime'
   | 'waitArea'
   | 'waitEnemy'
-  | 'waitFire';
+  | 'waitFire'
+  | 'waitDestroyed';
 
 class App {
   readonly api: Api;
@@ -269,7 +273,7 @@ class App {
     $('#btn-run').addEventListener('click', () => this.cmd({ cmd: this.state?.running ? 'pause' : 'run' }));
     $('#btn-step').addEventListener('click', () => this.cmd({ cmd: 'step', seconds: 1 }));
     $('#btn-rewind').addEventListener('click', () => {
-      if (confirm('Rewind to the start of the scenario? Changes since it was loaded will be lost.')) this.cmd({ cmd: 'rewind' });
+      if (confirm('Rewind to the scenario as it was last loaded or saved? Changes since then will be lost.')) this.cmd({ cmd: 'rewind' });
     });
     ($('#sel-speed') as HTMLSelectElement).addEventListener('change', (e) => this.cmd({ cmd: 'setTimeScale', scale: Number((e.target as HTMLSelectElement).value) }));
     document.querySelectorAll<HTMLButtonElement>('#draw-tools button').forEach((b) =>
@@ -616,9 +620,10 @@ class App {
     clear(el);
     if (!this.catalog) return;
     const filter = ($('#palette-filter') as HTMLInputElement).value.toLowerCase();
-    const prefix = FORCE_PREFIX[this.force];
-    const matches = (name: string, id: string) => (!filter || name.toLowerCase().includes(filter)) && (!prefix || id.startsWith(prefix) || filter.length > 0);
-    const templates = this.catalog.unitTemplates.filter((u) => matches(u.name, u.id));
+    // Typing a filter searches every force's catalog.
+    const matches = (name: string, typeId: string) =>
+      (!filter || name.toLowerCase().includes(filter)) && (filter.length > 0 || paletteForce(this.types.get(typeId)!.dis.country) === this.force);
+    const templates = this.catalog.unitTemplates.filter((u) => matches(u.name, u.members[0]));
     if (templates.length) {
       el.append(
         h(
@@ -627,7 +632,10 @@ class App {
           h('h4', { text: 'Units' }),
           templates.map((u) => {
             const lead = this.types.get(u.members[0])!;
-            return this.paletteItem(`unit:${u.id}`, symbolCanvas(this.force, lead.domain, lead.symbol, 26, u.echelon), u.name, `${u.members.length}× ${lead.name}`);
+            const counts = new Map<string, number>();
+            for (const m of u.members) counts.set(m, (counts.get(m) ?? 0) + 1);
+            const desc = [...counts].map(([t, n]) => `${n}× ${this.types.get(t)?.name ?? t}`).join(', ');
+            return this.paletteItem(`unit:${u.id}`, symbolCanvas(this.force, lead.domain, lead.symbol, 26, u.echelon), u.name, desc);
           }),
         ),
       );
@@ -868,6 +876,8 @@ class App {
   private updateInspector(): void {
     const el = $('#inspector');
     const id = this.selectedId;
+    // An object can be selected before the state that contains it arrives; build its panel then.
+    if (id && id !== this.inspectorFor && !this.exists(id)) return;
     if (id !== this.inspectorFor) {
       this.inspectorFor = id;
       clear(el);
@@ -1106,6 +1116,7 @@ class App {
       ['waitArea', 'Wait until in area'],
       ['waitEnemy', 'Wait until enemy detected'],
       ['waitFire', 'Wait until under fire'],
+      ['waitDestroyed', 'Wait until destroyed (pick)'],
     ];
     const kindSel = h('select', {}, kinds.map(([k, l]) => h('option', { value: k, text: l }))) as HTMLSelectElement;
     const param = h('span', {});
@@ -1179,6 +1190,13 @@ class App {
             return push({ kind: 'waitUntil', condition: { type: 'enemyDetected' } });
           case 'waitFire':
             return push({ kind: 'waitUntil', condition: { type: 'underFire' } });
+          case 'waitDestroyed':
+            this.map.setMode({
+              kind: 'pickEntity',
+              label: 'Click the entity to wait for',
+              onPick: (t) => push({ kind: 'waitUntil', condition: { type: 'entityDestroyed', entityId: this.unit(t)?.leaderId ?? t } }),
+            });
+            return;
         }
       },
     });
@@ -1188,6 +1206,12 @@ class App {
       'div',
       { class: 'section' },
       h('h4', { text: 'Plan editor' }),
+      h(
+        'div',
+        { class: 'row' },
+        'Name',
+        h('input', { type: 'text', value: plan.name ?? 'Plan', 'data-plan-name': id, style: 'flex:1', oninput: (ev: Event) => (plan.name = (ev.target as HTMLInputElement).value.trim() || 'Plan') }),
+      ),
       h('ol', { class: 'plan-list', 'data-plan-list': id }),
       h('div', { class: 'row' }, kindSel, param, addBtn),
       h(
