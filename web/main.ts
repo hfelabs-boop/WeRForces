@@ -37,6 +37,7 @@ import { setSymbolStyle, type SymbolStyle, symbolCanvas } from './symbols.js';
 import type { View3D } from './view3d.js';
 import { AarPlayer } from './aar.js';
 import { Timeline } from './timeline.js';
+import { QuickBar } from './quickbar.js';
 import type { CotStatus as CotView } from '../src/integrations/cot.js';
 import type { Webhook as WebhookView } from '../src/integrations/webhooks.js';
 
@@ -102,6 +103,7 @@ type PlanStepKind =
 class App {
   readonly api: Api;
   readonly map: MapView;
+  private quick!: QuickBar;
   catalog: Catalog | null = null;
   types = new Map<string, EntityTypeDef>();
   state: SimState | null = null;
@@ -153,6 +155,30 @@ class App {
       modeChanged: (m) => {
         if (m.kind !== 'place') this.disarm();
       },
+    });
+    this.quick = new QuickBar($('#quickbar'), {
+      targets: () => (this.aar.active ? [] : this.orderable().filter((id) => this.role.kind === 'controller' || (this.entity(id)?.force ?? this.unit(id)?.force) === this.role.force)),
+      orderAt: (w, make, line) => this.groupTaskAt(w, make, line),
+      orderEach: (make) =>
+        void this.groupOrder(async (id) => {
+          const c = make(id);
+          if (c) await this.cmd(c);
+        }),
+      pickPoint: (label, onPick) => this.map.setMode({ kind: 'pickPoint', label, onPick }),
+      pickEntity: (label, onPick) => this.map.setMode({ kind: 'pickEntity', label, onPick }),
+      can: (id, what) =>
+        what === 'indirect'
+          ? this.hasIndirect(id)
+          : what === 'smoke'
+            ? this.hasSmoke(id)
+            : what === 'air'
+              ? this.domainOf(id) === 'air'
+              : what === 'ground'
+                ? this.domainOf(id) !== 'air' && this.domainOf(id) !== 'surface'
+                : what === 'carrier'
+                  ? this.isCarrier(id)
+                  : this.canBreach(id),
+      toast: (m, info) => this.toast(m, info),
     });
     this.timeline = new Timeline($('#timeline-strip'), {
       review: async (t) => {
@@ -253,6 +279,7 @@ class App {
     clock.title = behind ? `The server is busy ${Math.round((s.load ?? 0) * 100)}% of the time: the simulation runs slower than ${s.timeScale}x` : 'Simulation time';
     this.renderEnvironment(s.environment);
     this.renderAlerts();
+    this.quick.update();
     $('#scenario-name').textContent = s.scenarioName;
     const run = $('#btn-run');
     run.textContent = s.running ? '⏸ Pause' : '▶ Run';
@@ -514,6 +541,7 @@ class App {
       if (e.key === 'f' && this.selectedId) this.centerOn(this.selectedId);
       if (e.key === 'm' && !e.ctrlKey && !e.metaKey) this.map.setMode({ kind: 'measure', points: [] });
       if (e.key === 'n' && !e.ctrlKey && !e.metaKey) this.nextAlert();
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && this.quick.key(e.key)) e.preventDefault();
     });
   }
 
@@ -1251,6 +1279,7 @@ class App {
     this.updateInspector();
     this.renderTree(true);
     this.refreshPath();
+    this.quick.update();
   }
 
   private rangesFor(id: string | null): { radius: number; label: string; color: string }[] {
