@@ -243,6 +243,8 @@ function summarize(activity: string, groups: Finding[][]): string {
     const engaging = all.find((f) => f.code === 'engaging');
     return engaging ? `${activity}. ${engaging.text}` : `${activity}.`;
   }
+  // "No task: it waits where it is." already says it: no "No task. No task: …".
+  if (worst.text.toLowerCase().startsWith(activity.toLowerCase())) return worst.text;
   return `${activity}. ${worst.text}`;
 }
 

@@ -106,7 +106,7 @@ describe('explanations over REST', () => {
     const u = eng.createUnitFromTemplate('us-tank-platoon', 1, 1000, 1000);
     const r = await get(`/entities/${e.id}/explain`, 'control');
     expect(r.status).toBe(200);
-    expect(((await r.json()) as Explanation).summary).toMatch(/No task/);
+    expect(((await r.json()) as Explanation).summary).toMatch(/^No task: it waits where it is\./);
     expect((await get(`/units/${u.id}/explain`, 'blue')).status).toBe(200);
     expect((await get(`/entities/${e.id}/explain`, 'blue')).status).toBe(200);
     expect((await get(`/entities/${e.id}/explain`, 'red')).status).toBe(404);
