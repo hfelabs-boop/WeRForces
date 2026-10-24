@@ -13,9 +13,9 @@ export function phaseCodeword(p: Phase): string {
 
 export class SyncPlans {
   private matrices = new Map<ForceId, SyncMatrix>();
-  /** Phase id -> simulation time it started. */
+  /** "force|phase id" -> simulation time it started (both forces may have a P1). */
   private started = new Map<string, number>();
-  /** Phase id -> time its orders were all carried out (for previousDone delays). */
+  /** "force|phase id" -> time its orders were all carried out (for previousDone delays). */
   private doneSince = new Map<string, number>();
 
   constructor(private readonly engine: Engine) {}
@@ -27,13 +27,13 @@ export class SyncPlans {
   }
 
   set(m: SyncMatrix, started: Record<string, number> = {}): void {
-    for (const p of this.matrices.get(m.force)?.phases ?? []) if (!m.phases.some((q) => q.id === p.id)) this.started.delete(p.id);
+    for (const p of this.matrices.get(m.force)?.phases ?? []) if (!m.phases.some((q) => q.id === p.id)) this.started.delete(key(m.force, p.id));
     if (!m.phases.length) {
       this.matrices.delete(m.force);
       return;
     }
     this.matrices.set(m.force, { force: m.force, phases: m.phases.map((p) => ({ ...p, orders: p.orders.map((o) => ({ ...o })) })) });
-    for (const [id, t] of Object.entries(started)) this.started.set(id, t);
+    for (const [id, t] of Object.entries(started)) this.started.set(key(m.force, id), t);
   }
 
   get(force: ForceId): SyncMatrix | undefined {
@@ -50,7 +50,7 @@ export class SyncPlans {
       const started: Record<string, number> = {};
       let current: string | undefined;
       for (const p of m.phases) {
-        const t = this.started.get(p.id);
+        const t = this.started.get(key(m.force, p.id));
         if (t !== undefined) {
           started[p.id] = t;
           current = p.id;
@@ -65,8 +65,8 @@ export class SyncPlans {
     const m = this.matrices.get(force);
     const p = m?.phases.find((x) => x.id === phaseId);
     if (!m || !p) throw new Error(`unknown phase ${phaseId}`);
-    if (this.started.has(p.id)) return;
-    this.started.set(p.id, this.engine.time);
+    if (this.started.has(key(force, p.id))) return;
+    this.started.set(key(force, p.id), this.engine.time);
     const word = phaseCodeword(p);
     this.engine.log('info', `${p.name} begins (${why})`, undefined);
     for (const o of p.orders) this.give(o);
@@ -101,9 +101,9 @@ export class SyncPlans {
     for (const m of this.matrices.values()) {
       for (let i = 0; i < m.phases.length; i++) {
         const p = m.phases[i];
-        if (this.started.has(p.id)) continue;
+        if (this.started.has(key(m.force, p.id))) continue;
         const prev = m.phases[i - 1];
-        if (prev && !this.started.has(prev.id)) break;
+        if (prev && !this.started.has(key(m.force, prev.id))) break;
         const t = p.trigger;
         let go = false;
         let why = '';
@@ -119,11 +119,12 @@ export class SyncPlans {
           case 'previousDone':
             if (prev) {
               const now = this.engine.time;
-              if (now - this.started.get(prev.id)! >= 1 && this.done(prev)) {
-                const at = this.doneSince.get(prev.id) ?? now;
-                this.doneSince.set(prev.id, at);
+              const k = key(m.force, prev.id);
+              if (now - this.started.get(k)! >= 1 && this.done(prev)) {
+                const at = this.doneSince.get(k) ?? now;
+                this.doneSince.set(k, at);
                 go = now - at >= (t.delay ?? 0);
-              } else this.doneSince.delete(prev.id);
+              } else this.doneSince.delete(k);
             } else go = true;
             why = prev ? `${prev.name} complete` : 'start';
             break;
@@ -142,6 +143,10 @@ export class SyncPlans {
     }
   }
 
+}
+
+function key(force: ForceId, phaseId: string): string {
+  return `${force}|${phaseId}`;
 }
 
 /** An entity or unit as something whose order status can be asked. */

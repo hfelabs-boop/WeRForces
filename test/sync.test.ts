@@ -85,6 +85,20 @@ describe('synchronization matrix', () => {
     expect(a.leader!.x).toBeLessThan(1000); // stopped soon after crossing into the area
   });
 
+  it('keeps each force\'s phases apart when they share ids', () => {
+    const eng = engine();
+    const blue = eng.createUnitFromTemplate('us-tank-platoon', 1, 500, 500);
+    const red = eng.createUnitFromTemplate('ru-tank-platoon', 2, 3500, 3500);
+    eng.sync.set({ force: 1, phases: [{ id: 'P1', name: 'Go', trigger: { type: 'time', time: 1 }, orders: [{ targetId: blue.id, roe: 'holdFire' }] }] });
+    eng.sync.set({ force: 2, phases: [{ id: 'P1', name: 'Go', trigger: { type: 'time', time: 3 }, orders: [{ targetId: red.id, roe: 'returnFire' }] }] });
+    eng.runFor(2);
+    expect(blue.leader!.roe).toBe('holdFire');
+    expect(red.leader!.roe).toBe('fireAtWill');
+    eng.runFor(2);
+    expect(red.leader!.roe).toBe('returnFire');
+    expect(eng.sync.states().map((m) => m.started.P1)).toEqual([1, 3]);
+  });
+
   it('refuses orders for another force or unknown objects', () => {
     const eng = engine();
     const runner = new SimRunner(eng, 0.1, 20, 0);
