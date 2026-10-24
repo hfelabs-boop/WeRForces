@@ -118,6 +118,7 @@ export function buildOpenApi(baseUrl: string): Schema {
               morale: { type: 'boolean', description: 'units become shaken and break under losses and fire' },
               fuel: { type: 'boolean', description: 'vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down' },
               orderDelay: { type: 'boolean', description: 'orders take time to pass down the chain of command: 5 s for an entity, 15 s a section, 30 s a platoon, 60 s a company (off by default)' },
+              curvature: { type: 'boolean', description: 'earth curvature and refraction (k = 4/3) in line of sight and radar horizon, beyond 2 km' },
             },
           }),
         }),
@@ -322,6 +323,17 @@ export function buildOpenApi(baseUrl: string): Schema {
         ),
       },
       '/api/v1/terrain': { get: op('Terrain', 'Terrain spec, towns and roads') },
+      '/api/v1/terrain/tiles': {
+        get: op('Terrain', 'How the terrain is tiled: tile size, levels, layers, elevation range, and the tile cache of a tiled dataset'),
+      },
+      '/api/v1/terrain/tiles/{z}/{x}/{y}': {
+        get: op(
+          'Terrain',
+          'One terrain tile (level z, column x from the west, row y from the south): binary, gzip-encoded; format in docs/terrain-import.md',
+          { parameters: ['z', 'x', 'y'].map((name) => ({ name, in: 'path', required: true, schema: { type: 'integer', minimum: 0 } })) },
+          { description: 'The tile', content: { 'application/vnd.werforces.tile': { schema: { type: 'string', format: 'binary' } } } },
+        ),
+      },
       '/api/v1/terrain/point': {
         get: op('Terrain', 'Elevation, water, forest, road and slope at a point', {
           parameters: ['x', 'y', 'lat', 'lon', 'town'].map((name) => ({ name, in: 'query', schema: { type: 'string' } })),

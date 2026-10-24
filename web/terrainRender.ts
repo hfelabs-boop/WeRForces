@@ -33,8 +33,11 @@ function tint(h: number): [number, number, number] {
   return TINTS[TINTS.length - 1][1];
 }
 
-/** Render to a canvas where pixel (0,0) is the north-west corner of the terrain. */
-export function renderTerrain(grid: TerrainGrid, pxPerPost = 3, contourInterval = 20): HTMLCanvasElement {
+/**
+ * Render to a canvas where pixel (0,0) is the north-west corner of the terrain. `range` fixes
+ * the elevation range the tints and contours are spread over (tiles of a larger terrain).
+ */
+export function renderTerrain(grid: TerrainGrid, pxPerPost = 3, contourInterval = 20, range?: { lo: number; hi: number }): HTMLCanvasElement {
   const n = (grid.cols - 1) * pxPerPost;
   const cv = document.createElement('canvas');
   cv.width = n;
@@ -56,6 +59,10 @@ export function renderTerrain(grid: TerrainGrid, pxPerPost = 3, contourInterval 
         hi = Math.max(hi, h);
       }
     }
+  }
+  if (range) {
+    lo = Math.max(0, range.lo);
+    hi = range.hi;
   }
   // Real terrain can sit hundreds of metres up: spread its own range over the tints.
   const relative = lo > 60 || hi > 450;

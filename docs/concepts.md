@@ -84,12 +84,35 @@ the more so the closer it is, so the route goes behind ridges, woods and
 buildings or round the enemy's reach. It replans every 15 s as contacts change.
 Broken units, withdrawing units and screens falling back take covered routes.
 
-**Line of sight.** Line of sight is sampled every 25 m along the line from the
-observer's eyes to the target. Terrain blocks it outright. Forest canopy (15 m)
-blocks it only once the line has passed through **more than 150 m of
-forest**, so vehicles at a wood's edge, or close together inside a wood, can
-still see each other. Smoke clouds block it too (except for radar), and so do
-buildings (above).
+**Line of sight.** Line of sight is sampled every half grid cell (25 m on a
+50 m grid) along the line from the observer's eyes to the target. Terrain blocks
+it outright. Forest canopy (15 m) blocks it only once the line has passed through
+**more than 150 m of forest**, so vehicles at a wood's edge, or close together
+inside a wood, can still see each other. Smoke clouds block it too (except for
+radar), and so do buildings (above).
+
+**Earth curvature.** Over long distances the earth curves away below a sight
+line. A point at distance *d* lies *d*² / (2*kR*) below the observer's horizontal,
+with *R* = 6371 km and *k* = 4/3 for standard atmospheric refraction, which bends
+light and radar a little round the earth; a sight line of length *d* therefore
+clears the ground by up to *d*² / (8*kR*) less in its middle than on a flat earth.
+That is 6 cm at 2 km, 1.5 m at 10 km and 13 m at 30 km, so the effect is
+applied to lines longer than 2 km (shorter ones are unchanged). It sets the
+horizon: an eye 2 m up sees ground out to about 5.8 km, and another 2 m eye out
+to about 11.7 km over flat ground; a 100 m mast sees a 2 m eye 47 km away; an
+aircraft 100 m up is below a 10 m radar's horizon beyond about 54 km. The same
+correction applies to radar line of sight, the viewshed and the covered-route
+threat map. It is a [rule](#optional-models) (`curvature`), on by default.
+
+**Large terrain.** Terrain bigger than one grid can hold (for example 200 km ×
+200 km at 30 m, 44 million posts) comes as a **tiled dataset**: tiles of 256 ×
+256 cells read on demand into a memory-bounded cache (see
+[Terrain import](terrain-import.md#large-areas-tiled-datasets)). Everything above
+works the same on it, with identical results for the same posts. Long sight
+lines skip tiles they pass high above without reading them. Long routes are
+planned on a coarser level of the tiles first, then refined leg by leg on the
+full grid in windows along that route, so a 250 km route takes a few seconds
+rather than a search over the whole grid.
 
 ## Forces and hostility
 
@@ -556,6 +579,7 @@ on and off per scenario, for comparison runs:
 | `morale` | on | Shaken and broken units (above) |
 | `fuel` | on | Fuel use and running out (below) |
 | `orderDelay` | off | Orders take time to pass down the [chain of command](#chain-of-command) |
+| `curvature` | on | [Earth curvature and refraction](#terrain) in line of sight and radar horizon, beyond 2 km |
 
 ## Night and weather
 

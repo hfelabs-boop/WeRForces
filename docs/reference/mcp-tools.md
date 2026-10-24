@@ -298,7 +298,7 @@ When aggregated units split up and join up again. Defaults: an aggregate disaggr
 
 ## `set_simulation_rules` _(idempotent)_
 
-Turn optional parts of the model on or off for this scenario. Suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel) are on by default; orderDelay (orders take 5-60 s to pass down the chain of command, by echelon) is off by default. Useful for comparison runs.
+Turn optional parts of the model on or off for this scenario. Suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel) are on by default; orderDelay (orders take 5-60 s to pass down the chain of command, by echelon) is off by default; curvature (earth curvature and refraction in line of sight beyond 2 km) is on. Useful for comparison runs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -306,6 +306,7 @@ Turn optional parts of the model on or off for this scenario. Suppression (fire 
 | `morale` | boolean |  |  |
 | `fuel` | boolean |  |  |
 | `orderDelay` | boolean |  |  |
+| `curvature` | boolean |  |  |
 
 ## `edit_catalog`
 

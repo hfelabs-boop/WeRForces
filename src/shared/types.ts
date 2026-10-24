@@ -395,6 +395,20 @@ export interface TerrainData {
   buildings?: Building[];
   roads: Vec2[][];
   towns: Town[];
+  /** Tiled terrain (large datasets): the posts come in tiles and the base64 layers above are empty. */
+  tiles?: TerrainTilesInfo;
+}
+
+/** How to fetch a tiled terrain's tiles: GET /api/v1/terrain/tiles/{z}/{x}/{y}. */
+export interface TerrainTilesInfo {
+  /** Cells per tile side (tiles have one more post per side). */
+  tileSize: number;
+  /** The finest level; level 0 is one tile over the whole extent. */
+  maxZoom: number;
+  layers: { water: boolean; landCover: boolean; roads: boolean; urban: boolean };
+  elevation: { min: number; max: number };
+  /** URL template, relative to the API root. */
+  url: string;
 }
 
 /** A building: footprint as local x,y pairs in metres (x0, y0, x1, y1, ...) and height in metres. */
@@ -625,6 +639,8 @@ export interface SimulationRules {
   fuel?: boolean;
   /** Orders take time to pass down the chain of command (by echelon). Off by default. */
   orderDelay?: boolean;
+  /** Earth curvature and atmospheric refraction in line of sight and radar horizon (k = 4/3). */
+  curvature?: boolean;
 }
 
 /** An order on its way to an entity or unit (rules.orderDelay). */

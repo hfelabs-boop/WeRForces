@@ -62,9 +62,10 @@ import { Life } from './life.js';
 import { Ew, JAMMED_ORDER_DELAY } from './ew.js';
 import { Aggregation } from './aggregate.js';
 import { Commanders } from './commander/manager.js';
+import { PostOverlay } from './postOverlay.js';
 
 export const DEFAULT_DT = 0.1;
-export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
+export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false, curvature: true };
 
 /** Seconds for an order to reach and be acted on, by echelon (rules.orderDelay). */
 const ORDER_DELAY: Record<UnitTemplate['echelon'] | 'entity', number> = { entity: 5, team: 10, flight: 10, section: 15, platoon: 30, company: 60, group: 60 };
@@ -193,14 +194,15 @@ export class Engine {
   environment: Required<Environment> = { ...DEFAULT_ENVIRONMENT };
   /** The environment now (clock and light), updated once a simulated second. */
   env: EnvironmentState = environmentAt(DEFAULT_ENVIRONMENT, 0, 0);
-  /** Loads imported terrain datasets by name (set by the server from its terrains folder). */
-  terrainLoader?: (name: string) => TerrainData;
+  /** Loads imported terrain datasets by name (set by the server from its terrains folder); tiled datasets come as a Terrain. */
+  terrainLoader?: (name: string) => TerrainData | Terrain;
 
-  constructor(opts: { catalog?: Catalog; terrain?: Terrain; seed?: number; terrainLoader?: (name: string) => TerrainData } = {}) {
+  constructor(opts: { catalog?: Catalog; terrain?: Terrain; seed?: number; terrainLoader?: (name: string) => TerrainData | Terrain } = {}) {
     this.terrainLoader = opts.terrainLoader;
     this.baseCatalog = opts.catalog ?? DEFAULT_CATALOG;
     this.catalog = new CatalogIndex(this.baseCatalog);
     this.terrain = opts.terrain ?? Terrain.generate();
+    this.terrain.curvature = this.rules.curvature;
     this.rng = new Rng(opts.seed ?? this.terrain.spec.seed);
   }
 
@@ -1017,7 +1019,7 @@ export class Engine {
   planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number, force?: ForceId, avoidThreats = false): Vec2[] | null {
     let overlay = this.obstacles.overlay(force, domain);
     const threat = avoidThreats && force !== undefined ? this.threats.overlay(force, domain) : null;
-    if (threat) overlay = overlay ? overlay.map((v, i) => v * threat[i]) : threat;
+    if (threat) overlay = overlay ? PostOverlay.product(overlay, threat) : threat;
     const route = this.terrain.planRoute(from, to, domain, offroadFactor, overlay);
     return route && overlay && domain !== 'lifeform' ? this.obstacles.threadLanes(route, from) : route;
   }
@@ -1128,6 +1130,7 @@ export class Engine {
   setRules(rules: SimulationRules): void {
     for (const k of Object.keys(DEFAULT_RULES) as (keyof SimulationRules)[]) if (typeof rules[k] === 'boolean') this.rules[k] = rules[k]!;
     if (!this.rules.suppression) for (const e of this.entities.values()) e.suppression = 0;
+    this.terrain.curvature = this.rules.curvature;
   }
 
   /** Change the time of day and weather. `time` is the time of day at the scenario's start. */
@@ -1361,7 +1364,8 @@ export class Engine {
       // Real-world terrain: everything but the dataset name comes from the dataset.
       if (this.terrain.spec.dataset !== spec.dataset) {
         if (!this.terrainLoader) throw new Error(`terrain dataset "${spec.dataset}" cannot be loaded here`);
-        terrain = Terrain.fromData(this.terrainLoader(spec.dataset));
+        const data = this.terrainLoader(spec.dataset);
+        terrain = data instanceof Terrain ? data : Terrain.fromData(data);
         spec = terrain.spec;
       } else {
         spec = this.terrain.spec;
@@ -1434,9 +1438,14 @@ export class Engine {
       const e = this.entities.get(r.id);
       // Members of aggregated units are not in the entity-level simulation.
       if (!e || e.destroyed || e.embarkedIn) continue;
-      if (r.plan) {
+      // A checkpoint without a plan position: the plan was dropped (broke or withdrew); keep its task.
+      const dropped = !!r.plan && !!r.state && r.state.planIndex === undefined;
+      if (r.plan && !dropped) {
         this.assignPlan(r.id, r.plan);
         if (r.state?.planIndex !== undefined) e.plan!.resume(r.state.planIndex, r.state.taskState);
+      } else if (dropped) {
+        e.assignedPlan = r.plan;
+        if (r.state?.taskState) this.assignTask(r.id, r.state.taskState, false);
       } else if (r.task && !r.state?.taskDone) {
         this.assignTask(r.id, r.state?.taskState ?? r.task, false);
         e.assignedTask = r.task;
@@ -1448,9 +1457,13 @@ export class Engine {
     for (const u of s.units ?? []) {
       const unit = this.units.get(u.id)!;
       if (!unit.leader) continue;
-      if (u.plan) {
+      const dropped = !!u.plan && !!u.state && u.state.planIndex === undefined;
+      if (u.plan && !dropped) {
         this.assignPlan(u.id, u.plan);
         if (u.state?.planIndex !== undefined) unit.plan!.resume(u.state.planIndex, u.state.taskState);
+      } else if (dropped) {
+        unit.assignedPlan = u.plan;
+        if (u.state?.taskState) this.assignTask(u.id, u.state.taskState, false);
       } else if (u.task && !u.state?.taskDone) {
         this.assignTask(u.id, u.state?.taskState ?? u.task, false);
         unit.assignedTask = u.task;

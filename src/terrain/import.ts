@@ -35,7 +35,7 @@ export interface ImportOptions {
   source?: TerrainDataset['source'];
 }
 
-interface Geometry {
+export interface Geometry {
   type: string;
   coordinates: unknown;
 }
@@ -45,14 +45,14 @@ export interface GeoJsonCollection {
   features: { type: 'Feature'; geometry: Geometry | null; properties?: Record<string, unknown> | null }[];
 }
 
-type LonLat = [number, number];
+export type LonLat = [number, number];
 
 const MAX_POSTS = 1201;
-const ROAD_TYPES = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential', 'motorway_link', 'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link', 'service', 'track']);
-const WATER_LINES = new Set(['river', 'canal']);
-const PLACES = new Set(['city', 'town', 'village', 'hamlet']);
+export const ROAD_TYPES = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential', 'motorway_link', 'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link', 'service', 'track']);
+export const WATER_LINES = new Set(['river', 'canal']);
+export const PLACES = new Set(['city', 'town', 'village', 'hamlet']);
 
-interface Projection {
+export interface Projection {
   /** WGS-84 lon/lat to raster coordinates. */
   forward(lon: number, lat: number): [number, number];
   /** Raster coordinates to WGS-84 lon/lat. */
@@ -60,7 +60,7 @@ interface Projection {
 }
 
 /** Projection between WGS-84 lon/lat and the raster's coordinate system. */
-function rasterProjection(keys: Record<string, number | undefined>): Projection {
+export function rasterProjection(keys: Record<string, number | undefined>): Projection {
   const projected = keys.ProjectedCSTypeGeoKey;
   const geographic = keys.GeographicTypeGeoKey;
   if (projected && projected !== 32767) {
@@ -79,8 +79,11 @@ function rasterProjection(keys: Record<string, number | undefined>): Projection 
   return { forward: (lon, lat) => [lon, lat], inverse: (x, y) => [x, y] };
 }
 
-/** Bilinear sampler over a raster, skipping no-data cells. */
-function sampler(values: ArrayLike<number>, width: number, height: number, noData: number | null) {
+/**
+ * Bilinear sampler over a raster, skipping no-data cells. With `window`, values hold only
+ * that part of the raster (width x height is still the whole raster's size).
+ */
+export function sampler(values: ArrayLike<number>, width: number, height: number, noData: number | null, window?: { x0: number; y0: number; w: number }) {
   const valid = (v: number) => Number.isFinite(v) && (noData === null || Math.abs(v - noData) > 1e-6) && v > -1e4;
   return (col: number, row: number): number | null => {
     const c = Math.min(Math.max(col - 0.5, 0), width - 1);
@@ -99,7 +102,7 @@ function sampler(values: ArrayLike<number>, width: number, height: number, noDat
       [c0, r1, (1 - tx) * ty],
       [c1, r1, tx * ty],
     ] as const) {
-      const v = values[rr * width + cc];
+      const v = window ? values[(rr - window.y0) * window.w + (cc - window.x0)] : values[rr * width + cc];
       if (!valid(v) || w <= 0) continue;
       sum += v * w;
       wsum += w;
@@ -108,7 +111,7 @@ function sampler(values: ArrayLike<number>, width: number, height: number, noDat
   };
 }
 
-const niceCell = (m: number) => [10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 150, 200, 250].find((c) => c >= m) ?? Math.ceil(m / 50) * 50;
+export const niceCell = (m: number) => [10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 150, 200, 250].find((c) => c >= m) ?? Math.ceil(m / 50) * 50;
 
 /** Build a terrain dataset from a DEM and optional map features. */
 export async function importTerrain(opts: ImportOptions): Promise<TerrainDataset> {

@@ -10,3 +10,5 @@ playwright-report/
 hla/vendor/
 hla/build/
 vendor-test/
+# Tiled terrain datasets (large; generate or import them)
+terrains/*/
