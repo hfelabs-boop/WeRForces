@@ -1,0 +1,359 @@
+// HTTP + WebSocket server: serves the front-end, the REST APIs (/api/v1 and the
+// command endpoint used by the GUI), the MCP endpoint (/mcp) and a WebSocket stream
+// of simulation state and events.
+
+import { timingSafeEqual } from 'node:crypto';
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { WebSocket, WebSocketServer } from 'ws';
+import { IntegrationHub, type IntegrationOptions } from '../integrations/hub.js';
+import { createMcpServer, type ApiCaller } from '../mcp/tools.js';
+import type { ClientMessage, ServerMessage, SimEvent } from '../shared/types.js';
+import { ApiV1 } from './apiV1.js';
+import { executeCommand } from './commands.js';
+import { DocsSite } from './docs.js';
+import { docsPage } from './openapi.js';
+import type { RouteResponse } from './router.js';
+import type { SimRunner } from './runner.js';
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json',
+  '.map': 'application/json',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+};
+const MAX_BODY = 8 * 1024 * 1024;
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+
+export interface ServerOptions {
+  port: number;
+  host: string;
+  webRoot: string;
+  scenarioDir: string;
+  /** State broadcasts per second. */
+  stateRate?: number;
+  /** When set, every /api, /ws and /mcp request must present this key. */
+  apiKey?: string;
+  /** Browser origins allowed to call the API cross-origin ('*' for any). */
+  corsOrigins?: string[];
+  /** Markdown documentation folder served at /docs. */
+  docsDir?: string;
+  /** Repository blob URL used for doc links to files outside docs/. */
+  repoBlobUrl?: string;
+  integrations?: IntegrationOptions;
+}
+
+class BodyError extends Error {}
+
+function readBody(req: http.IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => {
+      size += c.length;
+      if (size > MAX_BODY) {
+        reject(new BodyError('request body too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8').trim();
+      if (!raw) return resolve(undefined);
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(new BodyError('invalid JSON body'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function hostname(hostHeader: string | undefined): string {
+  if (!hostHeader) return '';
+  if (hostHeader.startsWith('[')) return hostHeader.slice(0, hostHeader.indexOf(']') + 1);
+  return hostHeader.split(':')[0].toLowerCase();
+}
+
+export class SimServer {
+  readonly http: http.Server;
+  readonly api: ApiV1;
+  readonly integrations: IntegrationHub;
+  private wss: WebSocketServer;
+  private terrainCache: { version: number; json: string } | null = null;
+  private lastTerrainVersion: number;
+  private pendingEvents: SimEvent[] = [];
+  private frameCount = 0;
+  private docs: DocsSite | null;
+
+  constructor(
+    readonly runner: SimRunner,
+    readonly opts: ServerOptions,
+  ) {
+    this.lastTerrainVersion = runner.engine.terrainVersion;
+    this.integrations = new IntegrationHub(runner, opts.integrations);
+    this.api = new ApiV1({ runner, integrations: this.integrations, scenarioDir: opts.scenarioDir });
+    this.docs = opts.docsDir ? new DocsSite(opts.docsDir, opts.repoBlobUrl) : null;
+    this.http = http.createServer((req, res) => {
+      this.handle(req, res).catch((err) => {
+        if (!res.headersSent) this.send(res, { status: 500, json: { error: { status: 500, message: String(err?.message ?? err) } } });
+      });
+    });
+    this.wss = new WebSocketServer({
+      server: this.http,
+      path: '/ws',
+      maxPayload: MAX_BODY,
+      verifyClient: (info: { req: http.IncomingMessage; origin?: string }) => this.allowRequest(info.req, new URL(info.req.url ?? '/', 'http://x')) === null && this.allowWsOrigin(info.req),
+    });
+    this.wss.on('connection', (ws) => this.onConnection(ws));
+    runner.engine.on('event', (ev) => this.pendingEvents.push(ev));
+    const every = Math.max(1, Math.round(1000 / runner.frameMs / (opts.stateRate ?? 10)));
+    runner.onFrame(() => {
+      if (this.runner.engine.terrainVersion !== this.lastTerrainVersion) {
+        this.lastTerrainVersion = this.runner.engine.terrainVersion;
+        this.broadcast({ type: 'terrainChanged', terrainVersion: this.lastTerrainVersion });
+      }
+      if (this.pendingEvents.length) {
+        this.broadcast({ type: 'events', events: this.pendingEvents });
+        this.pendingEvents = [];
+      }
+      if (++this.frameCount % every === 0 && this.wss.clients.size > 0) {
+        this.broadcast({ type: 'state', state: this.runner.state() });
+      }
+    });
+  }
+
+  listen(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.http.once('error', reject);
+      this.http.listen(this.opts.port, this.opts.host, () => {
+        this.http.off('error', reject);
+        resolve();
+      });
+    });
+  }
+
+  close(): Promise<void> {
+    this.integrations.close();
+    for (const c of this.wss.clients) c.terminate();
+    this.wss.close();
+    return new Promise((resolve) => this.http.close(() => resolve()));
+  }
+
+  get address(): string {
+    const a = this.http.address();
+    return typeof a === 'object' && a ? `http://${this.opts.host === '0.0.0.0' ? 'localhost' : this.opts.host}:${a.port}` : '';
+  }
+
+  /** In-process API caller used by the embedded MCP endpoint. */
+  localCaller(baseUrl: string): ApiCaller {
+    return async (method, p, body) => this.api.call(method, p, body, baseUrl);
+  }
+
+  // ------------------------------------------------------------ security
+
+  /** Returns an error response, or null when the request may proceed. */
+  private allowRequest(req: http.IncomingMessage, url: URL): RouteResponse & { status: number } | null {
+    // DNS-rebinding guard: a loopback-only server only answers to loopback host names.
+    if (LOOPBACK.has(this.opts.host) && !LOOPBACK.has(hostname(req.headers.host))) {
+      return { status: 403, json: { error: { status: 403, message: 'host not allowed' } } };
+    }
+    const protectedPath = url.pathname.startsWith('/api/') || url.pathname === '/ws' || url.pathname === '/mcp';
+    if (protectedPath && url.pathname !== '/api/docs' && this.opts.apiKey && !this.keyMatches(req, url)) {
+      return { status: 401, json: { error: { status: 401, message: 'missing or invalid API key' } } };
+    }
+    return null;
+  }
+
+  private keyMatches(req: http.IncomingMessage, url: URL): boolean {
+    const auth = req.headers.authorization;
+    const presented =
+      (auth?.startsWith('Bearer ') ? auth.slice(7) : undefined) ?? (req.headers['x-api-key'] as string | undefined) ?? url.searchParams.get('api_key') ?? '';
+    const a = Buffer.from(presented);
+    const b = Buffer.from(this.opts.apiKey!);
+    return a.length === b.length && timingSafeEqual(a, b);
+  }
+
+  private corsOrigin(req: http.IncomingMessage): string | null {
+    const origin = req.headers.origin;
+    const allowed = this.opts.corsOrigins ?? [];
+    if (!origin || allowed.length === 0) return null;
+    if (allowed.includes('*')) return '*';
+    return allowed.includes(origin) ? origin : null;
+  }
+
+  private allowWsOrigin(req: http.IncomingMessage): boolean {
+    const origin = req.headers.origin;
+    if (!origin) return true; // non-browser client
+    try {
+      if (new URL(origin).host === req.headers.host) return true;
+    } catch {
+      return false;
+    }
+    return this.corsOrigin(req) !== null;
+  }
+
+  // ------------------------------------------------------------ dispatch
+
+  private send(res: http.ServerResponse, r: RouteResponse & { status: number }, extraHeaders: Record<string, string> = {}): void {
+    const headers: Record<string, string> = { 'Cache-Control': 'no-store', ...extraHeaders, ...r.headers };
+    if (r.status === 204) {
+      res.writeHead(204, headers);
+      res.end();
+      return;
+    }
+    if (r.text !== undefined) {
+      res.writeHead(r.status, { 'Content-Type': r.contentType ?? 'text/plain; charset=utf-8', ...headers });
+      res.end(r.text);
+      return;
+    }
+    res.writeHead(r.status, { 'Content-Type': r.contentType ?? 'application/json', ...headers });
+    res.end(JSON.stringify(r.json ?? null));
+  }
+
+  private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const p = url.pathname;
+    const method = req.method ?? 'GET';
+    const cors = this.corsOrigin(req);
+    const corsHeaders: Record<string, string> = cors
+      ? { 'Access-Control-Allow-Origin': cors, 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key, Mcp-Session-Id, Mcp-Protocol-Version', 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS', Vary: 'Origin' }
+      : {};
+    if (method === 'OPTIONS' && (p.startsWith('/api/') || p === '/mcp')) {
+      res.writeHead(cors ? 204 : 403, corsHeaders);
+      res.end();
+      return;
+    }
+    const denied = this.allowRequest(req, url);
+    if (denied) return this.send(res, denied, corsHeaders);
+
+    if (p === '/api/docs') return this.send(res, { status: 200, text: docsPage(), contentType: 'text/html; charset=utf-8' });
+    if (this.docs && (p === '/docs' || p.startsWith('/docs/'))) {
+      if (p === '/docs') {
+        res.writeHead(302, { Location: '/docs/' });
+        res.end();
+        return;
+      }
+      const d = this.docs.serve(p);
+      res.writeHead(d.status, { 'Content-Type': d.contentType, 'Cache-Control': 'no-store' });
+      res.end(d.body);
+      return;
+    }
+
+    const isApi = p.startsWith('/api/') || p === '/mcp';
+    if (!isApi) return this.serveStatic(p, res);
+
+    // Cross-site form posts are "simple" requests; requiring JSON forces a CORS preflight.
+    if ((method === 'POST' || method === 'PUT') && !(req.headers['content-type'] ?? '').includes('application/json')) {
+      return this.send(res, { status: 415, json: { error: { status: 415, message: 'Content-Type must be application/json' } } }, corsHeaders);
+    }
+    let body: unknown;
+    if (method !== 'GET' && method !== 'HEAD') {
+      try {
+        body = await readBody(req);
+      } catch (err) {
+        return this.send(res, { status: err instanceof BodyError && err.message.includes('large') ? 413 : 400, json: { error: { status: 400, message: (err as Error).message } } }, corsHeaders);
+      }
+    }
+    const baseUrl = `http://${req.headers.host ?? 'localhost'}`;
+
+    if (p === '/mcp') return this.handleMcp(req, res, body, baseUrl, corsHeaders);
+
+    if (p.startsWith('/api/v1')) {
+      const r = await this.api.router.dispatch({ method, path: p, query: url.searchParams, body, baseUrl });
+      return this.send(res, r, corsHeaders);
+    }
+
+    // Endpoints used by the GUI.
+    const engine = this.runner.engine;
+    if (method === 'GET' && p === '/api/catalog') return this.send(res, { status: 200, json: engine.catalog.catalog }, corsHeaders);
+    if (method === 'GET' && p === '/api/terrain') return this.send(res, { status: 200, text: this.terrainJson(), contentType: 'application/json' }, corsHeaders);
+    if (method === 'GET' && p === '/api/state') return this.send(res, { status: 200, json: this.runner.state() }, corsHeaders);
+    if (method === 'GET' && p === '/api/events') return this.send(res, { status: 200, json: engine.eventsSince(Number(url.searchParams.get('since') ?? 0)) }, corsHeaders);
+    if (method === 'GET' && p === '/api/scenario') return this.send(res, { status: 200, json: engine.toScenario() }, corsHeaders);
+    if (method === 'GET' && p.startsWith('/api/path/')) return this.send(res, { status: 200, json: engine.plannedPath(decodeURIComponent(p.slice('/api/path/'.length))) }, corsHeaders);
+    if (method === 'POST' && p === '/api/command') {
+      const result = executeCommand(this.runner, body);
+      return this.send(res, { status: result.ok ? 200 : 400, json: result }, corsHeaders);
+    }
+    // Scenario storage (kept for the GUI; same behaviour as /api/v1/scenarios).
+    if (p === '/api/scenarios' || p.startsWith('/api/scenarios/')) {
+      const v1 = p.replace('/api/', '/api/v1/');
+      const r = await this.api.router.dispatch({ method, path: v1, query: url.searchParams, body, baseUrl });
+      return this.send(res, r, corsHeaders);
+    }
+    return this.send(res, { status: 404, json: { ok: false, error: 'unknown endpoint' } }, corsHeaders);
+  }
+
+  private async handleMcp(req: http.IncomingMessage, res: http.ServerResponse, body: unknown, baseUrl: string, corsHeaders: Record<string, string>): Promise<void> {
+    if (req.method !== 'POST') {
+      return this.send(res, { status: 405, json: { jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed (stateless MCP endpoint: use POST)' }, id: null } }, corsHeaders);
+    }
+    for (const [k, v] of Object.entries(corsHeaders)) res.setHeader(k, v);
+    // Stateless mode: a fresh server/transport per request.
+    const server = createMcpServer(this.localCaller(baseUrl));
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    res.on('close', () => {
+      void transport.close();
+      void server.close();
+    });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, body);
+  }
+
+  // ------------------------------------------------------------ websocket
+
+  private broadcast(msg: ServerMessage): void {
+    const data = JSON.stringify(msg);
+    for (const c of this.wss.clients) if (c.readyState === WebSocket.OPEN) c.send(data);
+  }
+
+  private onConnection(ws: WebSocket): void {
+    const engine = this.runner.engine;
+    const hello: ServerMessage = { type: 'hello', catalog: engine.catalog.catalog, scenarioName: engine.scenarioName, terrainVersion: engine.terrainVersion };
+    ws.send(JSON.stringify(hello));
+    ws.send(JSON.stringify({ type: 'events', events: engine.eventsSince(0).slice(-200) } satisfies ServerMessage));
+    ws.send(JSON.stringify({ type: 'state', state: this.runner.state() } satisfies ServerMessage));
+    ws.on('message', (data) => {
+      let msg: ClientMessage;
+      try {
+        msg = JSON.parse(data.toString());
+      } catch {
+        return;
+      }
+      if (msg?.type !== 'command') return;
+      const result = executeCommand(this.runner, msg.command);
+      // Push state first, so clients already know about any object the result refers to.
+      this.broadcast({ type: 'state', state: this.runner.state() });
+      ws.send(JSON.stringify({ type: 'result', reqId: msg.reqId, result } satisfies ServerMessage));
+    });
+  }
+
+  private terrainJson(): string {
+    const engine = this.runner.engine;
+    if (!this.terrainCache || this.terrainCache.version !== engine.terrainVersion) {
+      this.terrainCache = { version: engine.terrainVersion, json: JSON.stringify(engine.terrain.toData()) };
+    }
+    return this.terrainCache.json;
+  }
+
+  private serveStatic(p: string, res: http.ServerResponse): void {
+    const rel = p === '/' ? 'index.html' : decodeURIComponent(p).replace(/^\/+/, '');
+    const root = path.resolve(this.opts.webRoot);
+    const file = path.resolve(root, rel);
+    if (!file.startsWith(root + path.sep) || !existsSync(file) || !statSync(file).isFile()) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end(existsSync(root) ? 'Not found' : 'Front-end not built. Run `npm run build:web`.');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] ?? 'application/octet-stream' });
+    createReadStream(file).pipe(res);
+  }
+}

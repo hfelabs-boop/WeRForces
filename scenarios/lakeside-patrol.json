@@ -1,0 +1,427 @@
+{
+  "format": "werforces-scenario",
+  "version": 1,
+  "name": "Lakeside Patrol",
+  "description": "Small-unit scenario on the southern lake. US patrol boats sweep the lake while a rifle squad holds the north shore; a Russian recon patrol probes along the shore road and a Hind hunts the boats.",
+  "terrain": {
+    "seed": 1337,
+    "size": 16000,
+    "cellSize": 50,
+    "origin": {
+      "lat": 50.75,
+      "lon": 9.9
+    },
+    "relief": 320,
+    "waterFraction": 0.1,
+    "forestFraction": 0.28,
+    "towns": 7
+  },
+  "startTime": 0,
+  "hostilities": [
+    [
+      1,
+      2
+    ]
+  ],
+  "entities": [
+    {
+      "id": "E1",
+      "name": "PB 101",
+      "typeId": "us-patrol-boat",
+      "force": 1,
+      "x": 5300,
+      "y": 2600,
+      "heading": 0,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E2",
+      "name": "PB 102",
+      "typeId": "us-patrol-boat",
+      "force": 1,
+      "x": 5300,
+      "y": 2450,
+      "heading": 0,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E3",
+      "name": "1st Squad Lead",
+      "typeId": "us-rifleman",
+      "force": 1,
+      "x": 6900,
+      "y": 2850,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E4",
+      "name": "1st Squad 2",
+      "typeId": "us-rifleman",
+      "force": 1,
+      "x": 6888,
+      "y": 2862,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E5",
+      "name": "1st Squad 3",
+      "typeId": "us-rifleman",
+      "force": 1,
+      "x": 6912,
+      "y": 2862,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E6",
+      "name": "1st Squad 4",
+      "typeId": "us-rifleman",
+      "force": 1,
+      "x": 6876,
+      "y": 2874,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E7",
+      "name": "1st Squad 5",
+      "typeId": "us-rifleman",
+      "force": 1,
+      "x": 6924,
+      "y": 2874,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E8",
+      "name": "1st Squad 6",
+      "typeId": "us-rifleman",
+      "force": 1,
+      "x": 6864,
+      "y": 2886,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E9",
+      "name": "1st Squad 7",
+      "typeId": "us-rifleman",
+      "force": 1,
+      "x": 6936,
+      "y": 2886,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E10",
+      "name": "1st Squad 8",
+      "typeId": "us-rifleman",
+      "force": 1,
+      "x": 6852,
+      "y": 2898,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E11",
+      "name": "1st Squad 9",
+      "typeId": "us-rifleman",
+      "force": 1,
+      "x": 6948,
+      "y": 2898,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E12",
+      "name": "Stinger 1",
+      "typeId": "us-stinger-team",
+      "force": 1,
+      "x": 7000,
+      "y": 2950,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E13",
+      "name": "Dozor Lead",
+      "typeId": "ru-brdm2",
+      "force": 2,
+      "x": 2633,
+      "y": 2819,
+      "heading": 0,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E14",
+      "name": "Dozor 2",
+      "typeId": "ru-brdm2",
+      "force": 2,
+      "x": 2633,
+      "y": 2759,
+      "heading": 0,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E15",
+      "name": "Hind 21",
+      "typeId": "ru-mi24",
+      "force": 2,
+      "x": 1500,
+      "y": 9000,
+      "heading": 2.199,
+      "altitude": 80,
+      "roe": "fireAtWill",
+      "plan": {
+        "name": "Hunt boats",
+        "statements": [
+          {
+            "kind": "task",
+            "task": {
+              "type": "wait",
+              "duration": 120
+            }
+          },
+          {
+            "kind": "task",
+            "task": {
+              "type": "moveTo",
+              "target": {
+                "x": 6200,
+                "y": 2600
+              }
+            }
+          },
+          {
+            "kind": "task",
+            "task": {
+              "type": "orbit",
+              "center": {
+                "x": 6200,
+                "y": 2600
+              },
+              "radius": 2000
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "units": [
+    {
+      "id": "U1",
+      "name": "Boat Section",
+      "force": 1,
+      "memberIds": [
+        "E1",
+        "E2"
+      ],
+      "formation": "echelonRight",
+      "spacing": 120,
+      "echelon": "section",
+      "task": {
+        "type": "patrol",
+        "routeId": "G1"
+      }
+    },
+    {
+      "id": "U2",
+      "name": "1st Squad",
+      "force": 1,
+      "memberIds": [
+        "E3",
+        "E4",
+        "E5",
+        "E6",
+        "E7",
+        "E8",
+        "E9",
+        "E10",
+        "E11"
+      ],
+      "formation": "wedge",
+      "spacing": 12,
+      "echelon": "section"
+    },
+    {
+      "id": "U3",
+      "name": "Dozor",
+      "force": 2,
+      "memberIds": [
+        "E13",
+        "E14"
+      ],
+      "formation": "column",
+      "spacing": 60,
+      "echelon": "section",
+      "task": {
+        "type": "patrol",
+        "routeId": "G2"
+      }
+    }
+  ],
+  "graphics": [
+    {
+      "id": "G1",
+      "kind": "route",
+      "name": "Lake Sweep",
+      "points": [
+        {
+          "x": 4600,
+          "y": 2000
+        },
+        {
+          "x": 6400,
+          "y": 4600
+        },
+        {
+          "x": 7900,
+          "y": 2200
+        },
+        {
+          "x": 6200,
+          "y": 900
+        },
+        {
+          "x": 4600,
+          "y": 2000
+        }
+      ],
+      "force": 1
+    },
+    {
+      "id": "G2",
+      "kind": "route",
+      "name": "Shore Road",
+      "points": [
+        {
+          "x": 2633,
+          "y": 2819
+        },
+        {
+          "x": 2450,
+          "y": 3350
+        },
+        {
+          "x": 1900,
+          "y": 3900
+        },
+        {
+          "x": 1600,
+          "y": 4050
+        },
+        {
+          "x": 1600,
+          "y": 4500
+        },
+        {
+          "x": 1850,
+          "y": 4750
+        },
+        {
+          "x": 1900,
+          "y": 5100
+        },
+        {
+          "x": 2150,
+          "y": 5450
+        },
+        {
+          "x": 2150,
+          "y": 5650
+        },
+        {
+          "x": 2400,
+          "y": 5900
+        },
+        {
+          "x": 2950,
+          "y": 6100
+        },
+        {
+          "x": 3300,
+          "y": 6450
+        },
+        {
+          "x": 3450,
+          "y": 6450
+        },
+        {
+          "x": 4100,
+          "y": 7050
+        },
+        {
+          "x": 4250,
+          "y": 7050
+        },
+        {
+          "x": 4500,
+          "y": 7250
+        },
+        {
+          "x": 6300,
+          "y": 7300
+        },
+        {
+          "x": 6400,
+          "y": 7400
+        },
+        {
+          "x": 6950,
+          "y": 7400
+        },
+        {
+          "x": 7200,
+          "y": 7150
+        },
+        {
+          "x": 9400,
+          "y": 7200
+        }
+      ],
+      "force": 2
+    },
+    {
+      "id": "G3",
+      "kind": "area",
+      "name": "OP NORTH SHORE",
+      "points": [
+        {
+          "x": 6900,
+          "y": 3350
+        },
+        {
+          "x": 7254,
+          "y": 3204
+        },
+        {
+          "x": 7400,
+          "y": 2850
+        },
+        {
+          "x": 7254,
+          "y": 2496
+        },
+        {
+          "x": 6900,
+          "y": 2350
+        },
+        {
+          "x": 6546,
+          "y": 2496
+        },
+        {
+          "x": 6400,
+          "y": 2850
+        },
+        {
+          "x": 6546,
+          "y": 3204
+        }
+      ],
+      "force": 1
+    }
+  ]
+}

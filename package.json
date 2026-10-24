@@ -1,0 +1,47 @@
+{
+  "name": "werforces",
+  "version": "0.1.0",
+  "description": "WeRForces - an open computer-generated forces (CGF) simulator inspired by VR-Forces: scenario editor, tasking, sensors, combat and DIS interoperability.",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hfelabs-boop/WeRForces.git"
+  },
+  "type": "module",
+  "bin": {
+    "werforces": "dist/server/cli.js",
+    "werforces-mcp": "dist/mcp/stdio.js"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "tsc -p tsconfig.build.json",
+    "build:web": "node scripts/build-web.mjs",
+    "dev": "npm run build:web && tsx src/server/cli.ts",
+    "start": "node dist/server/cli.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "scenarios": "tsx scripts/make-scenarios.ts",
+    "check": "npm run typecheck && npm test && npm run build",
+    "mcp": "node dist/mcp/stdio.js",
+    "docs:gen": "tsx scripts/docs-gen.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "marked": "^18.1.1",
+    "three": "^0.186.1",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/three": "^0.186.0",
+    "@types/ws": "^8.18.2",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

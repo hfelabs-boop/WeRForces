@@ -1,0 +1,969 @@
+{
+  "format": "werforces-scenario",
+  "version": 1,
+  "name": "Calloway Crossroads",
+  "description": "Combined-arms meeting engagement. A US armor/mech task force advances from Eastwick to seize the town of Calloway, held by a Russian tank platoon, infantry and an SA-8. Apaches screen the advance; F-16s fly CAP over the assembly area; a Russian supply convoy and civilians move on the road network.",
+  "terrain": {
+    "seed": 1337,
+    "size": 16000,
+    "cellSize": 50,
+    "origin": {
+      "lat": 50.75,
+      "lon": 9.9
+    },
+    "relief": 320,
+    "waterFraction": 0.1,
+    "forestFraction": 0.28,
+    "towns": 7
+  },
+  "startTime": 0,
+  "hostilities": [
+    [
+      1,
+      2
+    ]
+  ],
+  "entities": [
+    {
+      "id": "E1",
+      "name": "Team ARMOR Lead",
+      "typeId": "us-m1a2",
+      "force": 1,
+      "x": 10566,
+      "y": 4289,
+      "heading": 0,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E2",
+      "name": "Team ARMOR 2",
+      "typeId": "us-m1a2",
+      "force": 1,
+      "x": 10646,
+      "y": 4209,
+      "heading": 0,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E3",
+      "name": "Team ARMOR 3",
+      "typeId": "us-m1a2",
+      "force": 1,
+      "x": 10486,
+      "y": 4209,
+      "heading": 0,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E4",
+      "name": "Team ARMOR 4",
+      "typeId": "us-m1a2",
+      "force": 1,
+      "x": 10726,
+      "y": 4129,
+      "heading": 0,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E5",
+      "name": "Team MECH Lead",
+      "typeId": "us-m2a3",
+      "force": 1,
+      "x": 10766,
+      "y": 3689,
+      "heading": 0,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E6",
+      "name": "Team MECH 2",
+      "typeId": "us-m2a3",
+      "force": 1,
+      "x": 10846,
+      "y": 3689,
+      "heading": 0,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E7",
+      "name": "Team MECH 3",
+      "typeId": "us-m2a3",
+      "force": 1,
+      "x": 10686,
+      "y": 3689,
+      "heading": 0,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E8",
+      "name": "Team MECH 4",
+      "typeId": "us-m2a3",
+      "force": 1,
+      "x": 10926,
+      "y": 3689,
+      "heading": 0,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E9",
+      "name": "Scout 1 Lead",
+      "typeId": "us-hmmwv",
+      "force": 1,
+      "x": 10366,
+      "y": 4689,
+      "heading": 0,
+      "roe": "returnFire"
+    },
+    {
+      "id": "E10",
+      "name": "Scout 1 2",
+      "typeId": "us-hmmwv",
+      "force": 1,
+      "x": 10366,
+      "y": 4629,
+      "heading": 0,
+      "roe": "returnFire"
+    },
+    {
+      "id": "E11",
+      "name": "Gunslinger Lead",
+      "typeId": "us-ah64",
+      "force": 1,
+      "x": 11666,
+      "y": 2789,
+      "heading": 0,
+      "altitude": 60,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E12",
+      "name": "Gunslinger 2",
+      "typeId": "us-ah64",
+      "force": 1,
+      "x": 11866,
+      "y": 2589,
+      "heading": 0,
+      "altitude": 60,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E13",
+      "name": "Viper Lead",
+      "typeId": "us-f16",
+      "force": 1,
+      "x": 13000,
+      "y": 2500,
+      "heading": 0,
+      "altitude": 3000,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E14",
+      "name": "Viper 2",
+      "typeId": "us-f16",
+      "force": 1,
+      "x": 13600,
+      "y": 1900,
+      "heading": 0,
+      "altitude": 3000,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E15",
+      "name": "Tank Plt 1 Lead",
+      "typeId": "ru-t72b3",
+      "force": 2,
+      "x": 7890,
+      "y": 12868,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E16",
+      "name": "Tank Plt 1 2",
+      "typeId": "ru-t72b3",
+      "force": 2,
+      "x": 7810,
+      "y": 12948,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E17",
+      "name": "Tank Plt 1 3",
+      "typeId": "ru-t72b3",
+      "force": 2,
+      "x": 7970,
+      "y": 12948,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E18",
+      "name": "Squad 1 Lead",
+      "typeId": "ru-rifleman",
+      "force": 2,
+      "x": 7440,
+      "y": 13218,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E19",
+      "name": "Squad 1 2",
+      "typeId": "ru-rifleman",
+      "force": 2,
+      "x": 7428,
+      "y": 13230,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E20",
+      "name": "Squad 1 3",
+      "typeId": "ru-rifleman",
+      "force": 2,
+      "x": 7452,
+      "y": 13230,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E21",
+      "name": "Squad 1 4",
+      "typeId": "ru-rifleman",
+      "force": 2,
+      "x": 7416,
+      "y": 13242,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E22",
+      "name": "Squad 1 5",
+      "typeId": "ru-rifleman",
+      "force": 2,
+      "x": 7464,
+      "y": 13242,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E23",
+      "name": "Squad 1 6",
+      "typeId": "ru-rifleman",
+      "force": 2,
+      "x": 7404,
+      "y": 13254,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E24",
+      "name": "Squad 1 7",
+      "typeId": "ru-rifleman",
+      "force": 2,
+      "x": 7476,
+      "y": 13254,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E25",
+      "name": "Squad 1 8",
+      "typeId": "ru-rifleman",
+      "force": 2,
+      "x": 7392,
+      "y": 13266,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E26",
+      "name": "Mech Plt 2 Lead",
+      "typeId": "ru-bmp2",
+      "force": 2,
+      "x": 6690,
+      "y": 13068,
+      "heading": 2.513,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E27",
+      "name": "Mech Plt 2 2",
+      "typeId": "ru-bmp2",
+      "force": 2,
+      "x": 6625.3,
+      "y": 13021,
+      "heading": 2.513,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E28",
+      "name": "Mech Plt 2 3",
+      "typeId": "ru-bmp2",
+      "force": 2,
+      "x": 6754.7,
+      "y": 13115,
+      "heading": 2.513,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E29",
+      "name": "Osa 1",
+      "typeId": "ru-sa8",
+      "force": 2,
+      "x": 8090,
+      "y": 14068,
+      "heading": 3.142,
+      "roe": "fireAtWill"
+    },
+    {
+      "id": "E30",
+      "name": "Convoy 7 Lead",
+      "typeId": "ru-brdm2",
+      "force": 2,
+      "x": 11236,
+      "y": 14276,
+      "heading": 3.142,
+      "roe": "returnFire"
+    },
+    {
+      "id": "E31",
+      "name": "Convoy 7 2",
+      "typeId": "ru-ural",
+      "force": 2,
+      "x": 11236,
+      "y": 14326,
+      "heading": 3.142,
+      "roe": "returnFire"
+    },
+    {
+      "id": "E32",
+      "name": "Convoy 7 3",
+      "typeId": "ru-ural",
+      "force": 2,
+      "x": 11236,
+      "y": 14376,
+      "heading": 3.142,
+      "roe": "returnFire"
+    },
+    {
+      "id": "E33",
+      "name": "Convoy 7 4",
+      "typeId": "ru-ural",
+      "force": 2,
+      "x": 11236,
+      "y": 14426,
+      "heading": 3.142,
+      "roe": "returnFire"
+    },
+    {
+      "id": "E34",
+      "name": "Civ Car 1",
+      "typeId": "civ-car",
+      "force": 3,
+      "x": 13791,
+      "y": 6777,
+      "heading": 0,
+      "roe": "fireAtWill",
+      "plan": {
+        "name": "Commute",
+        "statements": [
+          {
+            "kind": "task",
+            "task": {
+              "type": "wait",
+              "duration": 0
+            }
+          },
+          {
+            "kind": "task",
+            "task": {
+              "type": "patrol",
+              "routeId": "G6"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "E35",
+      "name": "Civ Car 2",
+      "typeId": "civ-car",
+      "force": 3,
+      "x": 13821,
+      "y": 6747,
+      "heading": 0,
+      "roe": "fireAtWill",
+      "plan": {
+        "name": "Commute",
+        "statements": [
+          {
+            "kind": "task",
+            "task": {
+              "type": "wait",
+              "duration": 45
+            }
+          },
+          {
+            "kind": "task",
+            "task": {
+              "type": "patrol",
+              "routeId": "G6"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "E36",
+      "name": "Civ Car 3",
+      "typeId": "civ-car",
+      "force": 3,
+      "x": 13851,
+      "y": 6717,
+      "heading": 0,
+      "roe": "fireAtWill",
+      "plan": {
+        "name": "Commute",
+        "statements": [
+          {
+            "kind": "task",
+            "task": {
+              "type": "wait",
+              "duration": 90
+            }
+          },
+          {
+            "kind": "task",
+            "task": {
+              "type": "patrol",
+              "routeId": "G6"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "units": [
+    {
+      "id": "U1",
+      "name": "Team ARMOR",
+      "force": 1,
+      "memberIds": [
+        "E1",
+        "E2",
+        "E3",
+        "E4"
+      ],
+      "formation": "wedge",
+      "spacing": 80,
+      "echelon": "platoon",
+      "plan": {
+        "name": "Seize OBJ CALLOWAY",
+        "statements": [
+          {
+            "kind": "setFormation",
+            "formation": "column"
+          },
+          {
+            "kind": "task",
+            "task": {
+              "type": "followRoute",
+              "routeId": "G1"
+            }
+          },
+          {
+            "kind": "setFormation",
+            "formation": "wedge"
+          },
+          {
+            "kind": "task",
+            "task": {
+              "type": "moveTo",
+              "target": {
+                "x": 7590,
+                "y": 13468
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "U2",
+      "name": "Team MECH",
+      "force": 1,
+      "memberIds": [
+        "E5",
+        "E6",
+        "E7",
+        "E8"
+      ],
+      "formation": "line",
+      "spacing": 80,
+      "echelon": "platoon",
+      "plan": {
+        "name": "Follow and support",
+        "statements": [
+          {
+            "kind": "waitUntil",
+            "condition": {
+              "type": "simTime",
+              "time": 90
+            }
+          },
+          {
+            "kind": "setFormation",
+            "formation": "column"
+          },
+          {
+            "kind": "task",
+            "task": {
+              "type": "followRoute",
+              "routeId": "G1"
+            }
+          },
+          {
+            "kind": "task",
+            "task": {
+              "type": "moveTo",
+              "target": {
+                "x": 7990,
+                "y": 12968
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "U3",
+      "name": "Scout 1",
+      "force": 1,
+      "memberIds": [
+        "E9",
+        "E10"
+      ],
+      "formation": "column",
+      "spacing": 60,
+      "echelon": "section",
+      "task": {
+        "type": "moveTo",
+        "target": {
+          "x": 10190,
+          "y": 10268
+        }
+      }
+    },
+    {
+      "id": "U4",
+      "name": "Gunslinger",
+      "force": 1,
+      "memberIds": [
+        "E11",
+        "E12"
+      ],
+      "formation": "echelonRight",
+      "spacing": 200,
+      "echelon": "team",
+      "plan": {
+        "name": "Screen",
+        "statements": [
+          {
+            "kind": "waitUntil",
+            "condition": {
+              "type": "simTime",
+              "time": 60
+            }
+          },
+          {
+            "kind": "task",
+            "task": {
+              "type": "patrol",
+              "routeId": "G5"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "U5",
+      "name": "Viper",
+      "force": 1,
+      "memberIds": [
+        "E13",
+        "E14"
+      ],
+      "formation": "echelonRight",
+      "spacing": 600,
+      "echelon": "flight",
+      "task": {
+        "type": "orbit",
+        "center": {
+          "x": 13500,
+          "y": 3000
+        },
+        "radius": 2000
+      }
+    },
+    {
+      "id": "U6",
+      "name": "Tank Plt 1",
+      "force": 2,
+      "memberIds": [
+        "E15",
+        "E16",
+        "E17"
+      ],
+      "formation": "wedge",
+      "spacing": 80,
+      "echelon": "platoon"
+    },
+    {
+      "id": "U7",
+      "name": "Squad 1",
+      "force": 2,
+      "memberIds": [
+        "E18",
+        "E19",
+        "E20",
+        "E21",
+        "E22",
+        "E23",
+        "E24",
+        "E25"
+      ],
+      "formation": "wedge",
+      "spacing": 12,
+      "echelon": "section"
+    },
+    {
+      "id": "U8",
+      "name": "Mech Plt 2",
+      "force": 2,
+      "memberIds": [
+        "E26",
+        "E27",
+        "E28"
+      ],
+      "formation": "line",
+      "spacing": 80,
+      "echelon": "platoon",
+      "plan": {
+        "name": "Counterattack",
+        "statements": [
+          {
+            "kind": "setRoe",
+            "roe": "holdFire"
+          },
+          {
+            "kind": "waitUntil",
+            "condition": {
+              "type": "enemyDetected"
+            }
+          },
+          {
+            "kind": "setRoe",
+            "roe": "fireAtWill"
+          },
+          {
+            "kind": "task",
+            "task": {
+              "type": "moveTo",
+              "target": {
+                "x": 8490,
+                "y": 11268
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "U9",
+      "name": "Convoy 7",
+      "force": 2,
+      "memberIds": [
+        "E30",
+        "E31",
+        "E32",
+        "E33"
+      ],
+      "formation": "column",
+      "spacing": 50,
+      "echelon": "section",
+      "task": {
+        "type": "followRoute",
+        "routeId": "G4"
+      }
+    }
+  ],
+  "graphics": [
+    {
+      "id": "G1",
+      "kind": "route",
+      "name": "Route IRON",
+      "points": [
+        {
+          "x": 10566,
+          "y": 4289
+        },
+        {
+          "x": 11400,
+          "y": 4850
+        },
+        {
+          "x": 11900,
+          "y": 4850
+        },
+        {
+          "x": 13850,
+          "y": 6850
+        },
+        {
+          "x": 13900,
+          "y": 8800
+        },
+        {
+          "x": 14100,
+          "y": 9150
+        },
+        {
+          "x": 14100,
+          "y": 9750
+        },
+        {
+          "x": 14600,
+          "y": 10300
+        },
+        {
+          "x": 14650,
+          "y": 10650
+        },
+        {
+          "x": 14850,
+          "y": 10850
+        },
+        {
+          "x": 14850,
+          "y": 11350
+        },
+        {
+          "x": 14950,
+          "y": 11450
+        },
+        {
+          "x": 14950,
+          "y": 12000
+        },
+        {
+          "x": 15100,
+          "y": 12500
+        },
+        {
+          "x": 14950,
+          "y": 12650
+        },
+        {
+          "x": 14800,
+          "y": 12650
+        },
+        {
+          "x": 14700,
+          "y": 12550
+        },
+        {
+          "x": 13650,
+          "y": 12550
+        },
+        {
+          "x": 12950,
+          "y": 12400
+        },
+        {
+          "x": 12550,
+          "y": 12650
+        },
+        {
+          "x": 12100,
+          "y": 12650
+        },
+        {
+          "x": 11050,
+          "y": 13700
+        },
+        {
+          "x": 10950,
+          "y": 14100
+        },
+        {
+          "x": 10350,
+          "y": 14050
+        },
+        {
+          "x": 9300,
+          "y": 14150
+        },
+        {
+          "x": 8450,
+          "y": 13400
+        },
+        {
+          "x": 7650,
+          "y": 13400
+        },
+        {
+          "x": 7590,
+          "y": 13468
+        }
+      ],
+      "force": 1
+    },
+    {
+      "id": "G2",
+      "kind": "area",
+      "name": "OBJ CALLOWAY",
+      "points": [
+        {
+          "x": 7590,
+          "y": 14368
+        },
+        {
+          "x": 8226,
+          "y": 14104
+        },
+        {
+          "x": 8490,
+          "y": 13468
+        },
+        {
+          "x": 8226,
+          "y": 12832
+        },
+        {
+          "x": 7590,
+          "y": 12568
+        },
+        {
+          "x": 6954,
+          "y": 12832
+        },
+        {
+          "x": 6690,
+          "y": 13468
+        },
+        {
+          "x": 6954,
+          "y": 14104
+        }
+      ],
+      "force": 1
+    },
+    {
+      "id": "G3",
+      "kind": "phaseLine",
+      "name": "PL AMBER",
+      "points": [
+        {
+          "x": 2000,
+          "y": 9000
+        },
+        {
+          "x": 15500,
+          "y": 9000
+        }
+      ],
+      "force": 1
+    },
+    {
+      "id": "G4",
+      "kind": "route",
+      "name": "Route SUPPLY",
+      "points": [
+        {
+          "x": 11236,
+          "y": 14276
+        },
+        {
+          "x": 10900,
+          "y": 14100
+        },
+        {
+          "x": 10350,
+          "y": 14050
+        },
+        {
+          "x": 9300,
+          "y": 14150
+        },
+        {
+          "x": 8450,
+          "y": 13400
+        },
+        {
+          "x": 7650,
+          "y": 13400
+        },
+        {
+          "x": 7590,
+          "y": 13468
+        }
+      ],
+      "force": 2
+    },
+    {
+      "id": "G5",
+      "kind": "route",
+      "name": "Apache Screen",
+      "points": [
+        {
+          "x": 9500,
+          "y": 6000
+        },
+        {
+          "x": 12500,
+          "y": 8000
+        },
+        {
+          "x": 9500,
+          "y": 10000
+        },
+        {
+          "x": 6500,
+          "y": 8000
+        },
+        {
+          "x": 9500,
+          "y": 6000
+        }
+      ],
+      "force": 1
+    },
+    {
+      "id": "G6",
+      "kind": "route",
+      "name": "Civil Traffic",
+      "points": [
+        {
+          "x": 13791,
+          "y": 6777
+        },
+        {
+          "x": 11900,
+          "y": 4850
+        },
+        {
+          "x": 11850,
+          "y": 4300
+        },
+        {
+          "x": 10866,
+          "y": 3389
+        }
+      ],
+      "force": 3
+    }
+  ]
+}
