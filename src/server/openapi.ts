@@ -113,6 +113,7 @@ export function buildOpenApi(baseUrl: string): Schema {
               morale: { type: 'boolean', description: 'units become shaken and break under losses and fire' },
               fuel: { type: 'boolean', description: 'vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down' },
               orderDelay: { type: 'boolean', description: 'orders take time to pass down the chain of command: 5 s for an entity, 15 s a section, 30 s a platoon, 60 s a company (off by default)' },
+              curvature: { type: 'boolean', description: 'earth curvature and refraction (k = 4/3) in line of sight and radar horizon, beyond 2 km' },
             },
           }),
         }),

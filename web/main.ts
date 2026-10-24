@@ -811,6 +811,7 @@ class App {
       box('suppression', 'Suppression', 'Incoming fire makes targets less accurate, slower to fire and spot; infantry get pinned down'),
       box('morale', 'Morale', 'Units become shaken and break under losses and fire, then rally'),
       box('orderDelay', 'Order delay', 'Orders take time to reach units: about 5 s for an entity, 15 s a section, 30 s a platoon, 60 s a company; orders to a superior pass down level by level'),
+      box('curvature', 'Earth curvature', 'Long sight lines and radar are blocked by the curve of the earth (with standard refraction): two people with eyes 2 m up cannot see each other beyond about 12 km over flat ground'),
       box('fuel', 'Fuel', 'Vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down. Supply trucks refuel and rearm.'),
       h('h4', { text: 'Time and weather (at the scenario start)' }),
       h(

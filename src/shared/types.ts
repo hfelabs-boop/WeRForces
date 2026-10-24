@@ -516,6 +516,8 @@ export interface SimulationRules {
   fuel?: boolean;
   /** Orders take time to pass down the chain of command (by echelon). Off by default. */
   orderDelay?: boolean;
+  /** Earth curvature and atmospheric refraction in line of sight and radar horizon (k = 4/3). */
+  curvature?: boolean;
 }
 
 /** An order on its way to an entity or unit (rules.orderDelay). */

@@ -61,7 +61,7 @@ import { Life } from './life.js';
 import { Ew, JAMMED_ORDER_DELAY } from './ew.js';
 
 export const DEFAULT_DT = 0.1;
-export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
+export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false, curvature: true };
 
 /** Seconds for an order to reach and be acted on, by echelon (rules.orderDelay). */
 const ORDER_DELAY: Record<UnitTemplate['echelon'] | 'entity', number> = { entity: 5, team: 10, flight: 10, section: 15, platoon: 30, company: 60, group: 60 };
@@ -192,6 +192,7 @@ export class Engine {
     this.baseCatalog = opts.catalog ?? DEFAULT_CATALOG;
     this.catalog = new CatalogIndex(this.baseCatalog);
     this.terrain = opts.terrain ?? Terrain.generate();
+    this.terrain.curvature = this.rules.curvature;
     this.rng = new Rng(opts.seed ?? this.terrain.spec.seed);
   }
 
@@ -1085,6 +1086,7 @@ export class Engine {
   setRules(rules: SimulationRules): void {
     for (const k of Object.keys(DEFAULT_RULES) as (keyof SimulationRules)[]) if (typeof rules[k] === 'boolean') this.rules[k] = rules[k]!;
     if (!this.rules.suppression) for (const e of this.entities.values()) e.suppression = 0;
+    this.terrain.curvature = this.rules.curvature;
   }
 
   /** Change the time of day and weather. `time` is the time of day at the scenario's start. */
@@ -1378,9 +1380,14 @@ export class Engine {
     for (const r of s.entities ?? []) {
       const e = this.entities.get(r.id)!;
       if (e.destroyed || e.embarkedIn) continue;
-      if (r.plan) {
+      // A checkpoint without a plan position: the plan was dropped (broke or withdrew); keep its task.
+      const dropped = !!r.plan && !!r.state && r.state.planIndex === undefined;
+      if (r.plan && !dropped) {
         this.assignPlan(r.id, r.plan);
         if (r.state?.planIndex !== undefined) e.plan!.resume(r.state.planIndex, r.state.taskState);
+      } else if (dropped) {
+        e.assignedPlan = r.plan;
+        if (r.state?.taskState) this.assignTask(r.id, r.state.taskState, false);
       } else if (r.task && !r.state?.taskDone) {
         this.assignTask(r.id, r.state?.taskState ?? r.task, false);
         e.assignedTask = r.task;
@@ -1392,9 +1399,13 @@ export class Engine {
     for (const u of s.units ?? []) {
       const unit = this.units.get(u.id)!;
       if (!unit.leader) continue;
-      if (u.plan) {
+      const dropped = !!u.plan && !!u.state && u.state.planIndex === undefined;
+      if (u.plan && !dropped) {
         this.assignPlan(u.id, u.plan);
         if (u.state?.planIndex !== undefined) unit.plan!.resume(u.state.planIndex, u.state.taskState);
+      } else if (dropped) {
+        unit.assignedPlan = u.plan;
+        if (u.state?.taskState) this.assignTask(u.id, u.state.taskState, false);
       } else if (u.task && !u.state?.taskDone) {
         this.assignTask(u.id, u.state?.taskState ?? u.task, false);
         unit.assignedTask = u.task;

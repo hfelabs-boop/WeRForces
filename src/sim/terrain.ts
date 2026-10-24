@@ -39,6 +39,22 @@ export interface TerrainLayers {
   landCover?: Uint8Array | null;
   buildings?: Building[];
 }
+/** Earth radius in metres. */
+export const EARTH_RADIUS = 6371000;
+/** Refraction coefficient: standard atmospheric refraction bends sight lines (and radar) round the earth as if it were 4/3 its size. */
+export const REFRACTION_K = 4 / 3;
+/** Below this range the earth's curvature lowers a sight line by under 6 cm, and is left out. */
+export const CURVATURE_MIN_RANGE = 2000;
+
+/**
+ * How far the earth's curvature (with refraction) drops a point at distance d below the
+ * observer's horizontal: d² / (2kR). A sight line of length d then clears the ground by
+ * curvatureDrop(d) * t * (1 - t) less at fraction t along it than on a flat earth.
+ */
+export function curvatureDrop(d: number): number {
+  return (d * d) / (2 * REFRACTION_K * EARTH_RADIUS);
+}
+
 /** Line-of-sight samples checked against the coarse obstacle grid at a time. */
 const LOS_CHUNK = 8;
 /** Posts per side of a coarse obstacle-height block. */
@@ -108,6 +124,8 @@ export class Terrain extends TerrainGrid {
   private readonly costGrids = new Map<string, Float32Array>();
 
   readonly buildings: Building[];
+  /** Earth curvature and refraction in line of sight (the engine sets it from rules.curvature). */
+  curvature = true;
   /** Per post: fraction (0-100) of the cell covered by buildings, and their mean height in metres. */
   private readonly urbanCover: Uint8Array | null;
   private readonly urbanHeight: Uint8Array | null;
@@ -421,6 +439,7 @@ export class Terrain extends TerrainGrid {
     const stepLen = d / n;
     let underCanopy = 0;
     let amongBuildings = 0;
+    const bulge = this.bulge(d);
     const tops = this.obstacleTops();
     const cs = this.spec.cellSize;
     const cols = this.cols;
@@ -431,7 +450,7 @@ export class Terrain extends TerrainGrid {
       // neither terrain nor canopy can touch it, so the result is exactly the same.
       if ((k - 1) % LOS_CHUNK === 0) {
         const k1 = Math.min(n - 1, k + LOS_CHUNK - 1);
-        if (this.clearAbove(a, b, k / n, k1 / n, tops)) {
+        if (this.clearAbove(a, b, k / n, k1 / n, tops, bulge)) {
           k = k1;
           continue;
         }
@@ -439,7 +458,7 @@ export class Terrain extends TerrainGrid {
       const t = k / n;
       const x = a.x + (b.x - a.x) * t;
       const y = a.y + (b.y - a.y) * t;
-      const z = a.z + (b.z - a.z) * t;
+      const z = a.z + (b.z - a.z) * t - bulge * t * (1 - t);
       // Inlined surfaceHeight(x, y): the same arithmetic as TerrainGrid.elevation.
       const fx = Math.min(Math.max(x / cs, 0), maxF);
       const fy = Math.min(Math.max(y / cs, 0), maxF);
@@ -477,11 +496,12 @@ export class Terrain extends TerrainGrid {
     const stepLen = d / n;
     let underCanopy = 0;
     let amongBuildings = 0;
+    const bulge = this.bulge(d);
     for (let k = 1; k < n; k++) {
       const t = k / n;
       const x = a.x + (b.x - a.x) * t;
       const y = a.y + (b.y - a.y) * t;
-      const z = a.z + (b.z - a.z) * t;
+      const z = a.z + (b.z - a.z) * t - bulge * t * (1 - t);
       const ground = this.surfaceHeight(x, y);
       const at = { x: Math.round(x), y: Math.round(y) };
       if (ground > z) return { cause: 'terrain', ...at };
@@ -523,14 +543,24 @@ export class Terrain extends TerrainGrid {
     return this.tops;
   }
 
+  /**
+   * Curvature term for a sight line of length d: the line is lowered by bulge * t * (1 - t)
+   * at fraction t (0 when the rule is off or the line is short).
+   */
+  protected bulge(d: number): number {
+    return this.curvature && d > CURVATURE_MIN_RANGE ? curvatureDrop(d) : 0;
+  }
+
   /** True when the sight line between fractions t0..t1 of a-b is above every obstacle beneath it. */
-  private clearAbove(a: Vec3, b: Vec3, t0: number, t1: number, tops: { cols: number; max: Float32Array }): boolean {
+  private clearAbove(a: Vec3, b: Vec3, t0: number, t1: number, tops: { cols: number; max: Float32Array }, bulge: number): boolean {
     const cs = this.spec.cellSize;
     const xa = a.x + (b.x - a.x) * t0;
     const xb = a.x + (b.x - a.x) * t1;
     const ya = a.y + (b.y - a.y) * t0;
     const yb = a.y + (b.y - a.y) * t1;
-    const zMin = Math.min(a.z + (b.z - a.z) * t0, a.z + (b.z - a.z) * t1);
+    // The lowest the line gets here: the lower end, less the most curvature takes off in the stretch.
+    const tm = Math.min(Math.max(0.5, t0), t1);
+    const zMin = Math.min(a.z + (b.z - a.z) * t0, a.z + (b.z - a.z) * t1) - bulge * tm * (1 - tm);
     // Posts that can influence samples in this stretch (bilinear corners and nearest post).
     const c0 = Math.max(0, Math.floor(Math.min(xa, xb) / cs));
     const c1 = Math.min(this.cols - 1, Math.ceil(Math.max(xa, xb) / cs));
