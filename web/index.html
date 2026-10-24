@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WeRForces</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header id="toolbar">
+      <div class="brand">WeRForces</div>
+      <div class="menu">
+        <button id="btn-file">File ▾</button>
+        <div class="menu-items" id="menu-file">
+          <button data-action="new">New scenario</button>
+          <button data-action="open-sample">Open scenario…</button>
+          <button data-action="import">Import from file…</button>
+          <button data-action="export">Export to file</button>
+          <button data-action="save-server">Save on server…</button>
+        </div>
+      </div>
+      <span id="scenario-name" class="scenario-name">—</span>
+      <div class="sep"></div>
+      <div class="sim-controls">
+        <button id="btn-rewind" title="Rewind to scenario start">⏮</button>
+        <button id="btn-run" class="primary" title="Run / pause (Space)">▶ Run</button>
+        <button id="btn-step" title="Step 1 s">⏭</button>
+        <select id="sel-speed" title="Time multiplier">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+          <option value="8">8×</option>
+          <option value="16">16×</option>
+          <option value="32">32×</option>
+        </select>
+        <span id="sim-time" class="sim-time">00:00:00</span>
+      </div>
+      <div class="sep"></div>
+      <div class="tools" id="draw-tools">
+        <button data-draw="route" title="Draw route">Route</button>
+        <button data-draw="area" title="Draw area">Area</button>
+        <button data-draw="phaseLine" title="Draw phase line">Phase line</button>
+        <button data-draw="point" title="Place point">Point</button>
+      </div>
+      <div class="sep"></div>
+      <div class="layers">
+        <label><input type="checkbox" data-layer="labels" checked /> Labels</label>
+        <label><input type="checkbox" data-layer="grid" checked /> Grid</label>
+        <label><input type="checkbox" data-layer="contacts" checked /> Contacts</label>
+        <label><input type="checkbox" data-layer="ranges" /> Ranges</label>
+        <label><input type="checkbox" data-layer="paths" checked /> Paths</label>
+        <select id="sel-aggregate" title="Unit display">
+          <option value="auto">Units: auto</option>
+          <option value="units">Units: aggregate</option>
+          <option value="entities">Units: entities</option>
+        </select>
+      </div>
+      <div class="spacer"></div>
+      <span id="dis-status" class="pill">DIS off</span>
+      <span id="conn-status" class="pill bad">offline</span>
+    </header>
+
+    <main>
+      <aside id="left">
+        <nav class="tabs">
+          <button data-tab="create" class="active">Create</button>
+          <button data-tab="objects">Objects</button>
+        </nav>
+        <section id="tab-create" class="tab active">
+          <div class="force-select">
+            <label>Force</label>
+            <div class="seg" id="force-seg">
+              <button data-force="1" class="active blue">Blue</button>
+              <button data-force="2" class="red">Red</button>
+              <button data-force="3" class="neutral">Neutral</button>
+            </div>
+          </div>
+          <input id="palette-filter" type="search" placeholder="Filter…" />
+          <div id="palette"></div>
+        </section>
+        <section id="tab-objects" class="tab">
+          <input id="objects-filter" type="search" placeholder="Filter…" />
+          <div id="objects"></div>
+        </section>
+      </aside>
+
+      <div id="map-wrap">
+        <div id="map"></div>
+        <div id="cursor-readout"></div>
+      </div>
+
+      <aside id="right">
+        <div id="inspector"><p class="hint">Select an entity, unit or graphic on the map.</p></div>
+      </aside>
+    </main>
+
+    <footer id="log-wrap">
+      <div class="log-head">
+        <strong>Event log</strong>
+        <label><input type="checkbox" data-log="fire" /> fire</label>
+        <label><input type="checkbox" data-log="detonation" checked /> detonations</label>
+        <label><input type="checkbox" data-log="destroyed" checked /> kills</label>
+        <label><input type="checkbox" data-log="damaged" checked /> damage</label>
+        <label><input type="checkbox" data-log="detected" checked /> detections</label>
+        <label><input type="checkbox" data-log="task" checked /> tasks</label>
+        <label><input type="checkbox" data-log="info" checked /> info</label>
+        <label><input type="checkbox" data-log="created" /> created/deleted</label>
+        <span class="spacer"></span>
+        <span id="score"></span>
+      </div>
+      <div id="log"></div>
+    </footer>
+
+    <div id="context-menu" class="context-menu hidden"></div>
+    <div id="modal" class="modal hidden"><div class="modal-body" id="modal-body"></div></div>
+    <div id="toast" class="toast hidden"></div>
+    <input type="file" id="file-input" accept=".json,application/json" hidden />
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
