@@ -550,6 +550,24 @@ export interface Explanation {
   unit?: Finding[];
 }
 
+export type AlertKind = 'taskFailed' | 'idle' | 'broken' | 'outOfFuel' | 'lowFuel' | 'outOfAmmo' | 'leaderLost' | 'losses' | 'underFire' | 'contact';
+
+/** Something that needs the operator's attention: a unit idle, broken, out of fuel... */
+export interface Alert {
+  id: string;
+  kind: AlertKind;
+  severity: 'critical' | 'warning' | 'info';
+  /** The unit or entity it is about. */
+  objectId: string;
+  force: ForceId;
+  text: string;
+  /** Simulation time it was raised (or last raised again). */
+  time: number;
+  /** How many times it was raised while open (e.g. losses). */
+  count: number;
+  acknowledged?: boolean;
+}
+
 // ---------------------------------------------------------------- runtime snapshots
 
 export interface EntitySnapshot {
@@ -671,6 +689,8 @@ export interface SimState {
   history?: { undo: number; redo: number };
   /** Share of wall-clock time the server spends simulating (near 1: it cannot keep up with the time scale). */
   load?: number;
+  /** Open alerts, newest first. */
+  alerts?: Alert[];
   /** Plan steps waiting for a set time, soonest first (for the timeline). */
   schedule?: { targetId: string; time: number; text: string }[];
   dis?: DisStatus;
@@ -728,6 +748,8 @@ export type Command =
   | { cmd: 'assignPlan'; targetId: string; plan: Plan }
   | { cmd: 'stop'; targetId: string }
   | { cmd: 'setRoe'; targetId: string; roe: Roe }
+  /** Acknowledge an alert, or all of them (players: their own force's). */
+  | { cmd: 'ackAlert'; id?: string; all?: boolean }
   | { cmd: 'setReactions'; targetId: string; reactions: Reactions }
   /** Put infantry (entity or unit) into a carrier (entity or unit) instantly, e.g. when setting up a scenario. */
   | { cmd: 'embark'; passengerId: string; carrierId: string }

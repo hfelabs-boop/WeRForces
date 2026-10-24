@@ -52,6 +52,7 @@ import { SpatialIndex } from './spatial.js';
 import { createTask, MountTask, type Task, type TaskStatus } from './tasks.js';
 import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
 import { formationOffset, perMemberTask, splitOrder, Unit } from './units.js';
+import { Alerts } from './alerts.js';
 
 export const DEFAULT_DT = 0.1;
 export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
@@ -140,6 +141,8 @@ export class Engine {
   readonly threats = new ThreatMap(this);
   readonly graphics = new Map<string, Graphic>();
   readonly listeners: EngineListeners = { event: [], fire: [], detonation: [], removed: [], reset: [], step: [] };
+  /** Things the operator should look at (idle, broken, out of fuel...). Read-only toward the simulation. */
+  readonly alerts: Alerts = new Alerts(this);
 
   private hostilities = new Set<string>(['1-2']);
   private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
@@ -1138,6 +1141,7 @@ export class Engine {
       checkCallsForFire(this);
       updateMorale(this);
       updateResupply(this);
+      this.alerts.update();
     }
     for (const e of this.entities.values()) updateCombat(this, e);
     this.processImpacts();
@@ -1561,6 +1565,7 @@ export class Engine {
         ? this.pendingOrders.map((o) => ({ targetId: o.targetId, text: this.describeOrder(o), due: o.due }))
         : undefined,
       schedule: this.schedule(),
+      alerts: this.alerts.open().slice(0, 50),
     };
   }
 

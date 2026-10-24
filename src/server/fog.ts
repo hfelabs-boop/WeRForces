@@ -69,9 +69,10 @@ export function filterState(engine: Engine, s: SimState, force: ForceId): SimSta
     units: s.units.filter((u) => u.force === force),
     // Obstacles can be seen; an enemy minefield only once this force knows about it.
     graphics: s.graphics.filter((g) => g.force === force || g.force === 0 || g.kind === 'obstacle' || (g.kind === 'minefield' && (g.knownBy ?? []).includes(force))),
-    // Orders and plan timings only for this force's own units and entities.
+    // Orders, plan timings and alerts only for this force's own units and entities.
     orders: s.orders?.filter((o) => forceOf(engine, o.targetId) === force),
     schedule: s.schedule?.filter((o) => forceOf(engine, o.targetId) === force),
+    alerts: s.alerts?.filter((a) => a.force === force),
     dis: undefined,
   };
 }
@@ -136,6 +137,7 @@ const PLAYER_COMMANDS = new Set<Command['cmd']>([
   'deleteObject',
   'embark',
   'disembark',
+  'ackAlert',
 ]);
 
 /**
@@ -212,6 +214,10 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
       return;
     case 'disembark':
       ownObject(c.carrierId, 'carrier');
+      return;
+    case 'ackAlert':
+      // Players acknowledge their own force's alerts only.
+      (c as { force?: ForceId }).force = force;
       return;
   }
 }

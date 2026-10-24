@@ -251,6 +251,7 @@ class App {
     clock.classList.toggle('behind', behind);
     clock.title = behind ? `The server is busy ${Math.round((s.load ?? 0) * 100)}% of the time: the simulation runs slower than ${s.timeScale}x` : 'Simulation time';
     this.renderEnvironment(s.environment);
+    this.renderAlerts();
     $('#scenario-name').textContent = s.scenarioName;
     const run = $('#btn-run');
     run.textContent = s.running ? '⏸ Pause' : '▶ Run';
@@ -416,7 +417,15 @@ class App {
       layersMenu.classList.toggle('open');
     });
     layersMenu.querySelector('.menu-items')!.addEventListener('click', (e) => e.stopPropagation());
+    const alertsMenu = $('#alerts-menu');
+    $('#btn-alerts').addEventListener('click', (e) => {
+      e.stopPropagation();
+      alertsMenu.classList.toggle('open');
+      this.renderAlerts(true);
+    });
+    $('#alerts-list').addEventListener('click', (e) => e.stopPropagation());
     document.addEventListener('click', () => {
+      alertsMenu.classList.remove('open');
       layersMenu.classList.remove('open');
       fileMenu.classList.remove('open');
       $('#context-menu').classList.add('hidden');
@@ -503,7 +512,68 @@ class App {
       }
       if (e.key === 'f' && this.selectedId) this.centerOn(this.selectedId);
       if (e.key === 'm' && !e.ctrlKey && !e.metaKey) this.map.setMode({ kind: 'measure', points: [] });
+      if (e.key === 'n' && !e.ctrlKey && !e.metaKey) this.nextAlert();
     });
+  }
+
+  // ------------------------------------------------------------ alerts
+
+  /** Alerts already toasted, so each critical one pops up once. */
+  private alertsToasted = new Set<string>();
+  private alertsPrimed = false;
+  private alertsKey = '';
+  private alertCursor = 0;
+
+  /** Badge, list and pop-ups for the attention queue. */
+  private renderAlerts(force = false): void {
+    const alerts = this.state?.alerts ?? [];
+    const count = $('#alerts-count');
+    count.textContent = String(alerts.length);
+    count.classList.toggle('hidden', alerts.length === 0);
+    count.classList.toggle('critical', alerts.some((a) => a.severity === 'critical'));
+    // Critical alerts pop up once, except those already open when the page loaded.
+    for (const a of alerts) {
+      if (a.severity !== 'critical' || this.alertsToasted.has(a.id)) continue;
+      this.alertsToasted.add(a.id);
+      if (this.alertsPrimed) this.toast(`⚠ ${a.text}`);
+    }
+    this.alertsPrimed = true;
+    const key = alerts.map((a) => `${a.id}:${a.count}:${a.text}`).join('|');
+    if (!force && key === this.alertsKey) return;
+    this.alertsKey = key;
+    const list = $('#alerts-list');
+    clear(list);
+    if (!alerts.length) {
+      list.append(h('div', { class: 'hint alert-empty', text: 'Nothing needs your attention.' }));
+      return;
+    }
+    list.append(
+      h('div', { class: 'alerts-head' }, h('span', { class: 'hint', text: `${alerts.length} open · N: next` }), h('button', { class: 'small', text: 'Acknowledge all', onclick: () => void this.cmd({ cmd: 'ackAlert', all: true }) })),
+      ...alerts.map((a) =>
+        h(
+          'div',
+          { class: `alert-row sev-${a.severity}`, title: 'Select and centre' },
+          h('span', { class: 'alert-time', text: fmtTime(a.time) }),
+          h('span', { class: 'alert-text', text: `${a.text}${a.count > 1 ? ` (×${a.count})` : ''}`, onclick: () => this.focusAlert(a.objectId) }),
+          h('button', { class: 'small', text: '✓', title: 'Acknowledge', onclick: () => void this.cmd({ cmd: 'ackAlert', id: a.id }) }),
+        ),
+      ),
+    );
+  }
+
+  private focusAlert(objectId: string): void {
+    if (!this.exists(objectId)) return;
+    this.select(objectId);
+    this.centerOn(objectId);
+  }
+
+  /** Jump to the next open alert (N). */
+  private nextAlert(): void {
+    const alerts = this.state?.alerts ?? [];
+    if (!alerts.length) return this.toast('No alerts', true);
+    const a = alerts[this.alertCursor++ % alerts.length];
+    this.focusAlert(a.objectId);
+    this.toast(a.text, true);
   }
 
   private startDraw(kind: GraphicKind): void {

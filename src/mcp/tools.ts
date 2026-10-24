@@ -126,16 +126,18 @@ export function createMcpServer(call: ApiCaller): McpServer {
     'Overview of the simulation: scenario, time, running state, strength per force, terrain size and towns, units and tactical graphics. Call this first.',
     {},
     async () => {
-      const [sim, units, graphics] = await Promise.all([
+      const [sim, units, graphics, alerts] = await Promise.all([
         api<Record<string, unknown>>('GET', '/api/v1/simulation'),
         api<{ id: string; name: string; force: number; echelon: string; formation: string; leaderId?: string; memberIds: string[]; x: number; y: number; task?: string; plan?: string }[]>('GET', '/api/v1/units'),
         api<{ id: string; name: string; kind: string; force: number; points: unknown[] }[]>('GET', '/api/v1/graphics'),
+        api<{ severity: string; text: string }[]>('GET', '/api/v1/alerts'),
       ]);
       return {
         ...sim,
         time: `${fmtTime(sim.time as number)} (${Math.round(sim.time as number)} s)`,
         units: units.map((u) => ({ id: u.id, name: u.name, force: u.force, echelon: u.echelon, members: u.memberIds.length, leader: u.leaderId, x: Math.round(u.x), y: Math.round(u.y), activity: u.plan ?? u.task ?? 'idle' })),
         graphics: graphics.map((g) => ({ id: g.id, name: g.name, kind: g.kind, force: g.force, points: g.points.length })),
+        alerts: alerts.length ? `${alerts.length} open (get_alerts): ${alerts.slice(0, 3).map((a) => a.text).join('; ')}` : 'none',
       };
     },
     { readOnlyHint: true },
@@ -188,6 +190,17 @@ export function createMcpServer(call: ApiCaller): McpServer {
       return { summary: ex.summary, activity: ex.activity, ...(ex.unit ? { unit: brief(ex.unit) } : {}), movement: brief(ex.movement), fire: brief(ex.fire), sensing: brief(ex.sensing) };
     },
     { readOnlyHint: true },
+  );
+
+  tool(
+    'get_alerts',
+    'The attention queue: what needs looking at now (units idle after finishing their orders, broken, out of fuel or ammunition, leader lost, losses, failed tasks, under fire, first contact), newest first. Pass acknowledge: true to clear them once handled.',
+    { acknowledge: z.boolean().optional().describe('Acknowledge all open alerts after reading them') },
+    async ({ acknowledge }) => {
+      const list = await api<{ id: string; kind: string; severity: string; objectId: string; text: string; time: number; count: number }[]>('GET', '/api/v1/alerts');
+      if (acknowledge && list.length) await api('POST', '/api/v1/alerts/acknowledge');
+      return list.map((a) => ({ id: a.id, severity: a.severity, kind: a.kind, about: a.objectId, text: a.text, time: fmtTime(a.time), ...(a.count > 1 ? { times: a.count } : {}) }));
+    },
   );
 
   tool(

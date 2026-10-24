@@ -197,7 +197,7 @@ export function validatePlan(v: unknown): Plan {
 }
 
 /** Commands that do not change the scenario, so are not undone. */
-const NOT_EDITS = new Set(['run', 'pause', 'step', 'setTimeScale', 'undo', 'redo']);
+const NOT_EDITS = new Set(['run', 'pause', 'step', 'setTimeScale', 'undo', 'redo', 'ackAlert']);
 
 export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
   const cmd = raw && typeof raw === 'object' ? (raw as { cmd?: unknown }).cmd : undefined;
@@ -324,6 +324,18 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
       case 'setRoe':
         engine.setRoe(str(c.targetId, 'targetId'), roe(c.roe));
         return;
+      case 'ackAlert': {
+        const force = (c as { force?: ForceId }).force;
+        if (c.all) {
+          engine.alerts.acknowledgeAll(force);
+          return;
+        }
+        const id = str(c.id, 'id');
+        const a = engine.alerts.all().find((x) => x.id === id);
+        if (!a || (force !== undefined && a.force !== force)) throw new ValidationError(`unknown alert ${id}`);
+        engine.alerts.acknowledge(id);
+        return;
+      }
       case 'setReactions':
         engine.setReactions(str(c.targetId, 'targetId'), validateReactions(c.reactions));
         return;

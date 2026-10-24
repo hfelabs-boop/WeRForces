@@ -45,6 +45,14 @@ Why an entity or unit is or is not moving, shooting or seeing the enemy: blocker
 | --- | --- | --- | --- |
 | `id` | string | yes | Entity or unit id |
 
+## `get_alerts`
+
+The attention queue: what needs looking at now (units idle after finishing their orders, broken, out of fuel or ammunition, leader lost, losses, failed tasks, under fire, first contact), newest first. Pass acknowledge: true to clear them once handled.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `acknowledge` | boolean |  | Acknowledge all open alerts after reading them |
+
 ## `get_unit` _(read-only)_
 
 Details of a unit and its members.

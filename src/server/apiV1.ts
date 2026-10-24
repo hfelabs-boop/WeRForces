@@ -52,6 +52,8 @@ const PLAYER_ROUTES: [string, RegExp][] = [
   ['GET', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
   ['GET', /^\/api\/v1\/entities\/[^/]+\/path\/?$/],
   ['GET', /^\/api\/v1\/(entities|units)\/[^/]+\/explain\/?$/],
+  ['GET', /^\/api\/v1\/alerts\/?$/],
+  ['POST', /^\/api\/v1\/alerts\/([^/]+\/)?acknowledge\/?$/],
   ['POST', /^\/api\/v1\/(entities|units)\/[^/]+\/(task|plan|stop|embark|disembark)\/?$/],
   ['POST', /^\/api\/v1\/(graphics|terrain\/line-of-sight|terrain\/route)\/?$/],
   ['PATCH', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
@@ -148,6 +150,12 @@ export class ApiV1 {
     const u = this.state().units.find((x) => x.id === id);
     if (!u) throw new HttpError(404, `unknown unit ${id}`);
     return u;
+  }
+
+  /** Open alerts the caller may see. */
+  private alertsView() {
+    const list = this.engine.alerts.open();
+    return this.role.kind === 'player' ? list.filter((a) => a.force === (this.role as { force: ForceId }).force) : list;
   }
 
   private weaponName(id: string): string {
@@ -557,6 +565,14 @@ export class ApiV1 {
     });
 
     // ---------------------------------------------------------------- events
+    r.get(`${P}/alerts`, (req) => {
+      const all = req.query.get('all') === 'true' || req.query.get('all') === '1';
+      let list = all ? this.engine.alerts.all() : this.engine.alerts.open();
+      if (this.role.kind === 'player') list = list.filter((a) => a.force === (this.role as { force: ForceId }).force);
+      return { json: list };
+    });
+    r.post(`${P}/alerts/acknowledge`, () => (this.run({ cmd: 'ackAlert', all: true }), { json: this.alertsView() }));
+    r.post(`${P}/alerts/{id}/acknowledge`, (req) => (this.run({ cmd: 'ackAlert', id: req.params.id }), { json: this.alertsView() }));
     r.get(`${P}/events`, (req) => {
       const since = Number(req.query.get('since') ?? 0) || 0;
       const kinds = req.query.get('kinds')?.split(',').filter(Boolean) as SimEventKind[] | undefined;

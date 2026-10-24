@@ -1146,3 +1146,70 @@ body.player [data-controller-only] {
   color: var(--good);
   margin-top: 2px;
 }
+
+/* Alerts (attention queue) */
+.badge {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--warn);
+  color: #111;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+.badge.critical {
+  background: var(--bad);
+  color: #fff;
+}
+.badge.hidden {
+  display: none;
+}
+.menu-items.alerts {
+  width: min(440px, calc(100vw - 24px));
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.alerts-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 4px 6px;
+}
+.alerts-head button {
+  width: auto;
+}
+.alert-row {
+  display: grid;
+  grid-template-columns: 62px 1fr auto;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 6px;
+  border-left: 3px solid var(--border);
+  margin: 2px 0;
+  font-size: 12px;
+}
+.alert-row.sev-critical {
+  border-left-color: var(--bad);
+}
+.alert-row.sev-warning {
+  border-left-color: var(--warn);
+}
+.alert-row .alert-time {
+  color: var(--muted);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+.alert-row .alert-text {
+  cursor: pointer;
+}
+.alert-row .alert-text:hover {
+  text-decoration: underline;
+}
+.alert-row button {
+  width: auto;
+  padding: 2px 8px;
+}
+.alert-empty {
+  padding: 8px;
+}
