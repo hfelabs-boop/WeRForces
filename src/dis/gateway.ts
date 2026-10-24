@@ -390,7 +390,7 @@ export class DisGateway {
   }
 
   private radioType(e: Entity) {
-    return { kind: 7, domain: e.type.dis.domain, country: e.type.dis.country, category: 0, nomenclatureVersion: 0, nomenclature: 0 };
+    return { kind: 7, domain: e.type.dis.domain, country: e.type.dis.country, category: 0, subcategory: 0, specific: 0, extra: 0 };
   }
 
   private sendTransmitter(e: Entity, state: number): void {

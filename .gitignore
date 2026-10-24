@@ -9,3 +9,4 @@ playwright-report/
 .claude/worktrees/
 hla/vendor/
 hla/build/
+vendor-test/
