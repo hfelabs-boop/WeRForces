@@ -19,6 +19,15 @@ Monte Carlo statistics, and the after-action review exports to CSV and PDF. One
 server can host several exercises, with sign-in through any OpenID Connect
 provider.
 
+For the operator there are typed orders with completions, a quick-task bar, an
+attention queue of alerts, a *Why?* explanation of what each unit is doing and
+what stops it, travel estimates, viewsheds, and direct control of a single
+vehicle. Plans have if/else, repeat-while and codewords, and a synchronization
+matrix runs a force's operation in phases. The model adds electronic warfare
+(radio and radar jammers) and background civilian traffic. A quick battle
+wizard builds a ready-to-run scenario from a few choices, and a catalog editor
+makes new vehicle variants in the GUI.
+
 It also connects to other systems:
 
 - a versioned **REST API** with an OpenAPI spec;
@@ -37,6 +46,53 @@ It also connects to other systems:
 
 ![Calloway Crossroads scenario, 2D](docs/images/screenshot-2d.png)
 ![Calloway Crossroads scenario, 3D](docs/images/screenshot-3d.png)
+
+## What's new in v0.5
+
+- **Why?** The inspector explains what an entity or unit is doing and what
+  stops it moving, shooting or seeing (no line of sight and what blocks it, out
+  of range, ROE, out of fuel, pinned, jammed...), with a fix for each. Click a
+  finding to mark the spot on the map. REST `GET /entities/{id}/explain`, MCP
+  `explain`.
+- **Alerts.** An attention queue in the toolbar: units idle after their orders,
+  broken, out of fuel or ammunition, leader lost, losses, failed tasks, first
+  contact, radio jammed. **N** jumps to the next one.
+- **Travel estimates.** Moves show the distance left and the arrival time, in
+  the inspector and at the end of the planned path.
+- **Quick-task bar and typed orders.** One-key orders for the selection
+  (**1**–**9**, **0**, configurable), and an order line (**/**) that takes
+  orders in words with completions: *Team ARMOR move to Calloway covered*.
+  REST `POST /orders`, MCP `give_order`.
+- **Plan control flow.** If/else, repeat-while, *send codeword* and *report*
+  steps; conditions can be combined with all/any/not and wait for a codeword.
+  The plan editor builds nested blocks.
+- **Synchronization matrix.** A force's operation in phases (toolbar
+  **Phases**). Each phase starts by hand, at a time, on a codeword, when the
+  previous phase is done, or on a condition, and gives its units their orders
+  at once.
+- **Viewshed.** What an entity or a point can see, and its dead ground, as a
+  map overlay.
+- **Pattern of life.** Civilian cars on the roads and people in the towns, who
+  run from the fighting.
+- **Electronic warfare.** Jammers (R-330Zh, Krasukha-2, Stryker MFEW) delay
+  orders, cut contact sharing, calls for fire and codewords, and shorten radar
+  range.
+- **Direct control.** Drive a vehicle yourself (**G**, then W/S/A/D) and pick its
+  target (**T**).
+- **Catalog editor.** Make variants and new entity types, weapons, sensors and
+  unit templates in the GUI (File → **Catalog editor…**). They are saved with
+  the scenario.
+- **Quick battle.** File → **Quick battle…** builds a battle from a mission,
+  two forces, support, time and weather, with graphics and a phase plan for
+  each side.
+- **Model changes.** Direct fire leads moving targets and a unit spreads its
+  fire over what it sees. Orders given while paused plan their route at once.
+  A screen falls back before the enemy's direct-fire reach or when it comes
+  under fire. Helicopters resupply in the field. Group orders are one undo
+  step.
+
+[Tutorial 16](docs/tutorials/16-quick-battle-and-command-tools.md) walks
+through them.
 
 ## Documentation
 
@@ -59,7 +115,8 @@ serves it at **`/docs`** (toolbar → **Help**).
   [12 Real terrain](docs/tutorials/12-real-terrain.md) ·
   [13 Obstacles, smoke and breaching](docs/tutorials/13-obstacles-smoke-and-breaching.md) ·
   [14 Night, weather and supply](docs/tutorials/14-night-weather-and-supply.md) ·
-  [15 Command, tactics and analysis](docs/tutorials/15-command-tactics-and-analysis.md)
+  [15 Command, tactics and analysis](docs/tutorials/15-command-tactics-and-analysis.md) ·
+  [16 Quick battle and command tools](docs/tutorials/16-quick-battle-and-command-tools.md)
 - [User guide](docs/user-guide.md) · [Concepts](docs/concepts.md) · [Terrain import](docs/terrain-import.md) · [Deployment](docs/deployment.md) · [Architecture](docs/architecture.md) · [FAQ](docs/faq.md)
 - **Reference:**
   [CLI](docs/reference/cli.md) · [REST API](docs/reference/rest-api.md) ·
@@ -77,6 +134,8 @@ npm start -- --scenario calloway-crossroads      # http://127.0.0.1:8080
 ```
 
 Open the URL, press **Space** (or ▶ Run), and set the time multiplier to 8–16×.
+For a fresh battle, choose File → **Quick battle…**, pick a mission and the two
+forces, and press **Build battle**.
 
 With Docker (`docker compose up -d` adds HTTPS; see [Deployment](docs/deployment.md)):
 
@@ -110,10 +169,14 @@ Useful options (`npm start -- --help` lists all of them):
 | --- | --- |
 | Simulation engine (back-end) | `src/sim/engine.ts`: fixed-step (0.1 s) deterministic engine with seeded RNG |
 | Front-end GUI / scenario editor | `web/`: 2D tactical map, 3D scene view (Three.js), palette, object tree, inspector, plan editor, event log |
-| Simulation Object Model (entity, weapon and sensor parameters) | `src/sim/catalog.ts`: 27 entity types, 26 weapons, 9 sensors, 16 unit templates |
+| Simulation Object Model (entity, weapon and sensor parameters) | `src/sim/catalog.ts`: 35 entity types, 26 weapons, 10 sensors, 23 unit templates; per-scenario additions from the catalog editor (`src/sim/catalogEdit.ts`) |
 | Terrain database | `src/sim/terrain.ts`: procedural terrain, or real terrain imported from GeoTIFF elevation and GeoJSON/OSM features (`src/terrain/`); LOS, mobility and route planning |
 | Tasks | Move to, Follow route, Patrol, Wait, Follow entity, Attack, Orbit, Fire mission, Mount, Dismount, plus internal formation keeping |
-| Plans | Ordered statements: tasks, set ROE/speed/altitude/formation/reactions, *wait until* (time, in area, enemy in area, enemy detected, under fire, strength below, entity destroyed), optional loop |
+| Plans | Ordered statements: tasks, set ROE/speed/altitude/formation/reactions, *wait until* (time, in area, enemy in area, enemy detected, under fire, strength below, entity destroyed, codeword; combined with all/any/not), if/else, repeat-while, send codeword, radio report, optional loop |
+| Global plans / synchronization matrix | `src/sim/sync.ts`: a force's phases, each started by hand, at a time, on a codeword, when the previous phase is done, or on a condition |
+| Electronic warfare | `src/sim/ew.ts`: radio jammers (late orders, no contact sharing, calls for fire or codewords) and radar jammers (shorter radar range) |
+| Pattern of life | `src/sim/life.ts`: neutral civilian cars and pedestrians that keep moving and flee fighting |
+| Direct control of an entity | Drive mode: throttle, turn and target from the keyboard (`manual` task) |
 | Reactive behaviour / ROE | Fire at will, Return fire, Hold fire; halt on contact, withdraw below a strength, call for fire. Automatic target and weapon selection |
 | Indirect fire | Howitzers and mortars: fire missions with sheaf, dispersion and blast effects; automatic call for fire by observers, with danger-close checks |
 | Embarked entities | Infantry riding in IFVs, trucks and helicopters; mount, dismount, losses with the carrier |
@@ -152,9 +215,20 @@ Useful options (`npm start -- --help` lists all of them):
   Three.js only loads the first time you open 3D.
 - **Integrations** (toolbar) shows API and MCP connection snippets, configures
   TAK output and webhooks, and links the GeoJSON/KML feeds.
+- **Typed orders**: press **/** and type an order, e.g. *Team ARMOR move to
+  Calloway covered*; Tab completes names, places and verbs. With something
+  selected, start with the verb.
+- **Quick-task bar**: with something selected, the bar at the bottom of the map
+  gives one-click orders (keys **1**–**9**, **0**); ⚙ chooses the buttons.
+- **Why?** in the inspector says what the selection is doing and what stops it.
+  **Alerts** (toolbar, **N** for the next) lists what needs your attention.
+- **Phases** (toolbar) opens the synchronization matrix. **Viewshed** in the
+  inspector (or *What can be seen from here* in the context menu) shades dead
+  ground red. **Drive** (**G**) puts a vehicle under your direct control.
 - **Layers** menu: labels, grid, sensor contacts (yellow lines; red = engaging),
   weapon and sensor range rings, planned paths, and unit aggregation.
-- Keys: **Space** run/pause, **F** centre on the selection, **Delete** remove it.
+- Keys: **Space** run/pause, **F** centre on the selection, **Delete** remove it,
+  **/** order line, **1**–**0** quick tasks, **N** next alert, **G** drive.
 
 ## Architecture
 
@@ -252,14 +326,16 @@ curl -s 'localhost:8080/api/v1/events?kinds=destroyed,damaged'
 
 | Resource | Endpoints |
 | --- | --- |
-| Simulation | `GET /simulation`; `POST /simulation/run`, `pause`, `rewind`, `step`; `PUT /simulation/time-scale` |
-| Scenario | `GET`/`PUT /scenario`; `POST /scenario/new`; `GET /scenarios`; `GET`/`PUT /scenarios/{name}`; `POST /scenarios/{name}/load` |
-| Catalog | `GET /catalog`, `/catalog/entity-types`, `/catalog/unit-templates` |
-| Entities | `GET`/`POST /entities`; `GET`/`PATCH`/`DELETE /entities/{id}`; `POST /entities/{id}/task`, `plan`, `stop`; `GET /entities/{id}/path` |
-| Units | `GET`/`POST /units` (from a template, or group entities); `GET`/`PATCH`/`DELETE /units/{id}`; `POST /units/{id}/task`, `plan`, `stop` |
+| Simulation | `GET /simulation`; `POST /simulation/run`, `pause`, `rewind`, `step`; `PUT /simulation/time-scale`; `GET`/`PUT /simulation/pattern-of-life` |
+| Scenario | `GET`/`PUT /scenario`; `POST /scenario/new`; `GET`/`POST /scenario/quick-battle`; `GET /scenarios`; `GET`/`PUT /scenarios/{name}`; `POST /scenarios/{name}/load` |
+| Catalog | `GET /catalog`, `/catalog/entity-types`, `/catalog/unit-templates`, `/catalog/custom`; `PUT`/`DELETE /catalog/{section}/{id}` |
+| Entities | `GET`/`POST /entities`; `GET`/`PATCH`/`DELETE /entities/{id}`; `POST /entities/{id}/task`, `plan`, `stop`, `drive`; `GET /entities/{id}/path`, `explain` |
+| Units | `GET`/`POST /units` (from a template, or group entities); `GET`/`PATCH`/`DELETE /units/{id}`; `POST /units/{id}/task`, `plan`, `stop`; `GET /units/{id}/explain` |
+| Orders and phases | `POST /orders` (an order in words); `GET /sync-matrix`; `PUT /sync-matrix/{force}`; `POST /sync-matrix/{force}/phases/{id}/start`; `GET`/`POST /codewords` |
+| Alerts | `GET /alerts`; `POST /alerts/acknowledge`, `/alerts/{id}/acknowledge` |
 | Graphics | `GET`/`POST /graphics`; `GET`/`PATCH`/`DELETE /graphics/{id}` |
 | Events | `GET /events?since=&kinds=&limit=` |
-| Terrain | `GET /terrain`; `GET /terrain/point?x=&y=` (or `lat`/`lon`/`town`); `POST /terrain/line-of-sight`; `POST /terrain/route` |
+| Terrain | `GET /terrain`; `GET /terrain/point?x=&y=` (or `lat`/`lon`/`town`); `POST /terrain/line-of-sight`; `POST /terrain/route`; `POST /terrain/viewshed` |
 | Integrations | `GET /integrations`; `GET`/`PUT /integrations/cot`; `GET`/`POST /webhooks`; `DELETE /webhooks/{id}`; `POST /webhooks/{id}/test` |
 | Export | `GET /export/entities.geojson`, `/export/graphics.geojson`, `/export/scene.kml`, `/export/live.kml` |
 
@@ -303,11 +379,13 @@ Tools:
 
 | Purpose | Tools |
 | --- | --- |
-| Awareness | `get_situation`, `list_entities`, `get_entity`, `get_unit`, `list_catalog`, `get_events`, `query_terrain`, `check_line_of_sight` |
-| Creation | `create_entity`, `create_unit`, `create_graphic`, `delete_object` |
-| Tasking | `assign_task`, `assign_plan`, `stop`, `set_roe` |
+| Awareness | `get_situation`, `list_entities`, `get_entity`, `get_unit`, `list_catalog`, `get_events`, `query_terrain`, `check_line_of_sight`, `viewshed`, `explain`, `get_alerts` |
+| Creation | `create_entity`, `create_unit`, `create_graphic`, `delete_object`, `edit_catalog` |
+| Tasking | `assign_task`, `assign_plan`, `give_order` (in words), `stop`, `set_roe`, `set_reactions`, `embark`, `set_unit_superior`, `set_jamming` |
+| Phases | `set_sync_matrix`, `start_phase`, `send_codeword` |
 | Time | `control_simulation`, `advance_time` (simulate N seconds now and get a summary of kills, damage and task changes) |
-| Scenarios | `manage_scenario` (list, load, save, new) |
+| Scenarios and settings | `manage_scenario` (list, load, save, new, undo, redo), `quick_battle`, `set_environment`, `set_simulation_rules`, `set_pattern_of_life` |
+| Analysis | `run_batch`, `after_action_report`, `replay_state`, `add_bookmark` |
 
 Resources: `werforces://scenario`, `werforces://catalog` and
 `werforces://entities.geojson`. Every tool goes through the same `/api/v1`
@@ -384,8 +462,5 @@ test         unit and integration tests
 
 ## Not yet implemented
 
-HLA/RPR-FOM (the gateway is the natural place to add an HLA binding), indirect
-fire and artillery missions, simulated radio communications, scripted behaviours
-(e.g. Lua), importing real terrain (GeoTIFF/OpenFlight/CDB) for both views, 3D
-models loaded from files (glTF),
-record/playback and checkpoints, and multiple back-ends sharing the load.
+Scripted behaviours (e.g. Lua), OpenFlight and CDB terrain, 3D models loaded
+from files (glTF), and several back-ends sharing the load of one exercise.

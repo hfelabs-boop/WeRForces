@@ -190,7 +190,7 @@ then holds it facing the direction of the move:
 | --- | --- |
 | **Overwatch here** | Watch and engage towards the facing. A unit deploys in a line. It holds until given another order (over the API, `duration` ends it). |
 | **Defend here** | Hold and fight from the position. It never finishes. |
-| **Screen here** | Watch with *Return fire* ROE, and fall back 2 km (by a covered route) once an enemy comes within 1.5 km. |
+| **Screen here** | Watch with *Return fire* ROE, and fall back 2 km (by a covered route) before an enemy gets within reach of its direct fire (at least 1.5 km), or as soon as it comes under fire. |
 | **Ambush *area* from here** | Right-click an area with a unit selected. The unit takes up position with weapons tight. It opens fire all at once when an enemy enters the area, or when it is fired on. |
 | **Search *area*** | Sweep the area in parallel tracks spaced to the searcher's sensor range, then report how many enemies it found. |
 
@@ -367,3 +367,5 @@ Over the API, `POST /api/v1/batch` with `{"runs": 20, "duration": 1800, "seed": 
 
 See also [Concepts → Chain of command](../concepts.md#chain-of-command) and the
 [User guide](../user-guide.md).
+
+**Next:** [Tutorial 16: Quick battle and command tools](16-quick-battle-and-command-tools.md).

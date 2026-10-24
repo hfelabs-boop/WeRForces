@@ -70,7 +70,8 @@ built-up:
 - troops among buildings are harder to hit (× 0.6) and to spot.
 
 **Route planning.** *Move to* and *Follow route* plan a ground or water path with
-A\* over the terrain grid. Paths minimise travel time, so vehicles use roads when
+A\* over the terrain grid, as soon as the order is given (also while the clock is
+paused, so the path and [travel estimate](#travel-estimates) show at once). Paths minimise travel time, so vehicles use roads when
 that is faster, and avoid water and cliffs. If a vehicle gets blocked for 3 s, it
 replans. Aircraft fly straight. Routes also go round **obstacles** and the
 **minefields the force knows about** (through breached lanes where there are
@@ -98,6 +99,8 @@ buildings (above).
 | 2 | Red | red |
 | 3 | Neutral | green |
 | 0 | Other | yellow |
+
+Background civilians ([pattern of life](#pattern-of-life)) are Neutral.
 
 By default only Blue and Red are hostile to each other. A scenario can list other
 hostile pairs in `hostilities` (e.g. `[[1,2],[2,3]]` for Red attacking
@@ -207,10 +210,11 @@ plan. **Stop** clears both.
 | **Overwatch** *position* | Takes the position facing `facing` (degrees; default the direction of the move) and watches and engages from it | `duration` elapsed, if set; otherwise never |
 | **Defend** *position* | Takes the position and holds it, fighting from it without chasing | Never |
 | **Ambush** *position, kill zone* | Takes the position with **hold fire**; as soon as an enemy enters the kill-zone area (or the ambushers come under fire) the whole unit switches to **fire at will** together | Never |
-| **Screen** *position* | Watches with **return fire**; when an enemy comes within `breakContact` m (default 1500) falls back to `fallback` (default 2 km to the rear) by a covered route | Back at the fallback point |
+| **Screen** *position* | Watches with **return fire**, and falls back to `fallback` (default 2 km to the rear) by a covered route when an enemy comes within `breakContact` m. Without `breakContact` it falls back before an enemy gets within reach of its direct fire (that enemy's longest direct-fire range against it plus 200 m, at least 1500 m), or as soon as it comes under fire | Back at the fallback point |
 | **Search** *area* | Sweeps the area in back-and-forth tracks spaced to the searcher's sensor range (or `spacing`), then reports how many enemies it found | Last track done |
 | **Breach** *minefield or obstacle* | Engineers only: go to the nearest edge and work there for the type's breach time (slower under fire), then open a 30 m lane | Lane open |
-| **Resupply** | Drives to the nearest friendly supply vehicle with stock (or the one given), halts within 36 m of it, and waits until full | Full (fails when there is no supply vehicle with stock) |
+| **Resupply** | Drives to the nearest friendly supply vehicle with stock (or the one given), halts within 36 m of it, and waits until full. A helicopter flies there, sets down beside it, and goes back up to its height when full. Fixed-wing aircraft and boats can't | Full (fails when there is no supply vehicle with stock) |
+| **Direct control** (`manual`) | A person drives it: throttle 0–1 of top speed, turn −1 to 1, and a target it engages first whatever its ROE ([Drive mode](user-guide.md#drive-mode)). A turn lasts 1.5 s unless it is sent again. Driving a unit's leader drops the unit's orders | Another order is given |
 
 **Prepared positions.** An entity holding still on *Overwatch*, *Defend*,
 *Ambush* or *Screen* is in a prepared position after a while: infantry **dug
@@ -231,6 +235,10 @@ A **plan** is a list of statements carried out **in order**:
 | `setRoe`, `setSpeed`, `setAltitude`, `setFormation` | Change a setting instantly and continue |
 | `setReactions` | Change the [reactions](#reactions) it names (others are kept) and continue |
 | `waitUntil` *condition* | Wait until the condition holds |
+| `if` *condition* `then` [...] `else` [...] | Check the condition once, now, and carry out one branch (`else` is optional) |
+| `while` *condition* `body` [...] | Check the condition; while it holds, carry out the body and check again |
+| `sendCodeword` *word* | Send a [codeword](#codewords) to the owner's force and continue |
+| `report` *text* | Put a radio message from the owner in the event log (*radio*) and continue |
 
 Conditions:
 
@@ -243,6 +251,18 @@ Conditions:
 | `entityDestroyed` *id* | That entity is destroyed or gone |
 | `enemyInArea` *area* | A living hostile (to the plan's owner) is inside the area |
 | `strengthBelow` *fraction* | Fewer than that fraction of the members are alive (an entity counts as one member) |
+| `fuelBelow`, `ammoBelow` *fraction* | The members' average fuel, or ammunition (share of full loads), is below the fraction |
+| `codeword` *word* | The owner's force has received the codeword, and the owner's radio is not jammed |
+| `all` [*conditions*] | Every one holds |
+| `any` [*conditions*] | At least one holds |
+| `not` *condition* | It does not hold |
+
+`if` and `while` blocks can be nested (up to 8 deep, 200 statements in all). A
+plan is turned into a flat list of steps with jumps, and *Current activity*
+counts those steps: *Plan 3/9* is the third of nine. An `if` does not wait:
+to wait for something, use `waitUntil`, or a `while` with a `wait` task in its
+body. Instant statements (settings, codewords, reports, tests) run straight
+on, up to 50 in one tick.
 
 With `loop: true` the plan starts over when it ends. When a non-looping plan
 finishes, the event log reports *plan … complete*. Plans can be given to
@@ -252,6 +272,54 @@ above).
 Plans run one step at a time. To react to something *while* moving, use ROE
 (units fire on the move), [reactions](#reactions), or split the route into legs
 separated by `waitUntil` steps.
+
+## Codewords
+
+A **codeword** is a word sent to a whole force: *EXECUTE*, *PHASE 2*, *BRAVO*.
+It is upper-cased and may have up to 40 letters, digits, spaces, `-` and `_`.
+It is sent by a plan's `sendCodeword` statement, by exercise control or a player
+(their own force; REST `POST /api/v1/codewords`, MCP `send_codeword`), or by a
+[synchronization matrix](#synchronization-matrix) phase as it starts (its name).
+The event log notes it (*Blue codeword EXECUTE*, or as a radio message from the
+unit that sent it).
+
+Once a force has a codeword it keeps it, so a plan that reaches *wait until
+codeword EXECUTE* after it was sent goes straight on. A unit whose radio is
+[jammed](#electronic-warfare) does not hear codewords until its radio is back.
+Codewords are per force: Red can't hear Blue's. `GET /api/v1/codewords` lists
+them with the time each was first sent; checkpoints save them.
+
+## Synchronization matrix
+
+A **synchronization matrix** (or global plan) is a force's operation in
+**phases**. Each phase has a name, a **trigger** and **orders**: a task, an
+ROE or *stop* for a unit or entity of that force. Phases start in order; a
+phase is only checked once the one before it has started. When a phase starts,
+the event log says *Assault begins (codeword EXECUTE)*, every order of the
+phase is given at once (through the chain of command, with any
+[order delay](#chain-of-command) or jamming delay), and the phase's name goes
+out to the force as a codeword (*ASSAULT*).
+
+| Trigger | Starts the phase |
+| --- | --- |
+| `manual` | Only by hand: the GUI's **▶ Start now**, `POST /api/v1/sync-matrix/{force}/phases/{id}/start`, MCP `start_phase` |
+| `time` *t* | At simulation time *t* |
+| `codeword` *word* | When the force has the codeword |
+| `previousDone` *delay* | When every order of the previous phase has been carried out (nothing still running or on its way), plus *delay* seconds. A first phase with this trigger starts at once |
+| `condition` *ownerId, condition* | When a plan [condition](#plans) holds for that unit or entity |
+
+Orders are carried out like any order: a later order to the same unit (typed,
+from a plan, or by hand) replaces the phase's order. An order that never ends,
+such as *Defend* or *Overwatch* without a duration, keeps a following
+`previousDone` phase waiting; use another trigger after such a phase. Phases
+are checked once a simulated second. Each force has its own matrix and its own
+record of which phases have started. Up to 20 phases of up to 100 orders each.
+
+Over the API, `PUT /api/v1/sync-matrix/{force}` takes the whole matrix, and an
+order can be given in words (`{"targetId": "U1", "text": "move to Calloway
+covered"}`): the server turns it into a task as the [order
+line](user-guide.md#typed-orders) would. The [quick battle](user-guide.md#quick-battle)
+gives each side a matrix. Scenario files keep them in `syncMatrices`.
 
 ## Reactions
 
@@ -312,6 +380,10 @@ Every tick, each entity that can fire picks a target and a weapon.
 **Target.** Candidates are the *Attack* task's target first, then the current
 target, then the nearest detected hostiles allowed by ROE.
 
+Members of a unit **spread their fire**: a target that unit-mates already
+engage counts as further away (× 1.6 for each of them), so a platoon shares out
+what it sees instead of all firing at the nearest.
+
 **Weapon.** The weapon with the highest effective kill probability against
 that target, among those in range and with ammunition. Guided missiles count as
 0.15 worse than they are, so guns are preferred unless a missile is clearly
@@ -325,8 +397,10 @@ better.
 - only one guided missile is kept in flight at the same target.
 
 **Flight time.** The round arrives after range ÷ projectile speed. Guided
-munitions track the target. An unguided round misses if the target moved more
-than 6 m from where it was aimed.
+munitions track the target. Unguided rounds are aimed where a moving target
+will be when they arrive (fire control leads it, at its current velocity), and
+miss if the target ends up more than 6 m from that point: a target that stops,
+speeds up or turns while the round is in flight is missed.
 
 **Effective Pk.** Start from the weapon's Pk against the target's armour class
 (see the [catalog](reference/catalog.md#weapons)), then multiply by:
@@ -448,8 +522,67 @@ T-72B3 500 km...) and aircraft by time aloft (AH-64 2.5 h, F-16 2 h). Below
 of fuel and ammunition. When one is halted, friendly entities halted within 60 m
 take on fuel (a full tank in 60 s) and ammunition (a full load in 40 s), using
 up its stock (a full load of fuel and ammunition is one load). The *Resupply*
-task drives there; plans can wait until *fuel below* or *ammunition below* a
-level.
+task drives there; helicopters fly there and set down beside it. Plans can wait
+until *fuel below* or *ammunition below* a level.
+
+## Electronic warfare
+
+**Jammers** are entity types with a `jammer` (see the
+[catalog](reference/catalog.md)):
+
+| Type | Jams | Reach |
+| --- | --- | --- |
+| R-330Zh Zhitel (`ru-r330zh`) | radios | 15 km |
+| 1L269 Krasukha-2 (`ru-krasukha`) | radars | 25 km |
+| M1133 Stryker EW, MFEW (`us-mfew`) | radios | 10 km |
+
+A jammer starts switched on. It jams while it is alive, switched on, not
+firepower-killed and not mounted, and only entities of forces hostile to it,
+within its reach (measured on the map). Who is jammed is worked out once a
+simulated second. Switch it with the inspector's **Jamming** section, `PATCH
+/api/v1/entities/{id}` with `{"jamming": false}`, or MCP `set_jamming`.
+
+**Radio jamming.** A unit is jammed when its leader is (a loose entity when it
+is itself). A jammed unit:
+
+- gets its **orders 60 s late** (by runner or relay). Orders pass down the
+  chain of command level by level, so a jammed company's order reaches its
+  jammed platoons after 60 s more; this adds to any [order
+  delay](#chain-of-command);
+- does not **share contacts**: each member only knows what it sees itself;
+- cannot **call for fire**, and a jammed battery or gun is not called;
+- does not hear **codewords** (a plan waiting for one waits on);
+- sends nothing on the radio (no contact reports or acknowledgements).
+
+The event log notes *US Combined Arms Team: radio jammed* and *radio back*, the
+[alerts](#explanations-and-alerts) list a *jammed* alert while it lasts, and
+the inspector shows *RADIO JAMMED*.
+
+**Radar jamming.** A jammed radar sees only part of its range: the distance to
+the jammer as a share of the jammer's reach, and never less than 30 %. Closing
+on the jammer burns through. The inspector shows *RADAR JAMMED*.
+
+## Pattern of life
+
+**Background civilians** fill the map so targets must be told from bystanders.
+Set how many with **Simulation settings** (or `PUT
+/api/v1/simulation/pattern-of-life`, MCP `set_pattern_of_life`, the scenario's
+`patternOfLife`): up to 300 cars and 300 people. The engine keeps the numbers up,
+adding (quietly, without *created* events) and removing them as needed.
+
+- **Cars** (`civ-car`) start on the roads. Each drives to another town (more
+  than 1 km away) or another stretch of road, waits 10–60 s, and sets off
+  again.
+- **People** (`civ-person`) start within 250 m of a town's centre and walk
+  about it, pausing 20–120 s.
+- They are Neutral, on *hold fire*. Within 700 m of a shot or a detonation
+  they **run** 1.5 km away from it at top speed, and keep away for two
+  minutes.
+
+Neutral is not hostile to Blue or Red by default, so nobody aims at them, but
+blast and stray rounds can kill them, and the log reports it. Jammers ignore
+them, and they raise no alerts. A scenario saved at time 0 keeps only the
+numbers; checkpoints keep the civilians themselves.
 
 ## Indirect fire and call for fire
 
@@ -520,6 +653,52 @@ The **after-action review** replays the recording on the map with a timeline,
 and builds a report: strength and losses per force, every kill with killer,
 weapon and time, rounds fired per weapon and strength over time. Recordings can
 be saved on the server and reviewed later.
+
+## Explanations and alerts
+
+**Why?** For any entity or unit the server can explain what it is doing and
+what stops it (`GET /api/v1/entities/{id}/explain`, `/units/{id}/explain`, MCP
+`explain`, the inspector's **Why?** section). The answer has a one-line
+`summary`, the `activity` (task or plan step in words), and findings under
+`movement`, `fire` and `sensing` (units also `unit`: strength, morale, orders
+on their way, subordinates, and how many members share each problem). Each
+finding has a `severity`:
+
+| Severity | Meaning | Examples |
+| --- | --- | --- |
+| `block` | Stops the activity | destroyed, immobilised, out of fuel, pinned, halted on contact, broken, hold fire, out of range, no line of sight (and what blocks it, where) |
+| `warn` | Hampers it | low fuel, stuck, return-fire ROE, suppressed, radio or radar jammed, sensors cut by darkness or weather, no task |
+| `info` | Explains it | waiting for a plan condition, keeping formation, holding a position, slowed by forest, reloading, engaging |
+
+Most come with a `fix` (*Set ROE to "fire at will"*), and those about a place
+or another entity give `at` (x, y) and `aboutId`. Exercise control is also told
+about the nearest enemies the entity has *not* detected, and why: beyond its
+sensors, outside their field of view, hidden by the ground, forest, buildings
+or smoke, or in sight but not spotted yet (each scan only has a chance).
+Players only hear about what their side knows. Asking changes nothing in the
+run: the random generator is not touched.
+
+**Alerts** are the attention queue: idle after its orders (10 s with nothing to
+do), task failed, broken, out of fuel or low on fuel, out of ammunition,
+leader lost, losses, under fire or first contact after a quiet minute, and
+radio jammed. Each is about a unit or a loose entity, with a severity
+(critical, warning, info), the time it was last raised and a count. An alert
+about a lasting condition (broken, fuel, ammunition, jammed) closes by itself
+when the condition clears. Acknowledged alerts are kept (up to 200 in all) and
+listed with `GET /api/v1/alerts?all=true`. Alerts are checked once a simulated
+second and only read the simulation.
+
+## Travel estimates
+
+An entity moving along a planned path (a unit: its leader) reports a
+**travel estimate**: `remaining`, the metres left along the path, and `eta`,
+the simulation time it should arrive, with `etaLocal`, the local time of day.
+The path is sampled every 100 m at the speed the ground there allows for that
+vehicle (roads, off-road, forest, slope, land cover, weather), capped at the
+speed it was told to go, plus a little to get going from a stop. Out of fuel
+there is no arrival time: `stalled` says why. It does not foresee halts for
+contact, suppression or traffic. It appears on entity and unit snapshots
+(`travel`), in the inspector and at the end of the path on the map.
 
 ## Time
 

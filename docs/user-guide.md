@@ -14,7 +14,7 @@ The WeRForces window has five areas:
 
 | Control | What it does |
 | --- | --- |
-| **File ▾** | **Undo** / **Redo** (Ctrl+Z / Ctrl+Y), **New scenario** (on generated terrain, or an imported real terrain), **Open scenario…** (from the server's `scenarios/` folder), **Import from file…**, **Export to file** (downloads the current state as JSON), **Save on server…**, **Review saved recording…**, **Simulation settings…** (optional models, time of day and weather), **Batch analysis…** (see [below](#batch-analysis)), **Sessions…** (see [below](#sessions)) |
+| **File ▾** | **Undo** / **Redo** (Ctrl+Z / Ctrl+Y), **New scenario** (on generated terrain, or an imported real terrain), **Quick battle…** (a ready-to-run battle; see [below](#quick-battle)), **Open scenario…** (from the server's `scenarios/` folder), **Import from file…**, **Export to file** (downloads the current state as JSON), **Save on server…**, **Review saved recording…**, **Batch analysis…** (see [below](#batch-analysis)), **Sessions…** (see [below](#sessions)), **Catalog editor…** (see [below](#catalog-editor)), **Simulation settings…** (optional models, time of day and weather, civilians) |
 | Scenario name | The loaded scenario; a *session* pill when this page belongs to a session other than the main one |
 | ⏮ | **Rewind**: reload the scenario as it was when last loaded. Anything since is discarded |
 | ▶ Run / ⏸ Pause | Start or stop the clock (**Space**) |
@@ -29,6 +29,8 @@ The WeRForces window has five areas:
 | **AAR** | After-action review: replay the recording (see [below](#after-action-review)) |
 | **Integrations** | API and MCP connection details, TAK output, webhooks, GIS feeds |
 | **?** | This documentation |
+| **Phases** | The [synchronization matrix](#synchronization-matrix). The button shows the phase in progress (*Phase: Assault*), or *Phases (not started)* |
+| **Alerts** | The [attention queue](#alerts), with the number of open alerts (red when one is critical) |
 | Role pill | *Blue player · fog of war* when you joined with a player key (see [below](#playing-one-force-fog-of-war)) |
 | DIS pill | DIS status when started with `--dis`: exercise, site:application, PDUs sent and received, remote entities |
 | connected | WebSocket connection to the simulation server |
@@ -55,7 +57,9 @@ nearest valid spot.
 A tree of every object, grouped by force: units with their subordinate units
 (a company's platoons) and members, single entities, entities received over DIS
 (marked *remote*), and tactical graphics. Click to select. Double-click to
-centre the map. Destroyed entities are struck through.
+centre the map. Destroyed entities are struck through. A name that repeats its
+parent's is shortened (*… 1st Platoon* under *US Mech Company*); hover for the
+full name.
 
 ## 2D map
 
@@ -88,7 +92,9 @@ the force and the dimension, and the echelon amplifier from the unit.
   - a dashed yellow outline means the entity is remote (owned by another DIS
     simulation);
   - a red halo shows how hard the entity is being suppressed (thicker when
-    pinned down).
+    pinned down);
+  - background civilians ([pattern of life](#simulation-settings)) are drawn
+    smaller and fainter, without labels unless selected.
 
 When zoomed out (or with *Units: aggregate*), each unit is drawn as one symbol
 at its leader, with its echelon above (••• platoon, •• section, Ø team) and its
@@ -97,6 +103,17 @@ strength in the label, e.g. *(3/4)*. Zoom in to see the individual vehicles.
 Effects: shots appear as yellow tracer lines from shooter to target. Detonations
 appear as an orange flash for a hit and a grey puff for a miss. Smoke clouds are
 grey discs that drift with the wind. At night and in twilight the map darkens.
+A jammer that is switched on has its reach drawn as a faint purple dashed
+circle. With **Layers → Planned paths**, the selection's path ends in its
+arrival time (*ETA 10:04*).
+
+Over the map:
+
+- the **order line** at the top (see [Typed orders](#typed-orders));
+- the **quick-task bar** at the bottom, when something is selected (see
+  [Quick-task bar](#quick-task-bar));
+- a chip with the [viewshed](#viewshed) on show, and the panel of a vehicle you
+  [drive](#drive-mode).
 
 Imported terrain can show land cover (built-up grey, wetland, shrub, bare,
 snow) and, when zoomed in, building footprints.
@@ -122,7 +139,7 @@ What appears depends on what is selected and what you right-click:
 | Infantry | A friendly carrier (or carrier unit) | **Mount *name*** (walk over and board), **Put inside *name* now** (scenario set-up), **Follow *name***, **Stop** |
 | Entity or unit | A route or phase line | **Follow route *name***, **Patrol route *name***, **Stop** |
 | Anything | Any object | **Select**, **Center map**, **Delete** |
-| Anything | Anywhere | **Center map here**, **Place point here**, **Place armed item here** (when a palette item is armed) |
+| Anything | Anywhere | **Center map here**, **Place point here**, **What can be seen from here (viewshed)**, **Clear viewshed** (when one is shown), **Place armed item here** (when a palette item is armed) |
 
 ## 3D view
 
@@ -166,8 +183,20 @@ scale up close. The 3D code is downloaded the first time you open the view.
   left), and the **Unit** it belongs to (click to select the unit).
 - **Current activity**: the running plan step and task, e.g. *Seize OBJ 2/4:
   Follow route IRON — Follow route IRON (wp 3/28)*. It also shows *PINNED*,
-  *BROKEN*, *DUG IN* / *HULL-DOWN*, *HALTED (contact)* and *ORDER IN n s* (an
-  order still on its way, with the order-delay rule).
+  *BROKEN*, *DUG IN* / *HULL-DOWN*, *HALTED (contact)*, *ORDER IN n s* (an
+  order still on its way, with the order-delay rule), *RADIO JAMMED*, *RADAR
+  JAMMED*, *JAMMING* (a jammer that is on) and, while it moves along a planned
+  path, the travel estimate: *1.4 km to go, ETA 10:04 local (in 3 min)*, or
+  *stalled: out of fuel*.
+- **Why?**: one line on what it is doing and the main thing in its way.
+  **Details** lists every reason under *Moving*, *Shooting* and *Seeing*
+  (units also *Unit*), each with what you can do about it. Red items block the
+  activity, amber ones hamper it, grey ones explain it. Click an item with a
+  place, e.g. *No line of sight to T-72B3: blocked by the ground (a crest or
+  ridge) at (9070, 7813)*, to mark the spot and the sight line on the map for
+  8 s; click one about another entity to select it. The section refreshes every
+  2 s. Exercise control is also told which enemies the entity has not
+  detected, and why. See [Concepts](concepts.md#explanations-and-alerts).
 - **Rules of engagement**: Fire at will, Return fire or Hold fire (see
   [Concepts](concepts.md#rules-of-engagement)).
 - **Reactions** (see [Concepts](concepts.md#reactions)):
@@ -192,12 +221,16 @@ scale up close. The 3D code is downloaded the first time you open the view.
 - **Sensors**: what the entity can see with.
 - **Contacts**: what it currently detects, with distance. ◎ marks its current
   target.
+- **Jamming** (jammers only): what it jams and how far, and **Switch on** /
+  **Switch off**.
+- **Center**, **Viewshed** (see [below](#viewshed)), **Drive** (see
+  [below](#drive-mode)) and **Delete**.
 
 A passenger's activity reads *MOUNTED in …*.
 
 ### Unit
 
-The same as an entity, plus **Strength** (alive/total), **Morale**,
+The same as an entity (with its own **Why?** and travel estimate), plus **Strength** (alive/total), **Morale**,
 **Leader**, a **Formation** picker (column, line, wedge, vee, echelonRight), a
 **Superior** picker (chain of command), **Subordinates**, and a **Members** list
 (★ = leader).
@@ -233,25 +266,61 @@ A plan is a list of steps carried out in order. Build one in the inspector:
 1. Optionally give the plan a **Name**. It appears in *Current activity* and in
    the event log.
 2. Choose a step type, fill in its value, and press **Add**. Steps that need a
-   location or target (*Move to*, *Attack*, *Orbit*) then ask you to click the
-   map.
-3. Use **↑** to reorder and **✕** to remove a step.
+   location or target (*Move to*, *Attack*, *Orbit*, *Defend*...) then ask you
+   to click the map.
+3. Use **↑** to reorder and **✕** to remove a step (✕ on an *If* or *While*
+   removes the block and its steps).
 4. Tick **loop** to repeat the plan forever.
 5. Press **Assign plan**.
 
-Step types:
+Step types, grouped as in the chooser:
 
-| Kind | Steps |
+| Group | Steps |
 | --- | --- |
-| Tasks | Move to (pick), Follow route, Patrol route, Wait (seconds), Attack (pick), Orbit (pick), Fire mission (pick; rounds), Mount carrier (pick), Dismount passengers, Resupply at the nearest supply vehicle |
+| Movement | Move to (pick), Move by a covered route (pick), Follow route, Patrol route, Orbit (pick; radius m), Wait (seconds) |
+| Tactics | Attack (pick), Overwatch, Defend and Screen (pick; facing °), Ambush area (pick position), Search area, Breach minefield or obstacle, Fire mission and Smoke (pick; rounds), Resupply at the nearest supply vehicle, Mount carrier (pick), Dismount passengers |
 | Settings | Set ROE, Set speed (km/h), Set altitude (m above ground; 0 lands a helicopter), Set formation (units), Set reaction on contact, Set call for fire |
-| Conditions | Wait until time (s), Wait until in area, Wait until enemy detected, Wait until under fire, Wait until destroyed (pick), Wait until enemy in area, Wait until strength below (%), Wait until fuel below (%), Wait until ammunition below (%) |
+| Control | Wait until…, If… (block), Repeat while… (block), Else (in the current If), End block, Send codeword, Report on the radio |
+
+Only the steps the selection can carry out are offered (no *Orbit* for a tank).
+*Wait until*, *If* and *Repeat while* take a condition: enemy detected, under
+fire, time is (s), in area, enemy in area, entity destroyed (pick), strength
+below (%), fuel below (%), ammunition below (%), codeword received, or codeword
+not yet received.
+
+**Blocks.** *If…* and *Repeat while…* open a block: the steps you add next go
+inside it, indented, and the line *▸ next step goes here* shows where. **Else**
+starts the other branch of the current *If*. **End block** closes it, so the
+next steps go after it. Double-click an *If* or *While* line to add steps
+inside it again. Blocks can be nested. For example:
+
+```
+1. Move to 12.240E 06.600N
+2. If enemy detected
+3.   Set ROE: Hold fire
+   Else
+4.   Send codeword BRAVO
+   End if
+5. While no codeword EXECUTE yet
+6.   Wait 30 s
+   End while
+7. Report "crossing PL LD"
+```
+
+**Codewords** coordinate plans: *Send codeword* tells the plan's own force a
+word (*BRAVO*), and *Wait until codeword received* holds a plan until its force
+has it. Exercise control or a player can send one too (REST `POST
+/api/v1/codewords`), and every phase of a [synchronization
+matrix](#synchronization-matrix) sends its name when it starts. A unit whose
+radio is jammed does not hear codewords until its radio is back. **Report on
+the radio** puts a message from the unit in the event log (*radio*).
 
 Steps waiting for a time appear on the [timeline](#timeline) as yellow diamonds.
 
 The draft stays in the editor after you assign it, so you can change it and
-assign it again. Right-clicking the map also offers **Add "move here" to plan**.
-See [Tutorial 2](tutorials/02-routes-plans-and-conditions.md).
+assign it again. **Clear** empties it. Right-clicking the map also offers **Add
+"move here" to plan**. See [Tutorial 2](tutorials/02-routes-plans-and-conditions.md)
+and [Concepts → Plans](concepts.md#plans).
 
 ## Drawing tactical graphics
 
@@ -285,7 +354,148 @@ point, **Esc** or right-click ends.
 moving, renaming, orders, plans, settings, loading a scenario. **Ctrl+Y** or
 **Ctrl+Shift+Z** redoes it. The last 30 edits can be undone; running and pausing
 are not edits. Undoing an order given mid-run goes back to the moment before it
-(the clock too). The event log is kept.
+(the clock too). The event log is kept. An order to several things at once (a
+group order from the context menu or the quick-task bar, a typed order to
+several units, **Delete all**) is one edit, undone in one step.
+
+## Typed orders
+
+The order line at the top of the map takes orders in words. Press **/** (or
+click it) and type *who*, *what* and *where*:
+
+```
+Team ARMOR move to Calloway covered
+Scout 1 screen 2 km north of Brenham facing north
+Team ARMOR and Team MECH defend OBJ CALLOWAY facing northwest
+Paladin Platoon fire 4 rounds on 9800 12300
+Team MECH hold fire
+```
+
+- **Who**: names of your units or entities (the start of a name is enough when
+  it is unique), joined with *and* or commas. Put a name in quotes if it
+  contains *and*. With something selected, start with the verb instead
+  (*defend Brenham facing north*): the order goes to the selection.
+- **Verbs**: *move to* (add *covered*, *fast*, *slowly* or *at 30 km/h*),
+  *attack*, *follow*, *defend* / *overwatch* / *screen* *place* (add *facing
+  north* and *width 800 m*), *ambush area* (*from place*), *search area*,
+  *patrol route*, *follow route route* (*in reverse*), *fire* (*N rounds*) *on
+  place*, *smoke place*, *orbit place* (*radius 3 km*), *mount carrier*,
+  *dismount*, *resupply* (*from X*), *breach minefield*, *wait 2 min*, *stop*,
+  *hold fire*, *return fire*, *fire at will*.
+- **Places**: a town, a graphic, an object, coordinates *9800 12300*, or *2 km
+  north of Brenham*.
+
+As you type, a list offers the next words: names, verbs, places. **Tab** or a
+click takes the highlighted one, **↑**/**↓** move through the list (or through
+the orders you sent, when the line is empty). When the order is complete, the
+list shows how it was understood (*↵ Team ARMOR: move to Calloway by a covered
+route*) or what is wrong with it. **Enter** sends it, and **Esc** leaves the
+line. Several movers keep their spacing around the destination; several
+defenders spread side by side across the facing.
+
+Over the API it is `POST /api/v1/orders` with `{"text": "...", "dryRun": true}`
+to check an order without carrying it out; over MCP, `give_order`.
+
+## Quick-task bar
+
+With units or entities selected, a bar at the bottom of the map gives one-click
+orders. Each button has a key, **1** to **9** then **0**:
+
+| Default buttons | What they do |
+| --- | --- |
+| **Move**, **Covered** | Click the destination (a covered route keeps out of known enemies' sight) |
+| **Attack** | Click the enemy |
+| **Defend**, **Overwatch** | Click the position; the facing is the direction from the selection. Several units spread in a line |
+| **Fire**, **Smoke** | Click the target point: 3 rounds of HE, or 2 of smoke (guns and mortars only) |
+| **Stop**, **Hold fire**, **Fire at will** | At once |
+
+Buttons the selection can't use are greyed out. **⚙** chooses up to ten
+buttons and their order from the full list (which adds *Follow*, *Screen*,
+*Orbit*, *Return fire*, *Resupply* and *Dismount*). The choice is kept in this
+browser.
+
+## Alerts
+
+**Alerts** in the toolbar is the attention queue: what needs looking at, newest
+first, so you don't have to watch every unit. Each alert is about a unit or a
+loose entity:
+
+| Alert | Raised when | Severity |
+| --- | --- | --- |
+| idle | it has finished its orders and has had nothing to do for 10 s | info |
+| task failed | a task failed (e.g. no route) | warning |
+| broken | its morale broke | critical |
+| out of fuel / low fuel | a member is out of fuel / below 20 % | critical / warning |
+| out of ammunition | a member has fired off everything | critical |
+| leader lost | the leader was destroyed or immobilised and another took over | warning |
+| losses | a member was destroyed (counted: *×3*) | warning |
+| under fire, contact | first fire or first enemy contact after a quiet minute | info |
+| jammed | its radio is jammed | warning |
+
+Critical alerts also pop up once. Click an alert to select and centre what it
+is about, ✓ to acknowledge it, or **Acknowledge all**. **N** jumps to the next
+alert. Alerts about a condition that clears (fuel, morale, jamming) close by
+themselves. Players only see their own force's alerts. REST `GET
+/api/v1/alerts`, MCP `get_alerts`.
+
+## Synchronization matrix
+
+**Phases** in the toolbar opens a force's operation as a table: one column per
+phase, one row per unit (and loose entity), and in each cell that unit's order
+for the phase, in words as on the [order line](#typed-orders) but without the
+name (*move to Calloway covered*, *defend OBJ CALLOWAY facing north*, *hold
+fire*; several separated by *;*). A cell turns green when it reads as an order
+(hover to see how) and red when it doesn't.
+
+Above each column are the phase's name and its trigger:
+
+| Trigger | The phase starts |
+| --- | --- |
+| *by hand* | when you press **▶ Start now** (or `POST /api/v1/sync-matrix/{force}/phases/{id}/start`) |
+| *at time (s)* | at that simulation time |
+| *on codeword* | when the force receives the codeword |
+| *when previous done (+s)* | when every order of the previous phase has been carried out, plus a delay |
+| *on a condition* | when a plan condition holds for a unit (set through the API) |
+
+Phases start in order: one waits until the one before it has started. When a
+phase starts it gives all its orders at once and sends its name to the force as
+a codeword (phase *Assault* sends *ASSAULT*), so unit plans can wait for it.
+**+ Phase** adds a column, ✕ removes one, **Save** stores the matrix and
+**Close** leaves without saving. A started phase shows *started 00:05:01*.
+Exercise control picks the force at the top; a player plans for their own.
+See [Concepts](concepts.md#synchronization-matrix).
+
+## Viewshed
+
+**Viewshed** in an entity's inspector shades the ground around it: clear where
+it can see, red for dead ground (cells hidden by the ground, forest, buildings
+or smoke), out to the range of its best sensor now (light and weather count; at
+least 1 km, at most 10 km). Right-click the map and choose **What can be seen
+from here** for the view from a point, 2 m above the ground, out to 3 km. The
+chip at the top of the map gives the share of the ground seen, e.g. *24% of
+the ground within 4.5 km seen*; ✕ (or **Clear viewshed** in the context menu)
+removes it. Each cell is tested with the simulation's own line of sight, for a
+target 2 m tall. REST `POST /api/v1/terrain/viewshed`, MCP `viewshed`.
+
+## Drive mode
+
+Select one of your vehicles (or anything that moves) and press **G**, or
+**Drive** in the inspector. You now drive it; the map follows it and a panel
+shows its speed, heading, throttle, target, damage and ammunition.
+
+| Key | Action |
+| --- | --- |
+| W / ↑, S / ↓ | Throttle up / down in quarters (0 to full speed) |
+| A / ←, D / → | Turn left / right while held. Stopped, a vehicle turns on the spot |
+| X | Stop (throttle 0) |
+| T | Pick a target: click an enemy. It engages that one first, even on *hold fire*; otherwise its ROE decides what it shoots at |
+| C | Clear the target |
+| Esc | Hand it back: it stops and its task ends |
+
+Driving replaces its task and plan, and any other order ends it. Driving a unit's leader takes the unit's
+orders away too; members keeping formation follow it. Aircraft keep at least
+their minimum speed. REST `POST /api/v1/entities/{id}/drive` with `{"throttle":
+0.5, "turn": -1, "targetId": "E12"}` (a turn lasts 1.5 s unless sent again).
 
 ## Event log
 
@@ -342,6 +552,63 @@ File → **Simulation settings…** (or click the time-of-day chip):
   [Concepts](concepts.md#optional-models).
 - **Time and weather** at the scenario start: date, time of day, visibility,
   precipitation and wind. See [Concepts](concepts.md#night-and-weather).
+- **Civilians (pattern of life)**: how many civilian **Cars** and **People**
+  (0–300 each) to keep on the map. Cars drive between the towns along the
+  roads; people walk about the towns. They are neutral (force 3) and run from
+  shots and blasts nearby. See [Concepts](concepts.md#pattern-of-life).
+
+## Quick battle
+
+File → **Quick battle…** builds a ready-to-run battle and replaces the current
+scenario:
+
+1. Pick a **mission**, from Blue's side: *Meeting* (both sides advance on the
+   objective), *Attack* (seize the objective Red defends), *Defend*, *Delay*
+   (screen, then fall back as Red pushes through) or *Recon* (find Red's hidden
+   positions in an area).
+2. For each side, the **Nation** (US or RU), **Force** (armor, mechanised,
+   infantry or combined arms), **Size** (platoon, or a company of three
+   platoons and an HQ) and **support**: artillery (mortars with a platoon,
+   howitzers with a company), scouts, engineers (a defence lays a minefield;
+   an attack brings sappers), supply, attack helicopters, air defence.
+3. **Time** (dawn, day, dusk or night), **Weather** (clear, haze, fog, rain),
+   **Distance** between the sides (automatic: 3 km, or 5 km with a company),
+   **Terrain** (the current one or a new generated one), **Civilians**, and a
+   **Seed**. The same seed and choices give the same battle; leave it empty for
+   a random one.
+
+**Build battle** places both forces on land either side of an objective (a town
+near the middle of the map when there is one), draws the mission's graphics
+(objective, attack position, line of departure, battle position, minefield...)
+and gives each side a [synchronization matrix](#synchronization-matrix). The
+brief that follows says who does what; **Start** runs the clock, **Show
+phases** opens the matrix. The quick battle is one edit: **Undo** brings back
+the previous scenario. REST `POST /api/v1/scenario/quick-battle`, MCP
+`quick_battle`. See [Tutorial
+16](tutorials/16-quick-battle-and-command-tools.md).
+
+## Catalog editor
+
+File → **Catalog editor…** (exercise control) shows the catalog in four tabs:
+**Entity types**, **Weapons**, **Sensors** and **Unit templates**. Pick an entry
+on the left (**Filter…** narrows the list) to see its fields in a form: names,
+speeds in km/h, turn rate in °/s, weapons and sensors, fuel, seats, supply
+loads, jammer reach, kill chances per armour class, and so on. **JSON** shows
+every field as JSON instead.
+
+- Change an entry and press **Save** to replace it; **Copy as new** starts a
+  variant with a new id (*us-m1a2-2*) and name.
+- Every field is checked: ids are 2–48 lower-case letters, digits and -,
+  numbers must be in range, and weapons, sensors and member types must exist.
+- Entries saved here are marked *custom*, belong to the scenario and are saved
+  with it (its `catalog` field). Entities already on the map keep the
+  definition they were made with; new ones use the new one.
+- **Remove custom entry** deletes it (a built-in entry it replaced comes back);
+  this is refused while entities use it.
+- **Export custom entries** downloads them as `catalog-extension.json`, for the
+  `--catalog` option ([Tutorial 9](tutorials/09-extending-the-catalog.md)).
+
+REST `PUT`/`DELETE /api/v1/catalog/{section}/{id}`, MCP `edit_catalog`.
 
 ## Batch analysis
 
@@ -388,6 +655,10 @@ When the server has player keys (`--player blue:KEY`), opening
 | Shift+drag | Select everything in a box |
 | Alt+drag | Move an entity |
 | M | Measure |
+| / | Open the [order line](#typed-orders) |
+| 1–9, 0 | [Quick-task bar](#quick-task-bar) buttons for the selection |
+| N | Select and centre the next [alert](#alerts) |
+| G | [Drive](#drive-mode) the selected entity (W/S/A/D, T, C, X, Esc while driving) |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
 
 ## Signing in
