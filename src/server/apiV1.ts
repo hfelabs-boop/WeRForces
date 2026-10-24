@@ -248,6 +248,18 @@ export class ApiV1 {
         this.run({ cmd: 'assignPlan', targetId: req.params.id, plan: this.resolvePlan(req.body) as never });
         return { json: this.targetView(req.params.id) };
       });
+      r.post(`${P}/${kind}/{id}/embark`, (req) => {
+        check(req.params.id);
+        const carrierId = obj(req.body).carrierId;
+        if (typeof carrierId !== 'string') throw new HttpError(400, 'carrierId is required');
+        this.run({ cmd: 'embark', passengerId: req.params.id, carrierId });
+        return { json: this.targetView(req.params.id) };
+      });
+      r.post(`${P}/${kind}/{id}/disembark`, (req) => {
+        check(req.params.id);
+        this.run({ cmd: 'disembark', carrierId: req.params.id });
+        return { json: this.targetView(req.params.id) };
+      });
       r.post(`${P}/${kind}/{id}/stop`, (req) => {
         check(req.params.id);
         this.run({ cmd: 'stop', targetId: req.params.id });

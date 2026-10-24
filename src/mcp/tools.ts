@@ -294,10 +294,10 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'assign_task',
-    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetId`; wait needs `duration`. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
+    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
     {
       targetId: z.string().describe('entity (E..) or unit (U..) id'),
-      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission']),
+      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission', 'mount', 'dismount']),
       to: position.optional(),
       routeId: z.string().optional(),
       targetEntityId: z.string().optional(),
@@ -315,7 +315,11 @@ export function createMcpServer(call: ApiCaller): McpServer {
       const task =
         a.type === 'moveTo'
           ? { type: 'moveTo', target: need(a.to, 'to'), speed }
-          : a.type === 'fireMission'
+          : a.type === 'mount'
+            ? { type: 'mount', carrierId: need(a.targetEntityId, 'targetEntityId') }
+            : a.type === 'dismount'
+            ? { type: 'dismount' }
+            : a.type === 'fireMission'
             ? { type: 'fireMission', target: need(a.to, 'to'), rounds: a.rounds, radius: a.radius }
             : a.type === 'orbit'
             ? { type: 'orbit', center: need(a.to, 'to'), radius: a.radius ?? 2000, duration: a.duration }
@@ -347,6 +351,23 @@ export function createMcpServer(call: ApiCaller): McpServer {
       const kind = a.targetId.startsWith('U') ? 'units' : 'entities';
       const r = await api<{ name: string; plan?: string }>('POST', `/api/v1/${kind}/${encodeURIComponent(a.targetId)}/plan`, { name: a.name, loop: a.loop, statements: a.statements });
       return `${r.name}: ${r.plan ?? 'plan assigned'}`;
+    },
+  );
+
+  tool(
+    'embark',
+    'Instantly put infantry (an entity or a whole unit) inside a carrier (an entity or a unit, whose seats are shared out), e.g. to set up a mechanized platoon with its squad mounted. Use assign_task type "mount" to make them walk to the carrier instead. With `dismount: true`, lets the passengers of the carrier(s) given in carrierId out now.',
+    { passengerId: z.string().optional().describe('infantry entity or unit id'), carrierId: z.string().describe('carrier entity or unit id'), dismount: z.boolean().optional() },
+    async ({ passengerId, carrierId, dismount }) => {
+      if (dismount) {
+        const kind = carrierId.startsWith('U') ? 'units' : 'entities';
+        await api('POST', `/api/v1/${kind}/${encodeURIComponent(carrierId)}/disembark`);
+        return `passengers of ${carrierId} dismounted`;
+      }
+      if (!passengerId) throw new Error('passengerId is required');
+      const kind = passengerId.startsWith('U') ? 'units' : 'entities';
+      await api('POST', `/api/v1/${kind}/${encodeURIComponent(passengerId)}/embark`, { carrierId });
+      return `${passengerId} mounted in ${carrierId}`;
     },
   );
 

@@ -187,12 +187,15 @@ export class MapView {
     const out: { id: string; pos: Vec2; entity?: EntitySnapshot; unit?: UnitSnapshot }[] = [];
     const agg = this.aggregated();
     for (const e of st.entities) {
-      if (agg && e.unitId && this.unitById.has(e.unitId)) continue;
+      if (e.embarkedIn) continue;
+      // Units are drawn as one symbol, except a mounted unit whose leftovers show individually.
+      if (agg && e.unitId && this.unitById.has(e.unitId) && !this.entityById.get(this.unitById.get(e.unitId)!.leaderId ?? '')?.embarkedIn) continue;
       out.push({ id: e.id, pos: e, entity: e });
     }
     if (agg) {
       for (const u of st.units) {
         const leader = u.leaderId ? this.entityById.get(u.leaderId) : undefined;
+        if (leader?.embarkedIn) continue;
         out.push({ id: u.id, pos: leader ?? u, unit: u });
       }
     }
@@ -600,7 +603,7 @@ export class MapView {
           ctx.stroke();
         }
         if (this.layers.labels && (!agg || e.id === this.selectedId || this.metresPerPixel < 6)) {
-          label(ctx, e.name, p.x + symSize * 1.5, p.y + 4, FORCE_COLORS[e.force].text, '11px system-ui');
+          label(ctx, e.passengers ? `${e.name} +${e.passengers.length}` : e.name, p.x + symSize * 1.5, p.y + 4, FORCE_COLORS[e.force].text, '11px system-ui');
           if (e.domain === 'air') label(ctx, `${Math.round(e.agl)}m`, p.x + symSize * 1.5, p.y + 16, '#ddd', '10px system-ui');
         }
       } else if (sym.unit) {

@@ -27,7 +27,7 @@ export function formationOffset(formation: Formation, k: number, spacing: number
 
 /** Unit tasks that every member executes itself, rather than the leader with the rest in formation. */
 export function perMemberTask(spec: TaskSpec): boolean {
-  return spec.type === 'attack' || spec.type === 'fireMission';
+  return spec.type === 'attack' || spec.type === 'fireMission' || spec.type === 'mount' || spec.type === 'dismount';
 }
 
 export class Unit implements Taskable {
@@ -89,6 +89,17 @@ export class Unit implements Taskable {
       const alive = this.alive();
       const tubes = alive.filter((m) => indirectWeaponFor(engine, m, spec.target, spec.weaponId));
       for (const m of tubes.length ? tubes : alive) engine.setEntityTask(m, createTask(spec));
+      return;
+    }
+    if (spec.type === 'mount' || spec.type === 'dismount') {
+      // Members board (in turn, so seats are shared out) or carriers unload; the rest keep still.
+      const who = this.alive().filter((m) => (spec.type === 'mount' ? !m.embarkedIn : engine.passengersOf(m.id).length > 0));
+      for (const m of who) {
+        const task = createTask(spec);
+        engine.setEntityTask(m, task);
+        // Start now so each member reserves its seat before the next one chooses.
+        if (spec.type === 'mount') task.update({ engine, entity: m, dt: 0 });
+      }
       return;
     }
     this.leaderTask = createTask(spec);

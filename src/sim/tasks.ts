@@ -463,6 +463,92 @@ export class FireMissionTask extends Task {
   }
 }
 
+/** Walk to a carrier and board it. A unit id as carrier picks the nearest member with a free seat. */
+export class MountTask extends Task {
+  private path = new PathFollower();
+  private replanIn = 0;
+  /** The carrier entity actually boarding (resolved from a unit id at start). */
+  carrier?: string;
+
+  constructor(readonly carrierId: string) {
+    super({ type: 'mount', carrierId });
+  }
+
+  protected override start({ engine, entity }: TaskContext): void {
+    if (entity.domain !== 'lifeform') {
+      this.fail('only dismounted infantry can mount');
+      return;
+    }
+    const unit = engine.units.get(this.carrierId);
+    const candidates = unit ? unit.alive() : [engine.entities.get(this.carrierId)].filter((c): c is Entity => !!c);
+    const free = candidates.filter((c) => c.alive && c !== entity && engine.freeSeats(c, entity) > 0).sort((a, b) => dist2d(entity, a) - dist2d(entity, b));
+    if (free.length === 0) {
+      this.fail(candidates.some((c) => (c.type.capacity ?? 0) > 0) ? 'no free seats' : 'not a carrier');
+      return;
+    }
+    this.carrier = free[0].id;
+  }
+
+  protected tick({ engine, entity, dt }: TaskContext): TaskStatus {
+    const c = this.carrier ? engine.entities.get(this.carrier) : undefined;
+    if (!c || c.destroyed) return this.fail('carrier destroyed');
+    if (engine.freeSeats(c, entity) <= 0) return this.fail(`${c.name} is full`);
+    const d = dist2d(entity, c);
+    const landed = c.domain !== 'air' || c.z - engine.terrain.surfaceHeight(c.x, c.y) < 5;
+    if (d <= 20 && c.speed < 1 && landed) {
+      engine.embark(entity, c);
+      return 'done';
+    }
+    if (d < 300) {
+      entity.steer = { x: c.x, y: c.y, speed: entity.cruiseSpeed, arrive: true };
+      return 'running';
+    }
+    this.replanIn -= dt;
+    if (this.replanIn <= 0) {
+      this.replanIn = 10;
+      this.path.plan(entity, engine, c);
+    }
+    this.path.step(entity, engine, dt, entity.cruiseSpeed, true);
+    return 'running';
+  }
+
+  describe(engine: Engine): string {
+    return `Mount ${engine.entities.get(this.carrier ?? this.carrierId)?.name ?? engine.units.get(this.carrierId)?.name ?? this.carrierId}`;
+  }
+
+  override resumeSpec(): TaskSpec {
+    return { type: 'mount', carrierId: this.carrier ?? this.carrierId };
+  }
+
+  override get remainingPath(): Vec2[] {
+    return this.path.remaining;
+  }
+}
+
+/** Stop (helicopters land) and let every passenger out. */
+export class DismountTask extends Task {
+  constructor() {
+    super({ type: 'dismount' });
+  }
+
+  protected tick({ engine, entity }: TaskContext): TaskStatus {
+    entity.steer = { x: entity.x, y: entity.y, speed: 0, arrive: true };
+    if (entity.speed > 0.5) return 'running';
+    if (entity.domain === 'air' && entity.z - engine.terrain.surfaceHeight(entity.x, entity.y) > 5) {
+      // Helicopters set down first (fixed-wing aircraft cannot hover to land).
+      if ((entity.type.minSpeed ?? 0) > 0) return this.fail('fixed-wing aircraft cannot land to dismount');
+      entity.altitudeOverride = 0;
+      return 'running';
+    }
+    engine.dismountAll(entity);
+    return 'done';
+  }
+
+  describe(): string {
+    return 'Dismount passengers';
+  }
+}
+
 export function createTask(spec: TaskSpec): Task {
   switch (spec.type) {
     case 'moveTo':
@@ -483,5 +569,9 @@ export function createTask(spec: TaskSpec): Task {
       return new FormationTask(spec.leaderId);
     case 'fireMission':
       return new FireMissionTask(spec);
+    case 'mount':
+      return new MountTask(spec.carrierId);
+    case 'dismount':
+      return new DismountTask();
   }
 }

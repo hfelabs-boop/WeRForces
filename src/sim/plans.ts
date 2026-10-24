@@ -39,6 +39,10 @@ export function describeStatement(st: PlanStatement, engine?: Engine): string {
           return `Orbit r=${t.radius}m`;
         case 'formation':
           return 'Hold formation';
+        case 'mount':
+          return `Mount ${engine?.entities.get(t.carrierId)?.name ?? engine?.units.get(t.carrierId)?.name ?? t.carrierId}`;
+        case 'dismount':
+          return 'Dismount passengers';
         case 'fireMission':
           return `Fire mission at (${Math.round(t.target.x)}, ${Math.round(t.target.y)}), ${t.rounds ?? DEFAULT_MISSION_ROUNDS} rounds`;
       }

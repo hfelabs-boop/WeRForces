@@ -137,6 +137,8 @@ export interface EntityTypeDef {
   weapons: string[];
   /** Number of personnel (informational). */
   crew: number;
+  /** Seats for dismounted infantry (lifeform entities) carried as passengers. */
+  capacity?: number;
   /** Reactions that new entities of this type start with (e.g. observers call for fire). */
   reactions?: Reactions;
 }
@@ -172,7 +174,11 @@ export type TaskSpec =
    * Indirect fire on a location: `rounds` per tube (default 3), spread over `radius`
    * metres around the target (default 0, all rounds at the aim point).
    */
-  | { type: 'fireMission'; target: Vec2; rounds?: number; radius?: number; weaponId?: string };
+  | { type: 'fireMission'; target: Vec2; rounds?: number; radius?: number; weaponId?: string }
+  /** Infantry walk to a carrier (entity, or any member of a unit with free seats) and board it. */
+  | { type: 'mount'; carrierId: string }
+  /** A carrier stops and lets all its passengers out. */
+  | { type: 'dismount' };
 
 export type Condition =
   | { type: 'simTime'; time: number }
@@ -497,6 +503,10 @@ export type Command =
   | { cmd: 'stop'; targetId: string }
   | { cmd: 'setRoe'; targetId: string; roe: Roe }
   | { cmd: 'setReactions'; targetId: string; reactions: Reactions }
+  /** Put infantry (entity or unit) into a carrier (entity or unit) instantly, e.g. when setting up a scenario. */
+  | { cmd: 'embark'; passengerId: string; carrierId: string }
+  /** Let a carrier's passengers out now. */
+  | { cmd: 'disembark'; carrierId: string }
   | { cmd: 'setFormation'; unitId: string; formation: Formation }
   | { cmd: 'rename'; id: string; name: string }
   | { cmd: 'createGraphic'; kind: GraphicKind; name?: string; points: Vec2[]; force?: ForceId }

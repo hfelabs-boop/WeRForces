@@ -259,6 +259,11 @@ export class DisGateway {
     this.timeScale = timeScale;
     for (const e of this.engine.entities.values()) {
       if (e.remote) continue;
+      // Passengers are not separate entities on the network while mounted.
+      if (e.embarkedIn) {
+        if (this.published.has(e.id)) this.sendRemoval(e);
+        continue;
+      }
       const v = e.velocity;
       const scale = running ? timeScale : 0;
       const apparent = { x: v.x * scale, y: v.y * scale, z: v.z * scale };

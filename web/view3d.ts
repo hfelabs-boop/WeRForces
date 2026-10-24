@@ -457,6 +457,7 @@ export class View3D {
   private syncEntities(list: EntitySnapshot[]): void {
     const seen = new Set<string>();
     for (const e of list) {
+      if (e.embarkedIn) continue;
       seen.add(e.id);
       const dead = e.damage === 'destroyed';
       const key = `${e.typeId}|${e.force}|${dead}`;

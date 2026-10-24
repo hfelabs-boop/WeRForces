@@ -126,12 +126,12 @@ Delete an entity, a unit (with its members) or a graphic.
 
 ## `assign_task`
 
-Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetId`; wait needs `duration`. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
+Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `targetId` | string | yes | entity (E..) or unit (U..) id |
-| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` | yes |  |
+| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` \| `"mount"` \| `"dismount"` | yes |  |
 | `to` | {x, y, lat, lon, town} |  | Location as {x,y}, {lat,lon} or {town} |
 | `routeId` | string |  |  |
 | `targetEntityId` | string |  |  |
@@ -150,6 +150,16 @@ Give an entity or unit a plan: an ordered list of statements executed in sequenc
 | `name` | string |  |  |
 | `loop` | boolean |  |  |
 | `statements` | array of object | yes |  |
+
+## `embark`
+
+Instantly put infantry (an entity or a whole unit) inside a carrier (an entity or a unit, whose seats are shared out), e.g. to set up a mechanized platoon with its squad mounted. Use assign_task type "mount" to make them walk to the carrier instead. With `dismount: true`, lets the passengers of the carrier(s) given in carrierId out now.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `passengerId` | string |  | infantry entity or unit id |
+| `carrierId` | string | yes | carrier entity or unit id |
+| `dismount` | boolean |  |  |
 
 ## `stop`
 

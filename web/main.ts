@@ -61,7 +61,9 @@ type PlanStepKind =
   | 'waitStrength'
   | 'setReaction'
   | 'fireMission'
-  | 'setCallForFire';
+  | 'setCallForFire'
+  | 'mount'
+  | 'dismount';
 
 class App {
   readonly api: Api;
@@ -236,6 +238,24 @@ class App {
       const t = this.types.get(this.entity(m)?.typeId ?? '');
       return !!t?.weapons.some((w) => this.catalog?.weapons.find((x) => x.id === w)?.indirect);
     });
+  }
+
+  /** Seats of an entity type (0 for non-carriers). */
+  capacityOf(id: string | undefined): number {
+    const e = id ? this.entity(id) : undefined;
+    return (e && this.types.get(e.typeId)?.capacity) ?? 0;
+  }
+
+  /** True if the id is a carrier entity, or a unit with carriers. */
+  isCarrier(id: string): boolean {
+    const u = this.unit(id);
+    return u ? u.memberIds.some((m) => this.capacityOf(m) > 0) : this.capacityOf(id) > 0;
+  }
+
+  /** Passengers aboard a carrier entity, or all carriers of a unit. */
+  passengerCount(id: string): number {
+    const u = this.unit(id);
+    return (u ? u.memberIds : [id]).reduce((n, m) => n + (this.entity(m)?.passengers?.length ?? 0), 0);
   }
 
   /** Domain of the thing being tasked (unit uses its leader). */
@@ -853,11 +873,23 @@ class App {
         if (hitEntity.force !== selForce && hitEntity.damage !== 'destroyed') add(`Attack ${hitEntity.name}`, () => this.task(sel, { type: 'attack', targetId: hitEntity.id }));
         if (hitEntity.force !== selForce && this.hasIndirect(sel)) add(`Fire mission on ${hitEntity.name}`, () => this.task(sel, { type: 'fireMission', target: { x: Math.round(hitEntity.x), y: Math.round(hitEntity.y) }, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
         add(`Follow ${hitEntity.name}`, () => this.task(sel, { type: 'follow', targetId: hitEntity.id }));
+        const carrierId = this.unit(hit) ? hit : hitEntity.id;
+        if (hitEntity.force === selForce && this.domainOf(sel) === 'lifeform' && this.isCarrier(carrierId)) {
+          const cname = this.unit(hit)?.name ?? hitEntity.name;
+          add(`Mount ${cname}`, () => this.task(sel, { type: 'mount', carrierId }));
+          add(`Put inside ${cname} now`, () => this.cmd({ cmd: 'embark', passengerId: sel, carrierId }));
+        }
       } else if (hitGraphic && (hitGraphic.kind === 'route' || hitGraphic.kind === 'phaseLine')) {
         add(`Follow route ${hitGraphic.name}`, () => this.task(sel, { type: 'followRoute', routeId: hitGraphic.id }));
         add(`Patrol route ${hitGraphic.name}`, () => this.task(sel, { type: 'patrol', routeId: hitGraphic.id }));
       } else {
         add('Move here', () => this.task(sel, { type: 'moveTo', target: world }));
+        if (this.passengerCount(sel) > 0) {
+          add('Move here and dismount', () => {
+            this.planDrafts.set(sel, { name: 'Move and dismount', statements: [{ kind: 'task', task: { type: 'moveTo', target: world } }, { kind: 'task', task: { type: 'dismount' } }] });
+            this.cmd({ cmd: 'assignPlan', targetId: sel, plan: this.planDrafts.get(sel)! });
+          });
+        }
         if (this.hasIndirect(sel)) add('Fire mission here (3 rounds)', () => this.task(sel, { type: 'fireMission', target: world, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
         if (this.domainOf(sel) === 'air') add('Orbit here (2 km)', () => this.task(sel, { type: 'orbit', center: world, radius: 2000 }));
         add('Add "move here" to plan', () => this.addPlanStep(sel, { kind: 'task', task: { type: 'moveTo', target: world } }));
@@ -1100,6 +1132,16 @@ class App {
       h('div', { class: 'row' }, route, h('button', { text: 'Follow', onclick: routeAction('followRoute') }), h('button', { text: 'Patrol', onclick: routeAction('patrol') })),
       h('div', { class: 'row' }, 'Wait', waitSecs, 's', h('button', { text: 'Wait', onclick: () => this.task(id, { type: 'wait', duration: Number(waitSecs.value) || 0 }) })),
       fireRow,
+      this.isCarrier(id)
+        ? h(
+            'div',
+            { class: 'row' },
+            h('span', { 'data-bind': 'passengers' }),
+            h('button', { text: 'Dismount', title: 'Stop and let the passengers out', onclick: () => this.task(id, { type: 'dismount' }) }),
+          )
+        : domain === 'lifeform'
+          ? h('div', { class: 'row' }, h('button', { text: 'Mount…', onclick: () => this.map.setMode({ kind: 'pickEntity', label: 'Click the carrier', onPick: (t) => this.task(id, { type: 'mount', carrierId: t }) }) }))
+          : null,
     );
   }
 
@@ -1141,6 +1183,10 @@ class App {
             return `Orbit ${fmtGrid(t.center.x, t.center.y)} r ${t.radius} m`;
           case 'fireMission':
             return `Fire mission ${fmtGrid(t.target.x, t.target.y)}, ${t.rounds ?? 3} rounds`;
+          case 'mount':
+            return `Mount ${this.unit(t.carrierId)?.name ?? name(t.carrierId)}`;
+          case 'dismount':
+            return 'Dismount passengers';
           default:
             return t.type;
         }
@@ -1190,6 +1236,8 @@ class App {
       ['waitStrength', 'Wait until strength below (%)'],
       ['setReaction', 'Set reaction on contact'],
       ['setCallForFire', 'Set call for fire'],
+      ...(this.domainOf(id) === 'lifeform' ? ([['mount', 'Mount carrier (pick)']] as [PlanStepKind, string][]) : []),
+      ...(this.isCarrier(id) ? ([['dismount', 'Dismount passengers']] as [PlanStepKind, string][]) : []),
       ...(this.hasIndirect(id) ? ([['fireMission', 'Fire mission (pick), rounds']] as [PlanStepKind, string][]) : []),
     ];
     const kindSel = h('select', {}, kinds.map(([k, l]) => h('option', { value: k, text: l }))) as HTMLSelectElement;
@@ -1279,6 +1327,11 @@ class App {
             return push({ kind: 'waitUntil', condition: { type: 'strengthBelow', fraction: Math.min(100, Math.max(1, Number(v) || 50)) / 100 } });
           case 'setReaction':
             return push({ kind: 'setReactions', reactions: { onContact: v === 'halt' ? 'halt' : 'continue' } });
+          case 'mount':
+            this.map.setMode({ kind: 'pickEntity', label: 'Click the carrier', onPick: (t) => push({ kind: 'task', task: { type: 'mount', carrierId: t } }) });
+            return;
+          case 'dismount':
+            return push({ kind: 'task', task: { type: 'dismount' } });
           case 'setCallForFire':
             return push({ kind: 'setReactions', reactions: { callForFire: v === 'yes' } });
           case 'fireMission':
@@ -1411,7 +1464,13 @@ class App {
       set('heading', fmtDeg(e.heading));
       set('speed', `${(e.speed * 3.6).toFixed(0)} km/h`);
       set('damage', e.damage === 'none' ? 'operational' : e.damage === 'destroyed' ? 'destroyed' : `${e.damage} kill`, `damage-${e.damage}`);
-      set('activity', [e.withdrawn ? 'WITHDRAWING' : '', e.halted ? 'HALTED (contact)' : '', e.plan, e.task].filter(Boolean).join(' — ') || (e.damage === 'destroyed' ? 'destroyed' : 'idle'));
+      set(
+        'activity',
+        [e.embarkedIn ? `MOUNTED in ${this.entity(e.embarkedIn)?.name ?? e.embarkedIn}` : '', e.withdrawn ? 'WITHDRAWING' : '', e.halted ? 'HALTED (contact)' : '', e.plan, e.task].filter(Boolean).join(' — ') ||
+          (e.damage === 'destroyed' ? 'destroyed' : 'idle'),
+      );
+      const cap = this.capacityOf(e.id);
+      if (cap) set('passengers', `Passengers ${e.passengers?.length ?? 0}/${cap}`);
       syncReactions(e.reactions);
       if (roeSel && document.activeElement !== roeSel) roeSel.value = e.roe;
       const t = this.types.get(e.typeId);
@@ -1449,7 +1508,10 @@ class App {
       const alive = members.filter((m) => m.damage !== 'destroyed');
       set('strength', `${alive.length}/${members.length}`);
       set('leader', lead?.name ?? '—');
-      set('activity', [u.withdrawn ? 'WITHDRAWING' : '', lead?.halted ? 'HALTED (contact)' : '', u.plan, u.task].filter(Boolean).join(' — ') || 'idle (in formation)');
+      const mounted = alive.filter((m) => m.embarkedIn).length;
+      set('activity', [mounted ? `MOUNTED ${mounted}/${alive.length}` : '', u.withdrawn ? 'WITHDRAWING' : '', lead?.halted ? 'HALTED (contact)' : '', u.plan, u.task].filter(Boolean).join(' — ') || 'idle (in formation)');
+      const seats = u.memberIds.reduce((n, m) => n + this.capacityOf(m), 0);
+      if (seats) set('passengers', `Passengers ${this.passengerCount(u.id)}/${seats}`);
       syncReactions(u.reactions);
       if (roeSel && document.activeElement !== roeSel && lead) roeSel.value = lead.roe;
       set(

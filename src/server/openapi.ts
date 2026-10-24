@@ -26,6 +26,13 @@ export function buildOpenApi(baseUrl: string): Schema {
       post: op(tag, `Assign a plan`, { parameters: [idParam()], ...body(ref('Plan')) }),
     },
     [`/api/v1/${kind}/{id}/stop`]: { post: op(tag, 'Stop the current task and plan', { parameters: [idParam()] }) },
+    [`/api/v1/${kind}/{id}/embark`]: {
+      post: op(tag, 'Put this infantry into a carrier now (scenario setup); a unit carrier shares out seats', {
+        parameters: [idParam()],
+        ...body({ type: 'object', required: ['carrierId'], properties: { carrierId: { type: 'string', description: 'carrier entity or unit id' } } }),
+      }),
+    },
+    [`/api/v1/${kind}/{id}/disembark`]: { post: op(tag, "Let this carrier's (or unit's carriers') passengers out now", { parameters: [idParam()] }) },
   });
 
   return {
@@ -199,6 +206,13 @@ export function buildOpenApi(baseUrl: string): Schema {
             { type: 'object', required: ['type', 'targetId'], properties: { type: { const: 'follow' }, targetId: { type: 'string' }, distance: { type: 'number' } } },
             { type: 'object', required: ['type', 'targetId'], properties: { type: { const: 'attack' }, targetId: { type: 'string' } } },
             { type: 'object', required: ['type', 'center', 'radius'], properties: { type: { const: 'orbit' }, center: ref('Position'), radius: { type: 'number' }, duration: { type: 'number' } } },
+            {
+              type: 'object',
+              required: ['type', 'carrierId'],
+              description: 'Infantry walk to the carrier (or the nearest member of a carrier unit with free seats) and board it. On a unit, seats are shared out.',
+              properties: { type: { const: 'mount' }, carrierId: { type: 'string' } },
+            },
+            { type: 'object', required: ['type'], description: 'A carrier stops (a helicopter lands) and lets all passengers out.', properties: { type: { const: 'dismount' } } },
             {
               type: 'object',
               required: ['type', 'target'],

@@ -408,6 +408,7 @@ const entityTypes: EntityTypeDef[] = [
     sensors: ['thermal-sight', 'eye'],
     weapons: ['gun-25mm', 'atgm-tow', 'mg-762'],
     crew: 3,
+    capacity: 6,
   },
   {
     id: 'us-hmmwv',
@@ -502,6 +503,7 @@ const entityTypes: EntityTypeDef[] = [
     sensors: ['eye'],
     weapons: ['mg-762'],
     crew: 4,
+    capacity: 11,
   },
   {
     id: 'us-f16',
@@ -616,6 +618,7 @@ const entityTypes: EntityTypeDef[] = [
     sensors: ['thermal-sight', 'eye'],
     weapons: ['gun-30mm-2a42', 'atgm-konkurs', 'mg-762'],
     crew: 3,
+    capacity: 7,
   },
   {
     id: 'ru-brdm2',
@@ -652,6 +655,7 @@ const entityTypes: EntityTypeDef[] = [
     sensors: ['eye'],
     weapons: [],
     crew: 2,
+    capacity: 20,
   },
   {
     id: 'ru-sa8',
@@ -708,6 +712,7 @@ const entityTypes: EntityTypeDef[] = [
     sensors: ['binoculars'],
     weapons: ['shturm', 'mg-127'],
     crew: 3,
+    capacity: 8,
   },
   {
     id: 'ru-su27',

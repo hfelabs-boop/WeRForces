@@ -196,7 +196,7 @@ export class CotPublisher {
     const seen = new Set<string>();
     let n = 0;
     for (const e of state.entities) {
-      if (e.remote && !this.config.includeRemote) continue;
+      if ((e.remote && !this.config.includeRemote) || e.embarkedIn) continue;
       seen.add(e.id);
       // Destroyed entities are reported once more with their damage, then go stale.
       const stale = e.damage === 'destroyed' ? Math.min(this.config.stale, this.config.interval * 3) : this.config.stale;

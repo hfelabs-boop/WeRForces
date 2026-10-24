@@ -38,7 +38,7 @@ import { PlanExecutor, type Taskable } from './plans.js';
 import { Rng } from './rng.js';
 import { SENSOR_INTERVAL, updateSensors } from './sensors.js';
 import { SpatialIndex } from './spatial.js';
-import { createTask, type Task, type TaskStatus } from './tasks.js';
+import { createTask, MountTask, type Task, type TaskStatus } from './tasks.js';
 import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
 import { formationOffset, perMemberTask, Unit } from './units.js';
 
@@ -316,6 +316,8 @@ export class Engine {
     const e = this.entities.get(id);
     if (e) {
       e.task?.cancel(e);
+      // Passengers of a deleted carrier get out where it was.
+      if (!e.remote) this.dismountAll(e, true);
       this.removeFromUnit(e);
       this.entities.delete(id);
       this.sensorDue.delete(id);
@@ -332,6 +334,105 @@ export class Engine {
     }
     if (this.graphics.delete(id)) return;
     throw new Error(`unknown object ${id}`);
+  }
+
+  // ------------------------------------------------------------ mounted infantry
+
+  /** Living entities riding in a carrier. */
+  passengersOf(carrierId: string): Entity[] {
+    const out: Entity[] = [];
+    for (const e of this.entities.values()) if (e.embarkedIn === carrierId && !e.destroyed) out.push(e);
+    return out;
+  }
+
+  /**
+   * Seats left in a carrier, counting passengers and infantry already on their way to
+   * board it (other than `boarding`).
+   */
+  freeSeats(carrier: Entity, boarding?: Entity): number {
+    let used = 0;
+    for (const e of this.entities.values()) {
+      if (e === boarding || e.destroyed) continue;
+      if (e.embarkedIn === carrier.id) used++;
+      else if (e.task instanceof MountTask && e.task.status === 'running' && e.task.carrier === carrier.id) used++;
+    }
+    return (carrier.type.capacity ?? 0) - used;
+  }
+
+  /** Board a passenger into a carrier now. */
+  embark(p: Entity, c: Entity): void {
+    if (p.domain !== 'lifeform') throw new Error(`${p.name} is not dismounted infantry`);
+    if (p.remote || c.remote) throw new Error('remote entities cannot mount or carry passengers');
+    if (p.destroyed || c.destroyed) throw new Error('destroyed entities cannot mount or carry passengers');
+    if (p.embarkedIn) throw new Error(`${p.name} is already mounted`);
+    if (p === c || p.force !== c.force) throw new Error(`${p.name} cannot mount ${c.name}`);
+    if (this.freeSeats(c, p) <= 0) throw new Error(`${c.name} has no free seats`);
+    p.embarkedIn = c.id;
+    p.plan = null;
+    p.steer = null;
+    p.speed = 0;
+    p.halted = false;
+    p.engagingId = undefined;
+    p.attackTargetId = undefined;
+    p.contacts.clear();
+    this.syncPassenger(p, c);
+    this.spatial.invalidate();
+    this.log('task', `${p.name} mounted ${c.name}`, p.id, c.id);
+  }
+
+  private syncPassenger(p: Entity, c: Entity): void {
+    p.x = c.x;
+    p.y = c.y;
+    p.z = c.z;
+    p.heading = c.heading;
+  }
+
+  /**
+   * Let all passengers out around the carrier, in a line behind it. With `bailOut`
+   * (carrier hit or deleted) they leave wherever it is, moving or not.
+   */
+  dismountAll(c: Entity, bailOut = false): Entity[] {
+    const list = this.passengersOf(c.id);
+    list.forEach((p, k) => {
+      const off = rotateOffset({ x: (k - (list.length - 1) / 2) * 4, y: -8 - (k % 2) * 3 }, c.heading);
+      const at = this.findValidPosition({ x: c.x + off.x, y: c.y + off.y }, 'lifeform') ?? { x: c.x, y: c.y };
+      p.embarkedIn = undefined;
+      p.x = at.x;
+      p.y = at.y;
+      p.z = this.terrain.elevation(at.x, at.y);
+      p.speed = 0;
+      p.heading = c.heading;
+      this.setEntityTask(p, null);
+      // A dismounted squad falls back in on its leader.
+      if (p.unit && p.unit.leader !== p && !p.unit.leader?.embarkedIn) p.unit.formUp(this);
+    });
+    if (list.length) {
+      this.spatial.invalidate();
+      this.log('task', `${list.length} passenger${list.length > 1 ? 's' : ''} ${bailOut ? 'bailed out of' : 'dismounted from'} ${c.name}`, c.id);
+    }
+    return list;
+  }
+
+  /** Instantly put infantry (an entity or a unit) into a carrier (an entity or a unit's members). */
+  embarkNow(passengerId: string, carrierId: string): number {
+    const pu = this.units.get(passengerId);
+    const people = pu ? pu.alive().filter((m) => !m.embarkedIn) : [this.entities.get(passengerId)];
+    const cu = this.units.get(carrierId);
+    const carriers = cu ? cu.alive() : [this.entities.get(carrierId)];
+    if (people.some((p) => !p)) throw new Error(`unknown entity or unit ${passengerId}`);
+    if (carriers.some((c) => !c)) throw new Error(`unknown entity or unit ${carrierId}`);
+    let n = 0;
+    for (const p of people as Entity[]) {
+      const c = (carriers as Entity[]).find((x) => x !== p && x.force === p.force && this.freeSeats(x, p) > 0);
+      if (!c) {
+        if (n === 0) throw new Error('no free seats');
+        break;
+      }
+      this.setEntityTask(p, null);
+      this.embark(p, c);
+      n++;
+    }
+    return n;
   }
 
   // ------------------------------------------------------------ tasking
@@ -495,6 +596,9 @@ export class Engine {
       case 'attack':
         if (!this.entities.has(spec.targetId)) throw new Error(`unknown entity ${spec.targetId}`);
         break;
+      case 'mount':
+        if (!this.entities.has(spec.carrierId) && !this.units.has(spec.carrierId)) throw new Error(`unknown carrier ${spec.carrierId}`);
+        break;
       case 'moveTo':
       case 'orbit':
       case 'fireMission': {
@@ -574,6 +678,18 @@ export class Engine {
   }
 
   private afterDamage(target: Entity, outcome: string, byId?: string): void {
+    if ((outcome === 'kill' || outcome === 'mobility') && !target.remote) {
+      // Passengers of a knocked-out carrier: some die with it, the rest bail out.
+      if (outcome === 'kill') {
+        for (const p of this.passengersOf(target.id)) {
+          if (!this.rng.chance(0.5)) continue;
+          p.destroyed = true;
+          p.embarkedIn = undefined;
+          this.log('destroyed', `${p.name} killed inside ${target.name}`, p.id, byId);
+        }
+      }
+      this.dismountAll(target, true);
+    }
     if (outcome === 'kill') {
       target.task?.cancel(target);
       target.task = null;
@@ -692,7 +808,15 @@ export class Engine {
       }
     }
 
-    for (const e of this.entities.values()) stepMovement(e, this.terrain, dt);
+    for (const e of this.entities.values()) {
+      if (!e.embarkedIn) {
+        stepMovement(e, this.terrain, dt);
+        continue;
+      }
+      const c = this.entities.get(e.embarkedIn);
+      if (c) this.syncPassenger(e, c);
+      else e.embarkedIn = undefined;
+    }
 
     for (const e of this.entities.values()) {
       if (e.remote) continue;
@@ -957,8 +1081,9 @@ export class Engine {
 
   // ------------------------------------------------------------ snapshots
 
-  snapshotEntity(e: Entity): EntitySnapshot {
+  snapshotEntity(e: Entity, passengers?: Map<string, string[]>): EntitySnapshot {
     const running = e.task && e.task.status === 'running';
+    const riders = (e.type.capacity ?? 0) > 0 ? (passengers ? passengers.get(e.id) : this.passengersOf(e.id).map((p) => p.id)) : undefined;
     return {
       id: e.id,
       name: e.name,
@@ -987,10 +1112,18 @@ export class Engine {
       halted: e.halted || undefined,
       withdrawn: e.withdrawn || undefined,
       embarkedIn: e.embarkedIn,
+      passengers: riders?.length ? riders : undefined,
     };
   }
 
   snapshot(): SimState {
+    const passengers = new Map<string, string[]>();
+    for (const e of this.entities.values()) {
+      if (!e.embarkedIn || e.destroyed) continue;
+      const list = passengers.get(e.embarkedIn);
+      if (list) list.push(e.id);
+      else passengers.set(e.embarkedIn, [e.id]);
+    }
     const units: UnitSnapshot[] = [...this.units.values()].map((u) => {
       const c = u.centroid();
       const leaderTask = u.leader?.task;
@@ -1015,7 +1148,7 @@ export class Engine {
       running: false,
       timeScale: 1,
       scenarioName: this.scenarioName,
-      entities: [...this.entities.values()].map((e) => this.snapshotEntity(e)),
+      entities: [...this.entities.values()].map((e) => this.snapshotEntity(e, passengers)),
       units,
       graphics: [...this.graphics.values()],
     };
