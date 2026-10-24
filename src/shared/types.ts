@@ -166,6 +166,8 @@ export interface UnitTemplate {
   members: string[];
   formation: Formation;
   spacing: number;
+  /** Subordinate unit templates (e.g. a company's platoons), placed in `formation` at `spacing` around the members (the HQ). */
+  subunits?: string[];
 }
 
 export interface Catalog {
@@ -403,6 +405,8 @@ export interface UnitRecord {
   formation: Formation;
   spacing: number;
   echelon: UnitTemplate['echelon'];
+  /** Superior unit in the chain of command. */
+  parentId?: string;
   plan?: Plan;
   task?: TaskSpec;
   reactions?: Reactions;
@@ -446,6 +450,8 @@ export interface ScenarioFile {
   rules?: SimulationRules;
   /** Time of day and weather at the start. */
   environment?: Environment;
+  /** Checkpoint only: orders still on their way. */
+  orders?: PendingOrder[];
 }
 
 /** Optional parts of the model, for comparison runs. Missing fields mean on. */
@@ -456,6 +462,17 @@ export interface SimulationRules {
   morale?: boolean;
   /** Vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down. */
   fuel?: boolean;
+  /** Orders take time to pass down the chain of command (by echelon). Off by default. */
+  orderDelay?: boolean;
+}
+
+/** An order on its way to an entity or unit (rules.orderDelay). */
+export interface PendingOrder {
+  targetId: string;
+  task?: TaskSpec;
+  plan?: Plan;
+  /** Simulation time it arrives and is acted on. */
+  due: number;
 }
 
 export type MoraleState = 'steady' | 'shaken' | 'broken';
@@ -547,6 +564,9 @@ export interface UnitSnapshot {
   force: ForceId;
   echelon: UnitTemplate['echelon'];
   formation: Formation;
+  /** Superior unit, and subordinate units, in the chain of command. */
+  parentId?: string;
+  childIds?: string[];
   leaderId?: string;
   memberIds: string[];
   x: number;
@@ -599,6 +619,8 @@ export interface SimState {
   /** Smoke clouds on the battlefield. */
   smoke?: SmokeCloud[];
   environment?: EnvironmentState;
+  /** Orders on their way down the chain of command. */
+  orders?: { targetId: string; text: string; due: number }[];
   dis?: DisStatus;
 }
 
@@ -658,6 +680,8 @@ export type Command =
   /** Turn optional model parts (suppression, morale, …) on or off. */
   | { cmd: 'setRules'; rules: SimulationRules }
   | { cmd: 'setEnvironment'; environment: Environment }
+  /** Put a unit under a superior unit (null: make it independent). */
+  | { cmd: 'setSuperior'; unitId: string; superiorId: string | null }
   | { cmd: 'setFormation'; unitId: string; formation: Formation }
   | { cmd: 'rename'; id: string; name: string }
   | { cmd: 'createGraphic'; kind: GraphicKind; name?: string; points: Vec2[]; force?: ForceId; density?: number }

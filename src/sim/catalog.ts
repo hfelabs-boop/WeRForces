@@ -1018,6 +1018,24 @@ const unitTemplates: UnitTemplate[] = [
   { id: 'us-mortar-section', name: 'US 81mm Mortar Section', echelon: 'section', members: ['us-mortar-team', 'us-mortar-team'], formation: 'line', spacing: 40 },
   { id: 'us-supply-section', name: 'US Supply Section', echelon: 'section', members: ['us-hemtt', 'us-hemtt'], formation: 'column', spacing: 40 },
   { id: 'us-engineer-squad', name: 'US Engineer Squad', echelon: 'section', members: Array(6).fill('us-engineer'), formation: 'wedge', spacing: 12 },
+  {
+    id: 'us-tank-company',
+    name: 'US Tank Company',
+    echelon: 'company',
+    members: ['us-m1a2', 'us-m1a2'],
+    formation: 'wedge',
+    spacing: 500,
+    subunits: ['us-tank-platoon', 'us-tank-platoon', 'us-tank-platoon'],
+  },
+  {
+    id: 'us-mech-company',
+    name: 'US Mech Company',
+    echelon: 'company',
+    members: ['us-m2a3', 'us-m1a2'],
+    formation: 'line',
+    spacing: 500,
+    subunits: ['us-mech-platoon', 'us-mech-platoon', 'us-mech-platoon'],
+  },
   { id: 'ru-tank-platoon', name: 'RU Tank Platoon', echelon: 'platoon', members: ['ru-t72b3', 'ru-t72b3', 'ru-t72b3'], formation: 'wedge', spacing: 80 },
   { id: 'ru-mech-platoon', name: 'RU Mech Platoon', echelon: 'platoon', members: ['ru-bmp2', 'ru-bmp2', 'ru-bmp2'], formation: 'line', spacing: 80 },
   { id: 'ru-rifle-squad', name: 'RU Rifle Squad', echelon: 'section', members: Array(8).fill('ru-rifleman'), formation: 'wedge', spacing: 12 },
@@ -1027,6 +1045,15 @@ const unitTemplates: UnitTemplate[] = [
   { id: 'ru-mortar-battery', name: 'RU 120mm Mortar Battery', echelon: 'platoon', members: Array(4).fill('ru-mortar-team'), formation: 'line', spacing: 40 },
   { id: 'ru-sapper-squad', name: 'RU Sapper Squad', echelon: 'section', members: Array(6).fill('ru-sapper'), formation: 'wedge', spacing: 12 },
   { id: 'ru-supply-section', name: 'RU Supply Section', echelon: 'section', members: ['ru-ural-supply', 'ru-ural-supply'], formation: 'column', spacing: 40 },
+  {
+    id: 'ru-tank-company',
+    name: 'RU Tank Company',
+    echelon: 'company',
+    members: ['ru-t72b3'],
+    formation: 'wedge',
+    spacing: 500,
+    subunits: ['ru-tank-platoon', 'ru-tank-platoon', 'ru-tank-platoon'],
+  },
   { id: 'ru-flanker-flight', name: 'Su-27 Flight', echelon: 'flight', members: ['ru-su27', 'ru-su27'], formation: 'echelonRight', spacing: 600 },
 ];
 
@@ -1069,6 +1096,7 @@ export class CatalogIndex {
     }
     for (const u of catalog.unitTemplates) {
       for (const m of u.members) if (!this.types.has(m)) throw new Error(`unit template ${u.id} references unknown type ${m}`);
+      for (const s of u.subunits ?? []) if (!this.templates.has(s) || s === u.id) throw new Error(`unit template ${u.id} references unknown subunit template ${s}`);
     }
   }
 

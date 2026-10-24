@@ -410,9 +410,17 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'set_unit_superior',
+    'Put a unit under a superior unit in the chain of command (or make it independent with superiorId null). An order given to the superior passes down to its subordinate units: moves keep their positions relative to each other, defend/overwatch/screen/ambush spread them in a line, other tasks go to all. With the orderDelay simulation rule on, each level adds a delay.',
+    { unitId: z.string(), superiorId: z.string().nullable() },
+    async ({ unitId, superiorId }) => api('PATCH', `/api/v1/units/${encodeURIComponent(unitId)}`, { superiorId }),
+    { idempotentHint: true },
+  );
+
+  tool(
     'set_simulation_rules',
-    'Turn optional parts of the model on or off for this scenario (all are on by default): suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel). Useful for comparison runs.',
-    { suppression: z.boolean().optional(), morale: z.boolean().optional(), fuel: z.boolean().optional() },
+    'Turn optional parts of the model on or off for this scenario. Suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel) are on by default; orderDelay (orders take 5-60 s to pass down the chain of command, by echelon) is off by default. Useful for comparison runs.',
+    { suppression: z.boolean().optional(), morale: z.boolean().optional(), fuel: z.boolean().optional(), orderDelay: z.boolean().optional() },
     async (rules) => api('PUT', '/api/v1/simulation/rules', rules),
     { idempotentHint: true },
   );

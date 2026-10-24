@@ -23,6 +23,7 @@ import type {
   SimState,
   TaskSpec,
   SimulationRules,
+  PendingOrder,
   Environment,
   EnvironmentState,
   TerrainData,
@@ -40,7 +41,7 @@ import { DEFAULT_ENVIRONMENT, environmentAt, groundFactor, normalizeEnvironment,
 import { checkCallsForFire } from './fires.js';
 import { decaySuppression, isPinned, updateMorale } from './morale.js';
 import { stepMovement } from './movement.js';
-import { PlanExecutor, type Taskable } from './plans.js';
+import { describeStatement, PlanExecutor, type Taskable } from './plans.js';
 import { Rng } from './rng.js';
 import { SENSOR_INTERVAL, updateSensors } from './sensors.js';
 import { Obstacles } from './obstacles.js';
@@ -49,10 +50,13 @@ import { burnFuel, updateResupply } from './supply.js';
 import { SpatialIndex } from './spatial.js';
 import { createTask, MountTask, type Task, type TaskStatus } from './tasks.js';
 import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
-import { formationOffset, perMemberTask, Unit } from './units.js';
+import { formationOffset, perMemberTask, splitOrder, Unit } from './units.js';
 
 export const DEFAULT_DT = 0.1;
-export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true };
+export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
+
+/** Seconds for an order to reach and be acted on, by echelon (rules.orderDelay). */
+const ORDER_DELAY: Record<UnitTemplate['echelon'] | 'entity', number> = { entity: 5, team: 10, flight: 10, section: 15, platoon: 30, company: 60, group: 60 };
 const MAX_EVENTS = 1000;
 
 type Listener<T> = (value: T) => void;
@@ -148,6 +152,8 @@ export class Engine {
 
   /** Optional model parts (see SimulationRules); all on unless a scenario turns them off. */
   rules: Required<SimulationRules> = { ...DEFAULT_RULES };
+  /** Orders on their way down the chain of command (rules.orderDelay). */
+  pendingOrders: PendingOrder[] = [];
   /** Time of day and weather at the scenario's start (time 0). */
   environment: Required<Environment> = { ...DEFAULT_ENVIRONMENT };
   /** The environment now (clock and light), updated once a simulated second. */
@@ -289,6 +295,25 @@ export class Engine {
     }
     const unit = this.groupUnit(members.map((m) => m.id), name ?? tpl.name, tpl.formation, tpl.spacing, tpl.echelon);
     members.forEach((m, i) => (m.name = `${unit.name} ${i === 0 ? 'Lead' : i + 1}`));
+    if (tpl.subunits?.length) {
+      // The members are the HQ, set back behind the subordinate units' formation.
+      const back = rotateOffset({ x: 0, y: -tpl.spacing * 0.6 }, heading);
+      for (const m of members) {
+        const p = this.findValidPosition({ x: clampTo(m.x + back.x, this.terrain.spec.size), y: clampTo(m.y + back.y, this.terrain.spec.size) }, m.domain);
+        if (p) {
+          m.x = p.x;
+          m.y = p.y;
+        }
+      }
+      for (const m of members) m.name = `${unit.name} HQ${members.length > 1 ? ` ${members.indexOf(m) + 1}` : ''}`;
+      tpl.subunits.forEach((sid, k) => {
+        const off = rotateSlot(tpl.formation, k, tpl.spacing, heading);
+        const echelon = this.catalog.templates.get(sid)!.echelon;
+        const nth = `${k + 1}${k === 0 ? 'st' : k === 1 ? 'nd' : k === 2 ? 'rd' : 'th'}`;
+        const sub = this.createUnitFromTemplate(sid, force, clampTo(x + off.x, this.terrain.spec.size), clampTo(y + off.y, this.terrain.spec.size), heading, `${nth} ${echelon[0].toUpperCase()}${echelon.slice(1)}`);
+        sub.parentId = unit.id;
+      });
+    }
     return unit;
   }
 
@@ -325,8 +350,113 @@ export class Engine {
     const i = unit.memberList.indexOf(e);
     if (i >= 0) unit.memberList.splice(i, 1);
     e.unit = null;
-    if (unit.memberList.length === 0) this.units.delete(unit.id);
+    if (unit.memberList.length === 0) this.dropUnit(unit.id);
     else if (unit.leader === e) unit.update(this);
+  }
+
+  /** Remove a unit; its subordinates become independent. */
+  private dropUnit(id: string): void {
+    this.units.delete(id);
+    for (const u of this.units.values()) if (u.parentId === id) u.parentId = undefined;
+    this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== id);
+  }
+
+  /** Subordinate units of a unit. */
+  subordinatesOf(unit: Unit): Unit[] {
+    const out: Unit[] = [];
+    for (const u of this.units.values()) if (u.parentId === unit.id) out.push(u);
+    return out;
+  }
+
+  /** Put a unit under a superior unit of the same force (null: independent). */
+  setSuperior(unitId: string, superiorId: string | null): void {
+    const u = this.units.get(unitId);
+    if (!u) throw new Error(`unknown unit ${unitId}`);
+    if (superiorId === null) {
+      u.parentId = undefined;
+      return;
+    }
+    const sup = this.units.get(superiorId);
+    if (!sup) throw new Error(`unknown unit ${superiorId}`);
+    if (sup.force !== u.force) throw new Error('a superior must be of the same force');
+    for (let p: Unit | undefined = sup; p; p = p.parentId ? this.units.get(p.parentId) : undefined) {
+      if (p === u) throw new Error(`${sup.name} is under ${u.name} already`);
+    }
+    u.parentId = sup.id;
+    this.log('info', `${u.name} placed under ${sup.name}`, u.id, sup.id);
+  }
+
+  // ------------------------------------------------------------ orders
+
+  /**
+   * Give an entity or unit an order, as a player or API client does. With rules.orderDelay
+   * on it arrives after a delay that depends on the echelon; orders to a unit with
+   * subordinates pass on down the chain, each level adding its own delay.
+   */
+  issueOrder(targetId: string, order: { task?: TaskSpec; plan?: Plan }): number {
+    const t = this.resolveTarget(targetId);
+    if (order.task) this.validateTask(order.task);
+    if (order.plan) for (const st of order.plan.statements) if (st.kind === 'task') this.validateTask(st.task);
+    // A new order replaces one still on its way.
+    this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== targetId);
+    const base = this.rules.orderDelay ? ORDER_DELAY[t instanceof Unit ? t.echelon : 'entity'] : 0;
+    if (base <= 0) {
+      if (order.plan) this.assignPlan(targetId, order.plan);
+      else if (order.task) this.assignTask(targetId, order.task);
+      return 0;
+    }
+    const delay = Math.round(base * (0.8 + 0.4 * this.rng.next()));
+    this.pendingOrders.push({ targetId, task: order.task, plan: order.plan, due: Math.round((this.time + delay) * 10) / 10 });
+    this.log('task', `Order to ${t.name}: ${this.describeOrder(order)} (arrives in ${delay} s)`, t.id);
+    return delay;
+  }
+
+  private describeOrder(o: { task?: TaskSpec; plan?: Plan }): string {
+    return o.plan ? `plan ${o.plan.name ?? ''}`.trim() : describeStatement({ kind: 'task', task: o.task! }, this);
+  }
+
+  private deliverOrders(): void {
+    if (!this.pendingOrders.length) return;
+    const due = this.pendingOrders.filter((o) => o.due <= this.time + 1e-9);
+    if (!due.length) return;
+    this.pendingOrders = this.pendingOrders.filter((o) => o.due > this.time + 1e-9);
+    for (const o of due) {
+      if (!this.entities.has(o.targetId) && !this.units.has(o.targetId)) continue;
+      try {
+        if (o.plan) this.assignPlan(o.targetId, o.plan);
+        else if (o.task) this.assignTask(o.targetId, o.task);
+      } catch (err) {
+        this.log('task', `Order to ${this.nameOf(o.targetId)} could not be carried out: ${(err as Error).message}`, o.targetId);
+      }
+    }
+  }
+
+  /** Start a task on an entity or unit; a unit with subordinates passes its part of it on. */
+  startOrder(owner: Taskable, spec: TaskSpec, cascade = true): void {
+    const unit = this.units.get(owner.id);
+    const subs = unit && cascade ? this.subordinatesOf(unit) : [];
+    if (!unit || subs.length === 0) {
+      if (unit && cascade) unit.orderedSubs = [];
+      owner.startTask(this, spec);
+      return;
+    }
+    const { own, children } = splitOrder(this, unit, subs, spec);
+    unit.startTask(this, own);
+    unit.orderedSubs = children.map((c) => c.unit.id);
+    for (const c of children) this.issueOrder(c.unit.id, { task: c.spec });
+  }
+
+  /** Task status of an entity or unit, counting subordinates still carrying out its order. */
+  orderStatus(owner: Taskable): TaskStatus | 'none' {
+    const own = owner.taskStatus();
+    if (own === 'running') return own;
+    const unit = this.units.get(owner.id);
+    for (const id of unit?.orderedSubs ?? []) {
+      if (this.pendingOrders.some((o) => o.targetId === id)) return 'running';
+      const sub = this.units.get(id);
+      if (sub && this.orderStatus(sub) === 'running') return 'running';
+    }
+    return own;
   }
 
   addGraphic(kind: GraphicKind, points: Vec2[], name?: string, force: ForceId = 1, id?: string): Graphic {
@@ -360,7 +490,7 @@ export class Engine {
     const u = this.units.get(id);
     if (u) {
       for (const m of [...u.memberList]) this.deleteObject(m.id);
-      this.units.delete(id);
+      this.dropUnit(id);
       return;
     }
     if (this.graphics.delete(id)) {
@@ -491,13 +621,14 @@ export class Engine {
   }
 
   /** Assign a task directly; replaces any running plan on the target. */
-  assignTask(targetId: string, spec: TaskSpec): void {
+  /** Start a task now (no order delay). `cascade`: pass it on to subordinate units. */
+  assignTask(targetId: string, spec: TaskSpec, cascade = true): void {
     const t = this.resolveTarget(targetId);
     this.validateTask(spec);
     t.plan = null;
     t.assignedPlan = undefined;
     t.assignedTask = spec;
-    if (t instanceof Unit) t.startTask(this, spec);
+    if (t instanceof Unit) this.startOrder(t, spec, cascade);
     else this.setEntityTask(t, createTask(spec));
     this.log('task', `${t.name}: ${createTask(spec).describe(this)}`, t.id);
   }
@@ -519,6 +650,7 @@ export class Engine {
 
   stop(targetId: string): void {
     const t = this.resolveTarget(targetId);
+    this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== targetId);
     t.plan = null;
     t.assignedPlan = undefined;
     t.assignedTask = undefined;
@@ -911,6 +1043,7 @@ export class Engine {
     // Round so repeated 0.1 s steps don't accumulate floating-point noise (900.0000000001).
     this.time = Math.round((this.time + dt) * 1e6) / 1e6;
     this.spatial.invalidate();
+    this.deliverOrders();
     decaySuppression(this, dt);
     for (const u of this.units.values()) u.update(this);
     for (const u of this.units.values()) u.plan?.update(this, u);
@@ -1005,6 +1138,7 @@ export class Engine {
     this.units.clear();
     this.graphics.clear();
     this.shots = [];
+    this.pendingOrders = [];
     this.sensorDue.clear();
     this.losMemo.clear();
     this.smoke.clear();
@@ -1078,6 +1212,8 @@ export class Engine {
         if (leader.alive) unit.formUp(this);
       }
     }
+    for (const u of s.units ?? []) if (u.parentId && this.units.has(u.parentId) && this.units.has(u.id)) this.units.get(u.id)!.parentId = u.parentId;
+    this.pendingOrders = (s.orders ?? []).filter((o) => this.entities.has(o.targetId) || this.units.has(o.targetId)).map((o) => ({ ...o }));
     // Tasks and plans last, since they can reference any object. Checkpoints resume them part-way.
     for (const r of s.entities ?? []) {
       const e = this.entities.get(r.id)!;
@@ -1086,7 +1222,7 @@ export class Engine {
         this.assignPlan(r.id, r.plan);
         if (r.state?.planIndex !== undefined) e.plan!.resume(r.state.planIndex, r.state.taskState);
       } else if (r.task && !r.state?.taskDone) {
-        this.assignTask(r.id, r.state?.taskState ?? r.task);
+        this.assignTask(r.id, r.state?.taskState ?? r.task, false);
         e.assignedTask = r.task;
       } else if (r.task) {
         e.assignedTask = r.task;
@@ -1100,7 +1236,7 @@ export class Engine {
         this.assignPlan(u.id, u.plan);
         if (u.state?.planIndex !== undefined) unit.plan!.resume(u.state.planIndex, u.state.taskState);
       } else if (u.task && !u.state?.taskDone) {
-        this.assignTask(u.id, u.state?.taskState ?? u.task);
+        this.assignTask(u.id, u.state?.taskState ?? u.task, false);
         unit.assignedTask = u.task;
         if (u.state && perMemberTask(u.task)) {
           // Each member resumes its own part (e.g. rounds left to fire); finished members stay idle.
@@ -1250,6 +1386,7 @@ export class Engine {
         formation: u.formation,
         spacing: u.spacing,
         echelon: u.echelon,
+        parentId: u.parentId,
         plan: u.assignedPlan,
         task: u.assignedTask,
         reactions: Object.keys(u.reactions).length ? u.reactions : undefined,
@@ -1277,7 +1414,8 @@ export class Engine {
         range: sh.range,
       })),
       rngState: this.time === 0 ? undefined : this.rng.state,
-      rules: Object.values(this.rules).every((v) => v) ? undefined : { ...this.rules },
+      rules: JSON.stringify(this.rules) === JSON.stringify(DEFAULT_RULES) ? undefined : { ...this.rules },
+      orders: this.pendingOrders.length ? this.pendingOrders.map((o) => ({ ...o })) : undefined,
       environment: JSON.stringify(this.environment) === JSON.stringify(DEFAULT_ENVIRONMENT) ? undefined : { ...this.environment },
       smoke: this.smoke.clouds.length ? this.smoke.clouds.map((c) => ({ ...c })) : undefined,
     };
@@ -1335,6 +1473,13 @@ export class Engine {
       if (list) list.push(e.id);
       else passengers.set(e.embarkedIn, [e.id]);
     }
+    const children = new Map<string, string[]>();
+    for (const u of this.units.values()) {
+      if (!u.parentId) continue;
+      const list = children.get(u.parentId);
+      if (list) list.push(u.id);
+      else children.set(u.parentId, [u.id]);
+    }
     const units: UnitSnapshot[] = [...this.units.values()].map((u) => {
       const c = u.centroid();
       const leaderTask = u.leader?.task;
@@ -1344,6 +1489,8 @@ export class Engine {
         force: u.force,
         echelon: u.echelon,
         formation: u.formation,
+        parentId: u.parentId,
+        childIds: children.get(u.id),
         leaderId: u.leader?.id,
         memberIds: u.memberList.map((m) => m.id),
         x: c.x,
@@ -1366,6 +1513,9 @@ export class Engine {
       graphics: [...this.graphics.values()],
       smoke: this.smoke.clouds.length ? this.smoke.clouds : undefined,
       environment: this.env,
+      orders: this.pendingOrders.length
+        ? this.pendingOrders.map((o) => ({ targetId: o.targetId, text: this.describeOrder(o), due: o.due }))
+        : undefined,
     };
   }
 

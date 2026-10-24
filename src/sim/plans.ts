@@ -188,12 +188,13 @@ export class PlanExecutor {
       const st = this.plan.statements[this.index];
       if (st.kind === 'task') {
         if (!this.taskActive) {
-          owner.startTask(engine, this.resumeTask ?? st.task);
+          // A task resumed from a checkpoint is not passed down again: subordinates resume their own.
+          engine.startOrder(owner, this.resumeTask ?? st.task, !this.resumeTask);
           this.resumeTask = undefined;
           this.taskActive = true;
           return;
         }
-        const status = owner.taskStatus();
+        const status = engine.orderStatus(owner);
         if (status === 'running') return;
         this.taskActive = false;
         this.index++;

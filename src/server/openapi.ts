@@ -84,6 +84,7 @@ export function buildOpenApi(baseUrl: string): Schema {
               suppression: { type: 'boolean', description: 'incoming fire suppresses: less accurate, slower, worse at spotting; infantry get pinned' },
               morale: { type: 'boolean', description: 'units become shaken and break under losses and fire' },
               fuel: { type: 'boolean', description: 'vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down' },
+              orderDelay: { type: 'boolean', description: 'orders take time to pass down the chain of command: 5 s for an entity, 15 s a section, 30 s a platoon, 60 s a company (off by default)' },
             },
           }),
         }),
@@ -161,7 +162,19 @@ export function buildOpenApi(baseUrl: string): Schema {
       },
       '/api/v1/units/{id}': {
         get: op('Units', 'Get a unit with its members', { parameters: [idParam()] }),
-        patch: op('Units', 'Rename, set formation, ROE or reactions', { parameters: [idParam()], ...body({ type: 'object', properties: { name: { type: 'string' }, formation: ref('Formation'), roe: ref('Roe'), reactions: ref('Reactions') } }) }),
+        patch: op('Units', 'Rename, set formation, ROE or reactions, or put under a superior unit', {
+          parameters: [idParam()],
+          ...body({
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              formation: ref('Formation'),
+              roe: ref('Roe'),
+              reactions: ref('Reactions'),
+              superiorId: { type: ['string', 'null'], description: 'superior unit in the chain of command (null: independent). Orders to the superior pass down to it.' },
+            },
+          }),
+        }),
         delete: { tags: ['Units'], summary: 'Delete a unit and its members', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } },
       },
       ...taskable('units', 'Units'),

@@ -122,6 +122,8 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `us-mortar-section` | US 81mm Mortar Section | section | 2× 81mm Mortar Team | line | 40 m |
 | `us-supply-section` | US Supply Section | section | 2× M977 HEMTT supply truck | column | 40 m |
 | `us-engineer-squad` | US Engineer Squad | section | 6× US Combat Engineer | wedge | 12 m |
+| `us-tank-company` | US Tank Company | company | HQ 2× M1A2 Abrams; 3× `us-tank-platoon` | wedge | 500 m |
+| `us-mech-company` | US Mech Company | company | HQ 1× M2A3 Bradley, 1× M1A2 Abrams; 3× `us-mech-platoon` | line | 500 m |
 | `ru-tank-platoon` | RU Tank Platoon | platoon | 3× T-72B3 | wedge | 80 m |
 | `ru-mech-platoon` | RU Mech Platoon | platoon | 3× BMP-2 | line | 80 m |
 | `ru-rifle-squad` | RU Rifle Squad | section | 8× Russian Rifleman | wedge | 12 m |
@@ -131,4 +133,5 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `ru-mortar-battery` | RU 120mm Mortar Battery | platoon | 4× 120mm Mortar Team | line | 40 m |
 | `ru-sapper-squad` | RU Sapper Squad | section | 6× RU Sapper | wedge | 12 m |
 | `ru-supply-section` | RU Supply Section | section | 2× Ural-4320 supply truck | column | 40 m |
+| `ru-tank-company` | RU Tank Company | company | HQ 1× T-72B3; 3× `ru-tank-platoon` | wedge | 500 m |
 | `ru-flanker-flight` | Su-27 Flight | flight | 2× Su-27 Flanker | echelonRight | 600 m |

@@ -434,6 +434,7 @@ export class ApiV1 {
       if (b.formation !== undefined) this.run({ cmd: 'setFormation', unitId: id, formation: b.formation as never });
       if (b.roe !== undefined) this.run({ cmd: 'setRoe', targetId: id, roe: b.roe as never });
       if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
+      if (b.superiorId !== undefined) this.run({ cmd: 'setSuperior', unitId: id, superiorId: b.superiorId as string | null });
       return { json: this.unitView(this.unit(id)) };
     });
     r.delete(`${P}/units/{id}`, (req) => {

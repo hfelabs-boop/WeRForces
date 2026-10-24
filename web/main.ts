@@ -500,6 +500,7 @@ class App {
       h('h4', { text: 'Models' }),
       box('suppression', 'Suppression', 'Incoming fire makes targets less accurate, slower to fire and spot; infantry get pinned down'),
       box('morale', 'Morale', 'Units become shaken and break under losses and fire, then rally'),
+      box('orderDelay', 'Order delay', 'Orders take time to reach units: about 5 s for an entity, 15 s a section, 30 s a platoon, 60 s a company; orders to a superior pass down level by level'),
       box('fuel', 'Fuel', 'Vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down. Supply trucks refuel and rearm.'),
       h('h4', { text: 'Time and weather (at the scenario start)' }),
       h(
@@ -1019,7 +1020,7 @@ class App {
       '|' +
       this.selectedId +
       '|' +
-      st.units.map((u) => u.id + u.name + u.memberIds.join()).join() +
+      st.units.map((u) => u.id + u.name + u.memberIds.join() + (u.parentId ?? '')).join() +
       '|' +
       st.entities.map((e) => e.id + e.name + e.damage).join() +
       '|' +
@@ -1036,13 +1037,22 @@ class App {
       const loose = st.entities.filter((e) => e.force === f && !e.unitId);
       if (!units.length && !loose.length) continue;
       el.append(h('div', { class: 'tree-head', text: `${FORCE_NAMES[f]} force` }));
-      for (const u of units) {
-        const members = u.memberIds.map((id) => this.entity(id)).filter((e): e is EntitySnapshot => !!e);
-        if (!match(u.name) && !members.some((m) => match(m.name))) continue;
+      const byId = new Map(units.map((u) => [u.id, u]));
+      const subsOf = (u: UnitSnapshot) => (u.childIds ?? []).map((id) => byId.get(id)).filter((x): x is UnitSnapshot => !!x);
+      const membersOf = (u: UnitSnapshot) => u.memberIds.map((id) => this.entity(id)).filter((e): e is EntitySnapshot => !!e);
+      const matches = (u: UnitSnapshot): boolean => match(u.name) || membersOf(u).some((m) => match(m.name)) || subsOf(u).some(matches);
+      // Units nest under their superiors; members follow their subordinate units.
+      const renderUnit = (u: UnitSnapshot, into: HTMLElement) => {
+        if (!matches(u)) return;
+        const members = membersOf(u);
         const lead = members[0];
-        el.append(item(u.id, `${u.name}`, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon) : null));
-        el.append(h('div', { class: 'tree-children' }, members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolCanvas(f, m.domain, m.symbol, 16), m.damage === 'destroyed'))));
-      }
+        into.append(item(u.id, `${u.name}`, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon) : null));
+        const kids = h('div', { class: 'tree-children' });
+        for (const sub of subsOf(u)) renderUnit(sub, kids);
+        kids.append(...members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolCanvas(f, m.domain, m.symbol, 16), m.damage === 'destroyed')));
+        into.append(kids);
+      };
+      for (const u of units) if (!u.parentId || !byId.has(u.parentId)) renderUnit(u, el);
       for (const e of loose) {
         if (!match(e.name)) continue;
         el.append(item(e.id, `${e.name}${e.remote ? ' (remote)' : ''}`, symbolCanvas(f, e.domain, e.symbol, 16), e.damage === 'destroyed'));
@@ -1318,13 +1328,45 @@ class App {
     );
   }
 
+  private pendingOrderText(id: string): string {
+    const o = this.state?.orders?.find((x) => x.targetId === id);
+    return o ? `ORDER IN ${Math.max(0, Math.ceil(o.due - (this.state?.time ?? 0)))} s: ${o.text}` : '';
+  }
+
+  /** Chooser for a unit's superior: same-force units that are not under it. */
+  private superiorSelect(u: UnitSnapshot): HTMLElement {
+    const units = this.state?.units ?? [];
+    const under = new Set<string>([u.id]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const x of units) if (x.parentId && under.has(x.parentId) && !under.has(x.id)) (under.add(x.id), (grew = true));
+    }
+    const options = units.filter((x) => x.force === u.force && !under.has(x.id));
+    return h(
+      'select',
+      { onchange: (ev: Event) => this.cmd({ cmd: 'setSuperior', unitId: u.id, superiorId: (ev.target as HTMLSelectElement).value || null }) },
+      h('option', { value: '', text: '(none)' }),
+      options.map((x) => h('option', { value: x.id, text: x.name, selected: x.id === u.parentId })),
+    );
+  }
+
   private buildUnitInspector(el: HTMLElement, u: UnitSnapshot): void {
     const lead = this.entity(u.leaderId) ?? this.entity(u.memberIds[0]);
     const formation = h('select', { onchange: (ev: Event) => this.cmd({ cmd: 'setFormation', unitId: u.id, formation: (ev.target as HTMLSelectElement).value as Formation }) }, FORMATIONS.map((f) => h('option', { value: f, text: f, selected: f === u.formation })));
     el.append(
       this.nameEditor(u.id, u.name, lead ? symbolCanvas(u.force, lead.domain, lead.symbol, 24, u.echelon) : null),
       h('div', { class: 'sub', text: `${u.echelon} · ${FORCE_NAMES[u.force]} · ${u.id}` }),
-      h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Strength', this.bind('strength'), 'Morale', this.bind('morale'), 'Leader', this.bind('leader'), 'Formation', formation),
+      h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Strength', this.bind('strength'), 'Morale', this.bind('morale'), 'Leader', this.bind('leader'), 'Formation', formation, 'Superior', this.superiorSelect(u)),
+      ...(u.childIds?.length
+        ? [
+            h(
+              'div',
+              { class: 'kv' },
+              'Subordinates',
+              h('span', {}, ...u.childIds.flatMap((id, i) => [i ? ', ' : '', h('a', { href: '#', text: this.unit(id)?.name ?? id, onclick: (ev: Event) => (ev.preventDefault(), this.select(id)) })])),
+            ),
+          ]
+        : []),
       h('div', { class: 'section' }, h('h4', { text: 'Current activity' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
       this.roeSection(u.id),
       this.reactionsSection(u.id, true),
@@ -1811,6 +1853,7 @@ class App {
           e.moraleState === 'broken' || this.unit(e.unitId)?.moraleState === 'broken' ? 'BROKEN' : '',
           e.pinned ? 'PINNED' : '',
           e.withdrawn ? 'WITHDRAWING' : '',
+          this.pendingOrderText(e.id),
           e.halted ? 'HALTED (contact)' : '',
           e.prepared === 'dugIn' ? 'DUG IN' : e.prepared === 'hullDown' ? 'HULL-DOWN' : '',
           e.plan,
@@ -1871,6 +1914,7 @@ class App {
           u.moraleState === 'broken' ? 'BROKEN' : '',
           alive.some((m) => m.pinned) ? `PINNED ${alive.filter((m) => m.pinned).length}/${alive.length}` : '',
           u.withdrawn ? 'WITHDRAWING' : '',
+          this.pendingOrderText(u.id),
           lead?.halted ? 'HALTED (contact)' : '',
           u.plan,
           u.task,

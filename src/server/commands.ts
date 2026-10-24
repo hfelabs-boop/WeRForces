@@ -285,10 +285,13 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         return;
       }
       case 'assignTask':
-        engine.assignTask(str(c.targetId, 'targetId'), validateTask(c.task));
+        engine.issueOrder(str(c.targetId, 'targetId'), { task: validateTask(c.task) });
         return;
       case 'assignPlan':
-        engine.assignPlan(str(c.targetId, 'targetId'), validatePlan(c.plan));
+        engine.issueOrder(str(c.targetId, 'targetId'), { plan: validatePlan(c.plan) });
+        return;
+      case 'setSuperior':
+        engine.setSuperior(str(c.unitId, 'unitId'), c.superiorId === null || c.superiorId === undefined ? null : str(c.superiorId, 'superiorId'));
         return;
       case 'stop':
         engine.stop(str(c.targetId, 'targetId'));

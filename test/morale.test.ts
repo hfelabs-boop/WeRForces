@@ -99,7 +99,7 @@ describe('morale', () => {
     // The setting is saved with the scenario.
     const copy = engine();
     copy.loadScenario(eng.toScenario());
-    expect(copy.rules).toEqual({ suppression: false, morale: false, fuel: true });
+    expect(copy.rules).toEqual({ suppression: false, morale: false, fuel: true, orderDelay: false });
   });
 
   it('checkpoints keep suppression and morale', () => {

@@ -183,15 +183,25 @@ Set rules of engagement for an entity or unit: fireAtWill, returnFire or holdFir
 | `targetId` | string | yes |  |
 | `roe` | `"fireAtWill"` \| `"returnFire"` \| `"holdFire"` | yes |  |
 
+## `set_unit_superior` _(idempotent)_
+
+Put a unit under a superior unit in the chain of command (or make it independent with superiorId null). An order given to the superior passes down to its subordinate units: moves keep their positions relative to each other, defend/overwatch/screen/ambush spread them in a line, other tasks go to all. With the orderDelay simulation rule on, each level adds a delay.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `unitId` | string | yes |  |
+| `superiorId` | string/null | yes |  |
+
 ## `set_simulation_rules` _(idempotent)_
 
-Turn optional parts of the model on or off for this scenario (all are on by default): suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel). Useful for comparison runs.
+Turn optional parts of the model on or off for this scenario. Suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel) are on by default; orderDelay (orders take 5-60 s to pass down the chain of command, by echelon) is off by default. Useful for comparison runs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `suppression` | boolean |  |  |
 | `morale` | boolean |  |  |
 | `fuel` | boolean |  |  |
+| `orderDelay` | boolean |  |  |
 
 ## `set_environment` _(idempotent)_
 
