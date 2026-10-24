@@ -87,11 +87,17 @@ function canEngage(engine: Engine, shooter: Entity, target: Entity, w: WeaponDef
 /** Choose and fire at most one weapon this tick, honouring ROE and explicit attack targets. */
 export function updateCombat(engine: Engine, shooter: Entity): void {
   if (shooter.remote || shooter.destroyed || shooter.firepowerKill || shooter.embarkedIn) return;
+  // An unmanned system without its datalink fires only as far as its autonomy allows.
+  const mode = shooter.uxs ? engine.unmanned.fireMode(shooter) : 'free';
+  if (mode === 'none') {
+    shooter.engagingId = undefined;
+    return;
+  }
   const now = engine.time;
   const candidates: Entity[] = [];
   const explicit = shooter.attackTargetId ? engine.entities.get(shooter.attackTargetId) : undefined;
   if (explicit && explicit.alive) candidates.push(explicit);
-  if (shooter.roe !== 'holdFire') {
+  if (shooter.roe !== 'holdFire' && mode === 'free') {
     for (const c of shooter.contacts.values()) {
       const t = engine.entities.get(c.id);
       if (!t || t.destroyed || t.embarkedIn || t === explicit || !engine.isHostile(shooter.force, t.force)) continue;

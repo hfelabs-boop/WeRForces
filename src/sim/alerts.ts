@@ -26,6 +26,7 @@ const SEVERITY: Record<AlertKind, Alert['severity']> = {
   underFire: 'info',
   contact: 'info',
   jammed: 'warning',
+  linkLost: 'warning',
 };
 
 /** A unit, or an entity that is not in one: what the operator gives orders to. */
@@ -189,6 +190,10 @@ export class Alerts {
       const by = lead ? engine.ew.radioJammedBy(lead) : undefined;
       if (by) this.raiseOnce('jammed', o, `${o.name}: radio jammed`);
       else this.resolve('jammed', o.id);
+      // Unmanned systems that lost their datalink.
+      const lost = o.members.filter((e) => e.uxs && !e.uxs.up);
+      if (lost.length) this.raiseOnce('linkLost', o, o.unit && o.members.length > 1 ? `${o.name}: ${lost.length} of ${o.members.length} lost their datalink` : `${o.name}: datalink lost`);
+      else this.resolve('linkLost', o.id);
       // Leader lost.
       if (o.unit) {
         const lead = o.unit.leader;

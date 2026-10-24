@@ -1,7 +1,7 @@
 // Checking catalog entries made in the catalog editor or sent through the API: every
 // field the simulation relies on is there and in range. Only known fields are kept.
 
-import type { ArmorClass, Catalog, DisEntityType, Domain, EntityTypeDef, Formation, SensorDef, SymbolKind, UnitTemplate, WeaponDef } from '../shared/types.js';
+import type { ArmorClass, Autonomy, Catalog, DisEntityType, Domain, EntityTypeDef, Formation, LostLinkBehaviour, SensorDef, SymbolKind, UnitTemplate, WeaponDef } from '../shared/types.js';
 
 export class CatalogError extends Error {}
 
@@ -10,9 +10,11 @@ export const CATALOG_SECTIONS: CatalogSection[] = ['entityTypes', 'weapons', 'se
 
 const DOMAINS: Domain[] = ['ground', 'lifeform', 'air', 'surface'];
 const ARMOR: ArmorClass[] = ['lifeform', 'soft', 'light', 'armored', 'air', 'ship'];
-const SYMBOLS: SymbolKind[] = ['armor', 'mech', 'infantry', 'recon', 'wheeled', 'air-defense', 'artillery', 'engineer', 'supply', 'ew', 'rotary', 'fixed-wing', 'uav', 'ship', 'boat', 'generic'];
+const SYMBOLS: SymbolKind[] = ['armor', 'mech', 'infantry', 'recon', 'wheeled', 'air-defense', 'artillery', 'engineer', 'supply', 'ew', 'rotary', 'fixed-wing', 'uav', 'ugv', 'legged', 'ship', 'boat', 'generic'];
 const FORMATIONS: Formation[] = ['column', 'line', 'wedge', 'vee', 'echelonRight'];
 const ECHELONS: UnitTemplate['echelon'][] = ['team', 'section', 'platoon', 'company', 'flight', 'group'];
+const LOST_LINK: LostLinkBehaviour[] = ['hover', 'return', 'continue', 'land'];
+const AUTONOMY: Autonomy[] = ['remote', 'supervised', 'autonomous'];
 
 type Raw = Record<string, unknown>;
 
@@ -126,8 +128,23 @@ export function validateEntityType(v: unknown): EntityTypeDef {
           gnss: bool(jammer.gnss, 'jammer.gnss'),
         })
       : undefined,
-    unmanned: unmanned ? tidy({ link: oneOf(unmanned.link, 'unmanned.link', ['rf', 'fiber', 'autonomous'] as const), antiJam: num(unmanned.antiJam, 'unmanned.antiJam', 0, 0.95, true) }) : undefined,
+    unmanned: unmanned
+      ? tidy({
+          link: oneOf(unmanned.link, 'unmanned.link', ['rf', 'fiber', 'autonomous'] as const),
+          antiJam: num(unmanned.antiJam, 'unmanned.antiJam', 0, 0.95, true),
+          linkRange: num(unmanned.linkRange, 'unmanned.linkRange (m)', 10, 1e7, true),
+          satcom: bool(unmanned.satcom, 'unmanned.satcom'),
+          relay: bool(unmanned.relay, 'unmanned.relay'),
+          lostLink: unmanned.lostLink === undefined ? undefined : oneOf(unmanned.lostLink, 'unmanned.lostLink', LOST_LINK),
+          autonomy: unmanned.autonomy === undefined ? undefined : oneOf(unmanned.autonomy, 'unmanned.autonomy', AUTONOMY),
+          warhead: unmanned.warhead === undefined ? undefined : id(unmanned.warhead),
+          terminalRange: num(unmanned.terminalRange, 'unmanned.terminalRange (m)', 5, 5000, true),
+        })
+      : undefined,
     gnss: bool(t.gnss, 'gnss'),
+    controlStation: bool(t.controlStation, 'controlStation'),
+    mobility: t.mobility === undefined ? undefined : oneOf(t.mobility, 'mobility', ['legged'] as const),
+    size: num(t.size, 'size (m)', 0.01, 1000, true),
   } as EntityTypeDef);
 }
 
@@ -193,6 +210,7 @@ export function validateUnitTemplate(v: unknown): UnitTemplate {
     formation: oneOf(u.formation ?? 'wedge', 'formation', FORMATIONS),
     spacing: num(u.spacing ?? 50, 'spacing', 1, 5000)!,
     subunits: u.subunits === undefined ? undefined : list(u.subunits, 'subunits', undefined, 10),
+    operator: u.operator === undefined ? undefined : id(u.operator),
   } as UnitTemplate);
 }
 

@@ -19,7 +19,7 @@ export function estimateTravel(engine: Engine, e: Entity): Travel | undefined {
   const wanted = Math.min((task.spec as { speed?: number }).speed ?? e.cruiseSpeed, t.maxSpeed);
   if (wanted <= 0) return undefined;
   const offroad = t.offroadFactor * (e.domain === 'air' || e.domain === 'surface' ? 1 : groundFactor(engine.env));
-  const speedAt = (p: Vec2) => (e.domain === 'air' ? wanted : Math.min(wanted, t.maxSpeed * Math.max(engine.terrain.mobilityFactor(p.x, p.y, e.domain, offroad), 0.1)));
+  const speedAt = (p: Vec2) => (e.domain === 'air' ? wanted : Math.min(wanted, t.maxSpeed * Math.max(engine.terrain.mobilityFactor(p.x, p.y, e.moveDomain, offroad), 0.1)));
   let remaining = 0;
   let seconds = 0;
   let from: Vec2 = { x: e.x, y: e.y };

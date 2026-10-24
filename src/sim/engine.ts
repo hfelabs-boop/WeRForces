@@ -61,6 +61,7 @@ import { SyncPlans } from './sync.js';
 import { Life } from './life.js';
 import { Ew, JAMMED_ORDER_DELAY } from './ew.js';
 import { Aggregation } from './aggregate.js';
+import { Unmanned } from './unmanned.js';
 
 export const DEFAULT_DT = 0.1;
 export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
@@ -170,6 +171,8 @@ export class Engine {
   models: Models = { ...DEFAULT_MODELS };
   /** Aggregate-level units: units simulated as one object, and the policy for splitting them up. */
   readonly aggregates = new Aggregation(this);
+  /** Unmanned systems: datalinks and lost-link behaviour. */
+  readonly unmanned = new Unmanned(this);
 
   private hostilities = new Set<string>(['1-2']);
   private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
@@ -306,6 +309,7 @@ export class Engine {
     if (type.reactions) e.reactions = { ...type.reactions };
     e.smokeLeft = type.smokeGrenades ?? 0;
     e.supplies = type.supply?.capacity ?? 0;
+    this.unmanned.init(e);
     this.spatial.invalidate();
     if (type.domain === 'air') {
       e.altitudeOverride = opts.altitude;
@@ -360,6 +364,14 @@ export class Engine {
     }
     const unit = this.groupUnit(members.map((m) => m.id), name ?? tpl.name, tpl.formation, spacing, tpl.echelon);
     members.forEach((m, i) => (m.name = `${unit.name} ${i === 0 ? 'Lead' : i + 1}`));
+    if (tpl.operator) {
+      // Drone operators stay behind, outside the unit; its drones are flown from them.
+      const back = rotateOffset({ x: 0, y: -60 }, heading);
+      const type = this.catalog.type(tpl.operator);
+      const at = this.findValidPosition({ x: clampTo(x + back.x, this.terrain.spec.size), y: clampTo(y + back.y, this.terrain.spec.size) }, type.domain) ?? { x, y };
+      const op = this.createEntity({ typeId: tpl.operator, force, x: at.x, y: at.y, heading, name: `${unit.name} Operator` });
+      for (const m of members) if (m.uxs) m.uxs.controllerId = op.id;
+    }
     if (tpl.subunits?.length) {
       // The members are the HQ, set back behind the subordinate units' formation.
       const back = rotateOffset({ x: 0, y: -tpl.spacing * 0.6 }, heading);
@@ -469,14 +481,17 @@ export class Engine {
     // A jammed radio: the order gets through late (by relay or runner).
     const lead = t instanceof Unit ? t.leader : t;
     const jam = lead && this.ew.radioJammed(lead) ? JAMMED_ORDER_DELAY : 0;
-    if (base <= 0 && !jam) {
+    // An unmanned system without its datalink gets the order when the link is back.
+    const unlinked = !!lead && !this.unmanned.linked(lead);
+    if (base <= 0 && !jam && !unlinked) {
       if (order.plan) this.assignPlan(targetId, order.plan);
       else if (order.task) this.assignTask(targetId, order.task);
       return 0;
     }
     const delay = (base > 0 ? Math.round(base * (0.8 + 0.4 * this.rng.next())) : 0) + jam;
-    this.pendingOrders.push({ targetId, task: order.task, plan: order.plan, due: Math.round((this.time + delay) * 10) / 10 });
-    this.log('task', `Order to ${t.name}: ${this.describeOrder(order)} (arrives in ${delay} s${jam ? ', radio jammed' : ''})`, t.id);
+    this.pendingOrders.push({ targetId, task: order.task, plan: order.plan, due: Math.round((this.time + delay) * 10) / 10, waitLink: unlinked || undefined });
+    const when = unlinked && !delay ? 'waits for its datalink' : `arrives in ${delay} s${jam ? ', radio jammed' : ''}${unlinked ? ', once its datalink is back' : ''}`;
+    this.log('task', `Order to ${t.name}: ${this.describeOrder(order)} (${when})`, t.id);
     return delay;
   }
 
@@ -513,9 +528,10 @@ export class Engine {
 
   private deliverOrders(): void {
     if (!this.pendingOrders.length) return;
-    const due = this.pendingOrders.filter((o) => o.due <= this.time + 1e-9);
+    const ready = (o: PendingOrder) => o.due <= this.time + 1e-9 && (!o.waitLink || this.unmanned.reachable(o.targetId));
+    const due = this.pendingOrders.filter(ready);
     if (!due.length) return;
-    this.pendingOrders = this.pendingOrders.filter((o) => o.due > this.time + 1e-9);
+    this.pendingOrders = this.pendingOrders.filter((o) => !ready(o));
     for (const o of due) {
       if (!this.entities.has(o.targetId) && !this.units.has(o.targetId)) continue;
       try {
@@ -958,6 +974,21 @@ export class Engine {
         if (!g || g.kind !== 'area') throw new Error(`unknown area ${spec.areaId}`);
         break;
       }
+      case 'strike':
+        if (!this.findEntity(spec.targetId)) throw new Error(`unknown entity ${spec.targetId}`);
+        break;
+      case 'loiter':
+      case 'swarmSearch':
+      case 'swarmAttack': {
+        const areaId = spec.areaId;
+        if (areaId !== undefined) {
+          const g = this.graphics.get(areaId);
+          if (!g || g.kind !== 'area') throw new Error(`unknown area ${areaId}`);
+        }
+        if (spec.type === 'loiter' && spec.center && !this.terrain.inBounds(spec.center.x, spec.center.y)) throw new Error('loiter point is outside the terrain');
+        if (spec.type === 'swarmAttack') for (const id of spec.targetIds ?? []) if (!this.findEntity(id)) throw new Error(`unknown entity ${id}`);
+        break;
+      }
       default:
         break;
     }
@@ -970,7 +1001,8 @@ export class Engine {
     const shooter = this.entities.get(shot.shooterId);
     const target = shot.targetId ? this.entities.get(shot.targetId) : undefined;
     // A vehicle with smoke grenades screens itself when a missile is fired at it.
-    if (target && !target.remote && target.alive && shot.weapon.guided && target.smokeLeft > 0) {
+    // (Not against a drone diving in: there is no warning.)
+    if (target && !target.remote && target.alive && shot.weapon.guided && target.smokeLeft > 0 && !shooter?.uxs) {
       target.smokeLeft--;
       const d = Math.hypot(shot.from.x - target.x, shot.from.y - target.y) || 1;
       this.smoke.add({ x: target.x + ((shot.from.x - target.x) / d) * 30, y: target.y + ((shot.from.y - target.y) / d) * 30 }, 25, 45);
@@ -1244,6 +1276,8 @@ export class Engine {
       if (halt || pinned) {
         // Stop and fight; the task keeps its progress and resumes afterwards.
         e.steer = { x: e.x, y: e.y, speed: 0, arrive: true };
+      } else if (e.uxs && !e.uxs.up && this.unmanned.overrides(e, dt)) {
+        // Lost link: its lost-link behaviour steers it; the task waits for the link.
       } else if (task && task.status === 'running') {
         const status = task.update({ engine: this, entity: e, dt });
         if (status !== 'running') {
@@ -1255,6 +1289,8 @@ export class Engine {
       }
     }
 
+    // Drones of a unit keep their distance from each other.
+    this.unmanned.separate();
     const ground = groundFactor(this.env);
     let hasObstacles = false;
     // Out of fuel, vehicles stop where they are.
@@ -1296,6 +1332,7 @@ export class Engine {
       updateMorale(this);
       updateResupply(this);
       this.ew.update();
+      this.unmanned.update();
       this.life.update();
       this.alerts.update();
       this.sync.update();
@@ -1498,10 +1535,11 @@ export class Engine {
     if (st.supplies !== undefined) e.supplies = st.supplies;
     if (st.ambient) this.life.adopt(e);
     if (st.jamming === false) e.jamming = false;
+    if (st.uxs) this.unmanned.restore(e, st.uxs);
   }
 
   private authoredState(e: Entity): EntityRecord['state'] {
-    const st = { destroyed: e.destroyed || undefined, mobilityKill: e.mobilityKill || undefined, firepowerKill: e.firepowerKill || undefined, embarkedIn: e.embarkedIn };
+    const st = { destroyed: e.destroyed || undefined, mobilityKill: e.mobilityKill || undefined, firepowerKill: e.firepowerKill || undefined, embarkedIn: e.embarkedIn, uxs: this.unmanned.record(e, false) };
     return Object.values(st).some((v) => v !== undefined) ? st : undefined;
   }
 
@@ -1553,6 +1591,7 @@ export class Engine {
         ambient: e.ambient || undefined,
         jamming: e.type.jammer && !e.jamming ? false : undefined,
         supplies: e.type.supply && e.supplies !== e.type.supply.capacity ? e.supplies : undefined,
+        uxs: this.unmanned.record(e, true),
       },
     };
   }
@@ -1701,6 +1740,8 @@ export class Engine {
       ambient: e.ambient || undefined,
       jamming: e.type.jammer ? e.jamming : undefined,
       jammed: this.ew.status(e),
+      link: this.unmanned.status(e),
+      expended: e.uxs?.expended || undefined,
     };
   }
 

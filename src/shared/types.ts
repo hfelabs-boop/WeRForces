@@ -44,6 +44,10 @@ export type SymbolKind =
   | 'rotary'
   | 'fixed-wing'
   | 'uav'
+  /** Unmanned ground vehicle. */
+  | 'ugv'
+  /** Legged robot (robot dog). */
+  | 'legged'
   | 'ship'
   | 'boat'
   | 'generic';
@@ -133,6 +137,44 @@ export interface SensorDef {
 /** What a jammer can deny: radios, radars, unmanned systems' datalinks, satellite navigation. */
 export type JamBand = 'radio' | 'radar' | 'datalink' | 'gnss';
 
+/** What an unmanned system does when its control datalink is lost. */
+export type LostLinkBehaviour = 'hover' | 'return' | 'continue' | 'land';
+/**
+ * How much an unmanned system does on its own. `remote`: a person flies or drives it and
+ * aims its weapons, so without a link it falls back on its lost-link behaviour and sees
+ * and fires at nothing. `supervised`: it carries on with its task and finishes an attack
+ * on a target it was given, but starts no new attack without a link. `autonomous`: it
+ * carries on, finds and attacks targets by itself.
+ */
+export type Autonomy = 'remote' | 'supervised' | 'autonomous';
+/** Why a datalink is down. */
+export type LinkLossReason = 'jammed' | 'range' | 'terrain' | 'noController' | 'controllerLost' | 'tether';
+
+/** Unmanned systems: how one is controlled (see EntityTypeDef.unmanned). */
+export interface UnmannedDef {
+  /** `rf`: a radio datalink to its operator (can be jammed); `fiber`: a fibre-optic tether (cannot); `autonomous`: needs no link. */
+  link: 'rf' | 'fiber' | 'autonomous';
+  /**
+   * 0-1: how much of a datalink jammer's reach it shrugs off (frequency hopping,
+   * directional antennas): the jammer must be within (1 - antiJam) of its range.
+   */
+  antiJam?: number;
+  /** `rf`: radio range (m) to its operator or a relaying drone, with line of sight; `fiber`: tether length (m). Default 5000. */
+  linkRange?: number;
+  /** `rf`: a satellite datalink, with no range or line-of-sight limit (its ground station is far away). */
+  satcom?: boolean;
+  /** `rf`: relays other own drones' datalinks (mesh networking). */
+  relay?: boolean;
+  /** What it does without a link (default hover; fixed wing circles, and lands by coming home). */
+  lostLink?: LostLinkBehaviour;
+  /** Default remote. */
+  autonomy?: Autonomy;
+  /** One-way attack munitions (FPV drones, loitering munitions): the weapon id of the warhead it delivers by flying into its target. */
+  warhead?: string;
+  /** One-way attack: distance (m) from its target at which it dives in (default 150). */
+  terminalRange?: number;
+}
+
 export interface EntityTypeDef {
   id: string;
   name: string;
@@ -183,15 +225,19 @@ export interface EntityTypeDef {
    * unmanned systems' control datalinks and/or satellite navigation (GNSS).
    */
   jammer?: { range: number; radio?: boolean; radar?: boolean; datalink?: boolean; gnss?: boolean };
-  /**
-   * Unmanned systems: how it is controlled. `rf`: a radio datalink to its operator (can be
-   * jammed); `fiber`: a fibre-optic tether (cannot); `autonomous`: needs no link.
-   * `antiJam` (0-1): how much of a datalink jammer's reach it shrugs off (frequency hopping,
-   * directional antennas): the jammer must be within (1 - antiJam) of its range.
-   */
-  unmanned?: { link: 'rf' | 'fiber' | 'autonomous'; antiJam?: number };
+  /** Unmanned systems: how it is controlled, and what it does without its link. */
+  unmanned?: UnmannedDef;
   /** Navigates by satellite (GNSS); denied, it falls back on inertial navigation. */
   gnss?: boolean;
+  /** Drone operators and ground control stations: unmanned systems' datalinks end here. */
+  controlStation?: boolean;
+  /** `legged`: a ground vehicle that walks (robot dog): it goes where troops on foot go, at its own speed. */
+  mobility?: 'legged';
+  /**
+   * Size (m) it presents to the eye and thermal sights; smaller than 3 m, it is seen only
+   * that much closer (a 0.3 m drone at a tenth of the range). Missing: full range.
+   */
+  size?: number;
   /** Reactions that new entities of this type start with (e.g. observers call for fire). */
   reactions?: Reactions;
 }
@@ -205,6 +251,8 @@ export interface UnitTemplate {
   spacing: number;
   /** Subordinate unit templates (e.g. a company's platoons), placed in `formation` at `spacing` around the members (the HQ). */
   subunits?: string[];
+  /** Unmanned systems: an operator (control station type) placed with the unit, not in it; its drones are controlled from it. */
+  operator?: string;
 }
 
 export interface Catalog {
@@ -250,7 +298,25 @@ export type TaskSpec =
   /** A carrier stops and lets all its passengers out. */
   | { type: 'dismount' }
   /** Direct control: a person drives it (throttle 0..1, turn -1..1) and picks what it shoots at. */
-  | { type: 'manual'; throttle?: number; turn?: number; targetId?: string };
+  | { type: 'manual'; throttle?: number; turn?: number; targetId?: string }
+  /** One-way attack: an expendable drone (FPV, loitering munition) flies into the target and its warhead detonates. */
+  | { type: 'strike'; targetId: string }
+  /**
+   * Unmanned: loiter over an area (sweeping it again and again) or round `center` at
+   * `radius`, for `duration` s or until out of endurance. With `attack`, strike (or
+   * engage) the first suitable enemy it finds. `prefer`: what to go for, in order: armour
+   * classes (armored, light, soft, lifeform), symbols (artillery, air-defense…) or type
+   * ids; 'any' for anything else. On a unit, members spread out over it.
+   */
+  | { type: 'loiter'; areaId?: string; center?: Vec2; radius?: number; duration?: number; attack?: boolean; prefer?: string[]; slot?: number; slots?: number; startIndex?: number }
+  /** Swarm: the unit's members share out the area and sweep it together; with `attack`, each strikes a different target it finds. */
+  | { type: 'swarmSearch'; areaId: string; spacing?: number; attack?: boolean; prefer?: string[]; slot?: number; slots?: number; startIndex?: number }
+  /**
+   * Swarm: the unit's members spread over the targets (those given, or the enemies it
+   * knows of in the area) so that each is hit before any is hit twice, and take on new
+   * ones as targets go down. With an area and nothing found yet, they wait over it.
+   */
+  | { type: 'swarmAttack'; targetIds?: string[]; areaId?: string; prefer?: string[]; assignedId?: string };
 
 export type Condition =
   | { type: 'simTime'; time: number }
@@ -464,6 +530,34 @@ export interface EntityState {
   ambient?: boolean;
   /** Jammers switched off. */
   jamming?: false;
+  /** Unmanned systems: control, datalink and lost-link state. */
+  uxs?: UnmannedState;
+}
+
+/** An unmanned system's state, saved in scenarios (settings) and checkpoints (the rest). */
+export interface UnmannedState {
+  /** The operator or control station it is assigned to (any of its force's when missing). */
+  controllerId?: string;
+  /** Overrides of the type's lost-link behaviour and autonomy. */
+  lostLink?: LostLinkBehaviour;
+  autonomy?: Autonomy;
+  /** Checkpoint: link state and when it last changed; while up, the operator at the far end and the radio hops to it. */
+  linkUp?: boolean;
+  reason?: LinkLossReason;
+  jammerId?: string;
+  rootId?: string;
+  hops?: number;
+  since?: number;
+  /** Where it goes home to (its operator when last linked, or where it started). */
+  home?: Vec2;
+  /** Lost link: holding here. */
+  holdAt?: Vec2;
+  /** Landed on lost link: the altitude setting to go back to (null: the type's). */
+  landedFrom?: number | null;
+  /** Fibre-optic tether ran out. */
+  tetherCut?: boolean;
+  /** One-way munition that has delivered its warhead. */
+  expended?: boolean;
 }
 
 export interface UnitRecord {
@@ -630,6 +724,8 @@ export interface PendingOrder {
   plan?: Plan;
   /** Simulation time it arrives and is acted on. */
   due: number;
+  /** An unmanned system without its datalink: the order waits until the link is back. */
+  waitLink?: boolean;
 }
 
 export type MoraleState = 'steady' | 'shaken' | 'broken';
@@ -758,7 +854,7 @@ export interface Explanation {
   unit?: Finding[];
 }
 
-export type AlertKind = 'taskFailed' | 'idle' | 'broken' | 'outOfFuel' | 'lowFuel' | 'outOfAmmo' | 'leaderLost' | 'losses' | 'underFire' | 'contact' | 'jammed';
+export type AlertKind = 'taskFailed' | 'idle' | 'broken' | 'outOfFuel' | 'lowFuel' | 'outOfAmmo' | 'leaderLost' | 'losses' | 'underFire' | 'contact' | 'jammed' | 'linkLost';
 
 /** Something that needs the operator's attention: a unit idle, broken, out of fuel... */
 export interface Alert {
@@ -834,6 +930,25 @@ export interface EntitySnapshot {
   jamming?: boolean;
   /** What enemy jamming denies it now. */
   jammed?: JamBand[];
+  /** Unmanned systems: the control datalink. */
+  link?: LinkStatus;
+  /** A one-way munition that has delivered its warhead (no longer on the map). */
+  expended?: boolean;
+}
+
+/** An unmanned system's control datalink as clients see it. */
+export interface LinkStatus {
+  mode: 'rf' | 'fiber' | 'autonomous';
+  up: boolean;
+  reason?: LinkLossReason;
+  /** The operator or control station at the other end. */
+  controllerId?: string;
+  /** Radio hops to it (more than 1: relayed through other drones). */
+  hops?: number;
+  /** Seconds since it went down. */
+  lostFor?: number;
+  autonomy: Autonomy;
+  lostLink: LostLinkBehaviour;
 }
 
 /** Estimate for a move: distance left on the planned path, and simulation time of arrival. */
@@ -997,6 +1112,8 @@ export type Command =
   | { cmd: 'drive'; id: string; throttle?: number; turn?: number; targetId?: string | null }
   /** Switch a jammer on or off. */
   | { cmd: 'setJamming'; id: string; on: boolean }
+  /** Unmanned systems (an entity, or every one in a unit): operator (null: any of its force), lost-link behaviour and autonomy (null: the type's). */
+  | { cmd: 'setUnmanned'; id: string; controllerId?: string | null; lostLink?: LostLinkBehaviour | null; autonomy?: Autonomy | null }
   /** Background civilians to keep on the map (0 for none). */
   | { cmd: 'setPatternOfLife'; vehicles?: number; pedestrians?: number }
   /** Replace a force's synchronization matrix (an empty list of phases removes it). */

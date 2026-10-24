@@ -1,7 +1,8 @@
-import type { DamageState, EntityTypeDef, ForceId, MoraleState, Plan, Reactions, Roe, TaskSpec, Vec2, Vec3 } from '../shared/types.js';
+import type { DamageState, Domain, EntityTypeDef, ForceId, MoraleState, Plan, Reactions, Roe, TaskSpec, Vec2, Vec3 } from '../shared/types.js';
 import type { PlanExecutor } from './plans.js';
 import type { Task } from './tasks.js';
 import type { Unit } from './units.js';
+import type { UxsState } from './unmanned.js';
 
 export interface Contact {
   id: string;
@@ -94,6 +95,8 @@ export class Entity {
   jamming = true;
   /** A background civilian the pattern-of-life model adds and removes. */
   ambient?: boolean;
+  /** Unmanned systems: control and datalink state (see unmanned.ts). */
+  uxs: UxsState | null = null;
 
   /** True for entities owned by another simulation (received via DIS). */
   remote = false;
@@ -122,6 +125,11 @@ export class Entity {
 
   get domain() {
     return this.type.domain;
+  }
+
+  /** Whose ground rules it moves by: a legged robot goes where troops on foot go. */
+  get moveDomain(): Domain {
+    return this.type.mobility === 'legged' ? 'lifeform' : this.type.domain;
   }
 
   get alive(): boolean {

@@ -34,6 +34,18 @@ export function detectionProbability(engine: Engine, observer: Entity, target: E
   return clamp(p, 0, 0.99);
 }
 
+/** Size (m) sensor ranges are quoted for; smaller targets are seen proportionally closer. */
+export const REFERENCE_SIZE = 3;
+
+/**
+ * Share of an optical or thermal sensor's range at which a target of this type can be
+ * seen: what the eye resolves scales with the target's size, so a 0.3 m drone is seen at
+ * a tenth of the range of a vehicle. Types without a size count as full size.
+ */
+export function sizeFactor(type: EntityTypeDef): number {
+  return type.size === undefined ? 1 : Math.min(1, type.size / REFERENCE_SIZE);
+}
+
 /** How far a radar detects a target of this type, before jamming. */
 export function radarRange(engine: Engine, s: SensorDef, type: EntityTypeDef): number {
   const radar = engine.models.radar;
@@ -42,7 +54,9 @@ export function radarRange(engine: Engine, s: SensorDef, type: EntityTypeDef): n
 
 export function updateSensors(engine: Engine, observer: Entity): void {
   const now = engine.time;
-  if (observer.alive && !observer.remote && !observer.embarkedIn && observer.type.sensors.length > 0) {
+  // A remotely flown drone without its datalink sends no picture back to its operator.
+  const blind = !!observer.uxs && !engine.unmanned.sees(observer);
+  if (observer.alive && !observer.remote && !observer.embarkedIn && observer.type.sensors.length > 0 && !blind) {
     const eye = observer.eye;
     // Muzzle flashes give away a shooter at night further than the dark would allow.
     const flashEnv = engine.env.light < FLASH_LIGHT ? { ...engine.env, light: FLASH_LIGHT } : engine.env;
@@ -66,7 +80,7 @@ export function updateSensors(engine: Engine, observer: Entity): void {
       const flash = now - target.lastFiredAt < 5;
       for (const { s, jam, range: dark, flashRange } of sensors) {
         // Radars see big targets further than small ones (the radar range equation).
-        const maxRange = s.radar && s.refRange ? radarRange(engine, s, target.type) * jam : flash ? flashRange : dark;
+        const maxRange = s.radar && s.refRange ? radarRange(engine, s, target.type) * jam : (flash ? flashRange : dark) * (s.radar ? 1 : sizeFactor(target.type));
         if (range > maxRange || !s.detects.includes(target.domain)) continue;
         if (s.fov < Math.PI * 2 - 1e-6) {
           const off = Math.abs(angleDiff(observer.heading, bearing(observer, target)));
@@ -89,7 +103,7 @@ export function updateSensors(engine: Engine, observer: Entity): void {
 function recordContact(engine: Engine, observer: Entity, target: Entity, now: number): void {
   const isNew = !observer.contacts.has(target.id);
   // Contacts go round the unit on the radio, unless it is jammed.
-  const share = observer.unit && !engine.ew.radioJammed(observer) ? observer.unit.alive() : [observer];
+  const share = observer.unit && !engine.ew.radioJammed(observer) && (!observer.uxs || engine.unmanned.linked(observer)) ? observer.unit.alive() : [observer];
   for (const m of share) {
     const existing = m.contacts.get(target.id);
     m.contacts.set(target.id, {

@@ -6,6 +6,7 @@
 
 import { DEG } from '../shared/math.js';
 import type { Catalog, DisEntityType, EntityTypeDef, SensorDef, UnitTemplate, WeaponDef } from '../shared/types.js';
+import { UNMANNED_CATALOG } from './catalogUnmanned.js';
 
 const dis = (kind: number, domain: number, country: number, category: number, subcategory = 0, specific = 0, extra = 0): DisEntityType => ({
   kind,
@@ -633,6 +634,9 @@ const entityTypes: EntityTypeDef[] = [
     sensors: ['eo-turret'],
     weapons: ['hellfire'],
     crew: 0,
+    gnss: true,
+    // Flown over a satellite datalink from a ground control station far behind the lines.
+    unmanned: { link: 'rf', satcom: true, antiJam: 0.8, lostLink: 'return', autonomy: 'supervised' },
   },
   {
     id: 'us-ddg51',
@@ -1208,7 +1212,13 @@ const unitTemplates: UnitTemplate[] = [
   { id: 'ru-flanker-flight', name: 'Su-27 Flight', echelon: 'flight', members: ['ru-su27', 'ru-su27'], formation: 'echelonRight', spacing: 600 },
 ];
 
-export const DEFAULT_CATALOG: Catalog = { entityTypes, weapons, sensors, unitTemplates };
+// Unmanned systems (catalogUnmanned.ts) come after the rest.
+export const DEFAULT_CATALOG: Catalog = {
+  entityTypes: [...entityTypes, ...UNMANNED_CATALOG.entityTypes],
+  weapons: [...weapons, ...UNMANNED_CATALOG.weapons],
+  sensors: [...sensors, ...UNMANNED_CATALOG.sensors],
+  unitTemplates: [...unitTemplates, ...UNMANNED_CATALOG.unitTemplates],
+};
 
 /**
  * Merge a catalog extension into a base catalog: entries whose id already exists are
@@ -1244,10 +1254,13 @@ export class CatalogIndex {
     for (const t of catalog.entityTypes) {
       for (const w of t.weapons) if (!this.weapons.has(w)) throw new Error(`entity type ${t.id} references unknown weapon ${w}`);
       for (const s of t.sensors) if (!this.sensors.has(s)) throw new Error(`entity type ${t.id} references unknown sensor ${s}`);
+      const wh = t.unmanned?.warhead;
+      if (wh && !this.weapons.has(wh)) throw new Error(`entity type ${t.id} references unknown warhead ${wh}`);
     }
     for (const u of catalog.unitTemplates) {
       for (const m of u.members) if (!this.types.has(m)) throw new Error(`unit template ${u.id} references unknown type ${m}`);
       for (const s of u.subunits ?? []) if (!this.templates.has(s) || s === u.id) throw new Error(`unit template ${u.id} references unknown subunit template ${s}`);
+      if (u.operator && !this.types.has(u.operator)) throw new Error(`unit template ${u.id} references unknown operator type ${u.operator}`);
     }
   }
 

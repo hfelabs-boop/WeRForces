@@ -34,7 +34,7 @@ function slideAround(e: Entity, terrain: Terrain, offroad: number, step: number,
   for (const h of tries) {
     const x = clamp(e.x + Math.sin(h) * step, 0, terrain.spec.size);
     const y = clamp(e.y + Math.cos(h) * step, 0, terrain.spec.size);
-    if (terrain.mobilityFactor(x, y, e.domain, offroad) > 0) return { x, y };
+    if (terrain.mobilityFactor(x, y, e.moveDomain, offroad) > 0) return { x, y };
   }
   return null;
 }
@@ -48,14 +48,14 @@ function stepSurfaceBound(e: Entity, terrain: Terrain, dt: number, offroadScale:
   let dist = 0;
   if (cmd) {
     dist = Math.hypot(cmd.x - e.x, cmd.y - e.y);
-    const mob = terrain.mobilityFactor(e.x, e.y, e.domain, offroad);
+    const mob = terrain.mobilityFactor(e.x, e.y, e.moveDomain, offroad);
     targetSpeed = Math.min(cmd.speed, t.maxSpeed * Math.max(mob, 0.1));
     if (cmd.arrive) {
       targetSpeed = dist < 1 ? 0 : Math.min(targetSpeed, Math.sqrt(2 * t.acceleration * 0.6 * dist));
     }
     if (dist > 0.5) {
       const err = Math.abs(angleDiff(e.heading, bearing(e, cmd)));
-      if (e.domain !== 'lifeform') {
+      if (e.moveDomain !== 'lifeform') {
         if (err > 1.2) targetSpeed *= 0.2;
         else if (err > 0.45) targetSpeed *= 0.6;
       }
@@ -70,7 +70,7 @@ function stepSurfaceBound(e: Entity, terrain: Terrain, dt: number, offroadScale:
   if (step > 0) {
     const nx = clamp(e.x + Math.sin(e.heading) * step, 0, terrain.spec.size);
     const ny = clamp(e.y + Math.cos(e.heading) * step, 0, terrain.spec.size);
-    if (terrain.mobilityFactor(nx, ny, e.domain, offroad) <= 0) {
+    if (terrain.mobilityFactor(nx, ny, e.moveDomain, offroad) <= 0) {
       // Skirt the edge (a route leg can clip the corner of a lake between its check
       // points): edge along at a slant toward where it is steering, if it can.
       const slide = cmd ? slideAround(e, terrain, offroad, step, bearing(e, cmd)) : null;

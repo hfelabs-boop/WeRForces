@@ -161,6 +161,8 @@ export function updateMorale(engine: Engine): void {
   for (const u of engine.units.values()) {
     const alive = u.alive().filter((m) => !m.remote);
     if (alive.length === 0) continue;
+    // Robots have no morale (and a spent drone is no loss).
+    if (u.memberList.every((m) => m.uxs)) continue;
     const lost = u.memberList.length - u.alive().length;
     const prev = step(engine, u, alive, u.memberList.length, lost - u.lossesSeen, lost);
     u.lossesSeen = lost;
@@ -173,7 +175,7 @@ export function updateMorale(engine: Engine): void {
     }
   }
   for (const e of engine.entities.values()) {
-    if (e.unit || e.remote || e.destroyed || e.embarkedIn || e.domain === 'air') continue;
+    if (e.unit || e.remote || e.destroyed || e.embarkedIn || e.domain === 'air' || e.uxs) continue;
     const prev = step(engine, e, [e], 1, 0, 0);
     if (e.moraleState === 'broken' && prev !== 'broken') breakEntity(engine, e);
     if (prev === 'broken' && e.moraleState !== 'broken') engine.setEntityTask(e, null);

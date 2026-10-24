@@ -29,6 +29,13 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | `ru-2s19` | 2S19 Msta-S — Russian 152mm self-propelled howitzer | 59 / 36 km/h | light | 20 / 15 / 13 / 10 | 152mm 2A64 howitzer (OF-45 HE)<br>12.7mm heavy machine gun (burst) | Unaided eye | 1.1.222.4.1.3.0 |
 | `us-m1150` | M1150 Assault Breacher Vehicle — US armoured breacher with mine plough and line charges (about 90 s per lane) | 65 / 32 km/h | armored | 600 / 250 / 80 / 50 | 12.7mm heavy machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.7.2.1.0 |
 | `civ-car` | Civilian Car — Neutral civilian sedan | 108 / 50 km/h | soft | — | — | — | 1.1.0.81.1.0.0 |
+| `us-themis` | THeMIS UGV (armed) — Tracked unmanned ground vehicle (Milrem THeMIS class) with a remote 12.7 mm weapon station | 20 / 14 km/h | light | 12 / 8 / 8 / 5 | 12.7mm heavy machine gun (burst) | UGV remote weapon sight (EO/IR) | 1.1.225.50.1.1.0 |
+| `us-smet` | S-MET logistics UGV — US small multipurpose equipment transport: a robotic mule that follows a squad and carries its water, batteries and ammunition | 14 / 7 km/h | soft | — | — | Robot sensor head (EO/IR) | 1.1.225.50.2.1.0 |
+| `ru-uran9` | Uran-9 — Russian tracked combat UGV with a 30 mm cannon and Ataka anti-tank missiles, driven from a control vehicle up to 3 km away | 35 / 14 km/h | light | 25 / 15 / 10 / 8 | 30mm 2A42 autocannon (burst)<br>9K114 Shturm ATGM | UGV remote weapon sight (EO/IR) | 1.1.222.50.1.1.0 |
+| `ru-ugv-cargo` | Logistics UGV (tracked) — Russian small tracked cargo robot for carrying ammunition forward and casualties back | 14 / 9 km/h | soft | — | — | Robot sensor head (EO/IR) | 1.1.222.50.2.1.0 |
+| `us-robot-dog` | Quadruped robot (Vision 60 class) — US legged reconnaissance robot with an EO/IR sensor head: walks where troops on foot go | 11 / 6 km/h | soft | — | — | Robot sensor head (EO/IR) | 1.1.225.50.3.1.0 |
+| `us-robot-dog-armed` | Quadruped robot (armed) — US legged robot with a sensor head and a remotely fired rifle; a person must approve every engagement | 11 / 6 km/h | soft | — | 5.56mm rifle | Robot sensor head (EO/IR) | 1.1.225.50.3.2.0 |
+| `ru-robot-dog` | Quadruped robot (armed) — Russian legged robot carrying a camera and a remotely fired rifle | 11 / 5 km/h | soft | — | 5.45mm rifle | Robot sensor head (EO/IR) | 1.1.222.50.3.1.0 |
 
 ### Dismounted
 
@@ -45,6 +52,8 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | `us-engineer` | US Combat Engineer — Sapper: breaches minefields and obstacles (about 4 minutes per lane) | 14 / 6 km/h | lifeform | 5.56mm rifle | Binoculars<br>Night-vision goggles | 3.1.225.1.8.0.0 |
 | `ru-sapper` | RU Sapper — Russian combat engineer: breaches minefields and obstacles (about 4 minutes per lane) | 14 / 6 km/h | lifeform | 5.45mm rifle | Binoculars | 3.1.222.1.8.0.0 |
 | `civ-person` | Civilian — Neutral civilian pedestrian | 11 / 5 km/h | lifeform | — | — | 3.1.0.0.0.0.0 |
+| `us-uas-operator` | UAS Operator Team — US small unmanned aircraft and robot operators with their ground control station | 14 / 5 km/h | lifeform | 5.56mm rifle | Binoculars<br>Night-vision goggles | 3.1.225.1.9.0.0 |
+| `ru-uas-operator` | Drone Operator Team — Russian drone and robot operators with their ground control station | 14 / 5 km/h | lifeform | 5.45mm rifle | Binoculars | 3.1.222.1.9.0.0 |
 
 ### Aircraft
 
@@ -56,6 +65,17 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | `us-mq9` | MQ-9 Reaper — US armed reconnaissance UAV | 432 / 270 km/h, 2500 m AGL | air | 1 | AGM-114 Hellfire | EO/IR turret | 1.2.225.50.2.1.0 |
 | `ru-mi24` | Mi-24V Hind — Russian attack helicopter | 306 / 216 km/h, 80 m AGL | air | 15 | 9K114 Shturm ATGM<br>12.7mm heavy machine gun (burst) | Binoculars | 1.2.222.20.3.0.0 |
 | `ru-su27` | Su-27 Flanker — Russian air-superiority fighter | 1512 / 828 km/h, 3500 m AGL | air | 15 | R-73 air-to-air missile | Fire-control radar<br>Unaided eye | 1.2.222.1.9.0.0 |
+| `us-quadcopter` | Short-range recon quadcopter — US small reconnaissance quadcopter (Skydio X10D class), EO/IR camera, 40 min | 58 / 40 km/h, 80 m AGL | air | 0.01 | — | Small UAV gimbal camera (EO/IR) | 1.2.225.50.10.1.0 |
+| `ru-quadcopter` | Recon quadcopter (Mavic class) — Commercial-type reconnaissance quadcopter used by Russian units, camera, 30 min | 68 / 43 km/h, 100 m AGL | air | 0.01 | — | Small UAV gimbal camera (EO/IR) | 1.2.222.50.10.1.0 |
+| `us-fpv` | FPV attack drone — US first-person-view one-way attack quadcopter with an anti-armour warhead, flown by a pilot over a radio link | 144 / 90 km/h, 30 m AGL | air | 0.01 | — | FPV camera | 1.2.225.50.11.1.0 |
+| `ru-fpv` | FPV attack drone — Russian first-person-view one-way attack quadcopter with an RPG-type warhead, flown by a pilot over a radio link | 144 / 90 km/h, 30 m AGL | air | 0.01 | — | FPV camera | 1.2.222.50.11.1.0 |
+| `ru-fpv-fiber` | FPV attack drone (fibre-optic) — Russian FPV one-way attack drone controlled through a 10 km fibre-optic cable: it cannot be jammed, but cannot fly further than its spool | 108 / 72 km/h, 30 m AGL | air | 0.01 | — | FPV camera | 1.2.222.50.11.2.0 |
+| `us-swarm-drone` | Swarm attack drone — US small autonomous attack quadcopter for swarms: mesh datalink, onboard target recognition, small top-attack warhead | 108 / 72 km/h, 60 m AGL | air | 0.01 | — | Small UAV gimbal camera (EO/IR) | 1.2.225.50.12.1.0 |
+| `us-switchblade300` | Switchblade 300 — US tube-launched loitering munition against troops and light vehicles, 10 km, 15 min | 158 / 101 km/h, 150 m AGL | air | 0.01 | — | Loitering munition EO/IR seeker | 1.2.225.50.20.1.0 |
+| `us-switchblade600` | Switchblade 600 — US anti-armour loitering munition with a top-attack HEAT warhead, 40 km, 40 min | 184 / 112 km/h, 200 m AGL | air | 0.05 | — | Loitering munition EO/IR seeker | 1.2.225.50.21.1.0 |
+| `ru-lancet3` | Lancet-3 — Russian loitering munition with a top-attack warhead, against armour and artillery, 40 km, 40 min | 299 / 108 km/h, 300 m AGL | air | 0.05 | — | Loitering munition EO/IR seeker | 1.2.222.50.21.1.0 |
+| `us-raven` | RQ-11B Raven — US hand-launched reconnaissance UAV, EO/IR, 10 km, 90 min | 79 / 47 km/h, 150 m AGL | air | 0.05 | — | Small UAV gimbal camera (EO/IR) | 1.2.225.50.3.1.0 |
+| `ru-orlan10` | Orlan-10 — Russian reconnaissance and artillery-spotting UAV; also relays other drones’ datalinks. 120 km, 16 h | 148 / 90 km/h, 1000 m AGL | air | 0.3 | — | UAV EO/IR turret | 1.2.222.50.3.1.0 |
 
 ### Surface vessels
 
@@ -63,6 +83,34 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `us-ddg51` | DDG-51 Arleigh Burke — US guided-missile destroyer | 54 / 32 km/h | ship | 1000 | RIM-66 SM-2 SAM<br>127mm Mk 45 naval gun | Naval surface/air radar<br>Binoculars | 1.3.225.4.1.0.0 |
 | `us-patrol-boat` | Mk VI Patrol Boat — US patrol boat | 83 / 50 km/h | ship | 30 | 12.7mm heavy machine gun (burst) | Binoculars | 1.3.225.61.1.0.0 |
+
+### Unmanned systems
+
+How each unmanned type is controlled (see [Concepts](../concepts.md#unmanned-systems-and-swarms)): its datalink and range (a fibre-optic cable's length), anti-jam share, whether it relays other drones' links, what it does when the link is lost, its autonomy, the warhead of one-way attack drones, and the size the eye and thermal sights see.
+
+| Id | Link | Range | Anti-jam | Relay | Lost link | Autonomy | Warhead (dive from) | Size |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `us-mq9` | rf | satellite | 80 % | no | return | supervised | — | — |
+| `us-quadcopter` | rf | 8.0 km | 30 % | no | return | remote | — | 0.4 m |
+| `ru-quadcopter` | rf | 7.0 km | 10 % | no | return | remote | — | 0.35 m |
+| `us-fpv` | rf | 10.0 km | — | no | land | remote | FPV drone warhead (RPG-type HEAT) (120 m) | 0.3 m |
+| `ru-fpv` | rf | 10.0 km | — | no | land | remote | FPV drone warhead (RPG-type HEAT) (120 m) | 0.3 m |
+| `ru-fpv-fiber` | fiber | 10.0 km | — | no | land | remote | FPV drone warhead (RPG-type HEAT) (120 m) | 0.35 m |
+| `us-swarm-drone` | rf | 3.0 km | 50 % | yes | continue | autonomous | Swarm drone warhead (small HEAT / fragmentation) (150 m) | 0.4 m |
+| `us-switchblade300` | rf | 10.0 km | 30 % | no | hover | supervised | Switchblade 300 warhead (fragmentation) (300 m) | 0.6 m |
+| `us-switchblade600` | rf | 40.0 km | 50 % | no | hover | supervised | Switchblade 600 warhead (HEAT) (400 m) | 1.3 m |
+| `ru-lancet3` | rf | 30.0 km | 30 % | no | hover | supervised | Lancet-3 warhead (HEAT / fragmentation) (500 m) | 1.6 m |
+| `us-raven` | rf | 10.0 km | 20 % | no | return | supervised | — | 1.4 m |
+| `ru-orlan10` | rf | 120.0 km | 30 % | yes | return | supervised | — | 3.1 m |
+| `us-themis` | rf | 1.5 km | 20 % | no | hover | remote | — | 2.4 m |
+| `us-smet` | rf | 1.0 km | — | no | hover | supervised | — | 2.3 m |
+| `ru-uran9` | rf | 3.0 km | 10 % | no | hover | remote | — | 5 m |
+| `ru-ugv-cargo` | rf | 2.0 km | — | no | hover | remote | — | 1.8 m |
+| `us-robot-dog` | rf | 1.0 km | 20 % | no | return | supervised | — | 0.9 m |
+| `us-robot-dog-armed` | rf | 1.0 km | 20 % | no | hover | remote | — | 0.9 m |
+| `ru-robot-dog` | rf | 0.8 km | — | no | hover | remote | — | 0.8 m |
+
+Drone operators and ground control stations (datalinks end at them): `us-uas-operator`, `ru-uas-operator`. Legged (they move as troops on foot do): `us-robot-dog`, `us-robot-dog-armed`, `ru-robot-dog`.
 
 ## Weapons
 
@@ -97,6 +145,11 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `how-152mm` | 152mm 2A64 howitzer (OF-45 HE) | 2000–24700 m | 320 m/s | 12 s | 50 | no | ground, lifeform, surface | armored 0.28, light 0.6, soft 0.85, lifeform 0.75, ship 0.1 | 110 mm | — |
 | `mortar-81mm` | 81mm M252 mortar (M821 HE) | 80–5600 m | 200 m/s | 5 s | 30 | no | ground, lifeform | armored 0.02, light 0.2, soft 0.65, lifeform 0.7 | 25 mm | — |
 | `mortar-120mm` | 120mm 2B11 mortar (OF-843 HE) | 480–7100 m | 220 m/s | 6 s | 24 | no | ground, lifeform | armored 0.06, light 0.35, soft 0.75, lifeform 0.75 | 45 mm | — |
+| `wh-fpv-heat` | FPV drone warhead (RPG-type HEAT) | 0–2000 m | 40 m/s | 1 s | 1 | yes | ground, lifeform, surface | armored 0.55, light 0.85, soft 0.9, lifeform 0.45, ship 0.1 | 500 mm | — |
+| `wh-switchblade300` | Switchblade 300 warhead (fragmentation) | 0–2000 m | 45 m/s | 1 s | 1 | yes (top attack) | ground, lifeform, surface | lifeform 0.7, soft 0.6, light 0.15, armored 0.02 | 20 mm | — |
+| `wh-switchblade600` | Switchblade 600 warhead (HEAT) | 0–2000 m | 55 m/s | 1 s | 1 | yes (top attack) | ground, lifeform, surface | armored 0.8, light 0.9, soft 0.9, lifeform 0.4, ship 0.3 | 750 mm | — |
+| `wh-lancet` | Lancet-3 warhead (HEAT / fragmentation) | 0–2000 m | 80 m/s | 1 s | 1 | yes (top attack) | ground, lifeform, surface | armored 0.6, light 0.85, soft 0.9, lifeform 0.4, ship 0.2 | 300 mm | — |
+| `wh-swarm` | Swarm drone warhead (small HEAT / fragmentation) | 0–2000 m | 35 m/s | 1 s | 1 | yes (top attack) | ground, lifeform, surface | armored 0.3, light 0.7, soft 0.85, lifeform 0.6 | 150 mm | — |
 
 ## Sensors
 
@@ -112,6 +165,12 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `sam-radar` | Search/track radar | 30000 m (25000 m against 5 m²) | 360° | air | yes |
 | `observer-optics` | Observer optics (thermal, laser rangefinder) | 6000 m | 360° | ground, lifeform, surface | no |
 | `naval-radar` | Naval surface/air radar | 80000 m (60000 m against 1 m²) | 360° | air, surface | yes |
+| `uav-camera` | Small UAV gimbal camera (EO/IR) | 2500 m | 360° | ground, lifeform, surface, air | no |
+| `fpv-camera` | FPV camera | 1500 m | 100° | ground, lifeform, surface | no |
+| `lm-seeker` | Loitering munition EO/IR seeker | 3000 m | 120° | ground, lifeform, surface | no |
+| `uav-turret` | UAV EO/IR turret | 5000 m | 360° | ground, lifeform, surface | no |
+| `robot-sensors` | Robot sensor head (EO/IR) | 1500 m | 360° | ground, lifeform, surface, air | no |
+| `ugv-sight` | UGV remote weapon sight (EO/IR) | 3500 m | 120° | ground, lifeform, surface, air | no |
 
 ## Unit templates
 
@@ -140,3 +199,18 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `ru-supply-section` | RU Supply Section | section | 2× Ural-4320 supply truck | column | 40 m |
 | `ru-tank-company` | RU Tank Company | company | HQ 1× T-72B3; 3× `ru-tank-platoon` | wedge | 500 m |
 | `ru-flanker-flight` | Su-27 Flight | flight | 2× Su-27 Flanker | echelonRight | 600 m |
+| `us-uas-team` | US Recon Quadcopter Team | team | 2× Short-range recon quadcopter; operated by UAS Operator Team (placed with it) | line | 150 m |
+| `us-raven-team` | US Raven Team | team | 1× RQ-11B Raven; operated by UAS Operator Team (placed with it) | line | 300 m |
+| `us-fpv-team` | US FPV Strike Team | team | 4× FPV attack drone; operated by UAS Operator Team (placed with it) | line | 40 m |
+| `us-switchblade-section` | US Switchblade Section | section | 4× Switchblade 600; operated by UAS Operator Team (placed with it) | echelonRight | 150 m |
+| `us-drone-swarm` | US Drone Swarm | group | 16× Swarm attack drone; operated by UAS Operator Team (placed with it) | wedge | 30 m |
+| `us-ugv-section` | US UGV Section | section | 2× THeMIS UGV (armed); operated by UAS Operator Team (placed with it) | line | 60 m |
+| `us-robot-dog-team` | US Robot Dog Team | team | 1× Quadruped robot (Vision 60 class), 1× Quadruped robot (armed); operated by UAS Operator Team (placed with it) | line | 20 m |
+| `ru-quadcopter-team` | RU Recon Quadcopter Team | team | 2× Recon quadcopter (Mavic class); operated by Drone Operator Team (placed with it) | line | 150 m |
+| `ru-orlan-team` | RU Orlan-10 Team | team | 1× Orlan-10; operated by Drone Operator Team (placed with it) | line | 300 m |
+| `ru-fpv-team` | RU FPV Strike Team | team | 4× FPV attack drone; operated by Drone Operator Team (placed with it) | line | 40 m |
+| `ru-fpv-fiber-team` | RU Fibre-optic FPV Team | team | 4× FPV attack drone (fibre-optic); operated by Drone Operator Team (placed with it) | line | 40 m |
+| `ru-fpv-swarm` | RU FPV Strike Group | group | 24× FPV attack drone; operated by Drone Operator Team (placed with it) | wedge | 30 m |
+| `ru-lancet-section` | RU Lancet Section | section | 3× Lancet-3; operated by Drone Operator Team (placed with it) | echelonRight | 200 m |
+| `ru-uran9-section` | RU Uran-9 Section | section | 2× Uran-9; operated by Drone Operator Team (placed with it) | line | 80 m |
+| `ru-robot-dog-team` | RU Robot Dog Team | team | 2× Quadruped robot (armed); operated by Drone Operator Team (placed with it) | line | 20 m |
