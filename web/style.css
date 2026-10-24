@@ -1328,3 +1328,43 @@ body.player [data-controller-only] {
 .order-preview.ok {
   color: var(--good);
 }
+
+/* Plan editor blocks */
+.plan-list {
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.plan-line {
+  font-size: 12px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.plan-step {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.plan-step > span:first-child {
+  flex: 1;
+}
+.plan-step button.small {
+  padding: 0 5px;
+}
+.plan-block .plan-step > span:first-child,
+.plan-kw {
+  color: var(--blue);
+  font-weight: 600;
+}
+.plan-here {
+  font-style: italic;
+}
+.plan-add {
+  flex-wrap: wrap;
+}
+.plan-add select {
+  max-width: 100%;
+}

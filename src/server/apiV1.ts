@@ -55,6 +55,8 @@ const PLAYER_ROUTES: [string, RegExp][] = [
   ['GET', /^\/api\/v1\/(entities|units)\/[^/]+\/explain\/?$/],
   ['GET', /^\/api\/v1\/alerts\/?$/],
   ['POST', /^\/api\/v1\/orders\/?$/],
+  ['GET', /^\/api\/v1\/codewords\/?$/],
+  ['POST', /^\/api\/v1\/codewords\/?$/],
   ['POST', /^\/api\/v1\/alerts\/([^/]+\/)?acknowledge\/?$/],
   ['POST', /^\/api\/v1\/(entities|units)\/[^/]+\/(task|plan|stop|embark|disembark)\/?$/],
   ['POST', /^\/api\/v1\/(graphics|terrain\/line-of-sight|terrain\/route)\/?$/],
@@ -567,6 +569,16 @@ export class ApiV1 {
     });
 
     // ---------------------------------------------------------------- events
+    r.get(`${P}/codewords`, () => {
+      const list = [...this.engine.codewords].map(([k, time]) => ({ force: Number(k.split('|')[0]) as ForceId, codeword: k.slice(k.indexOf('|') + 1), time }));
+      return { json: this.role.kind === 'player' ? list.filter((c) => c.force === (this.role as { force: ForceId }).force) : list };
+    });
+    r.post(`${P}/codewords`, (req) => {
+      const b = obj(req.body);
+      const force = this.role.kind === 'player' ? this.role.force : ((b.force ?? 1) as ForceId);
+      this.run({ cmd: 'sendCodeword', force, codeword: String(b.codeword ?? '') });
+      return { status: 201, json: { force, codeword: String(b.codeword).trim().toUpperCase(), time: this.engine.time } };
+    });
     r.post(`${P}/orders`, (req) => {
       const b = obj(req.body);
       const text = typeof b.text === 'string' ? b.text : '';
@@ -731,14 +743,18 @@ export class ApiV1 {
 
   resolvePlan(body: unknown): unknown {
     const p = { ...obj(body) };
-    if (Array.isArray(p.statements)) {
-      p.statements = p.statements.map((s) => {
-        const st = { ...obj(s) };
-        if (st.kind === 'task') st.task = this.resolveTask(st.task);
-        if (st.kind === 'setReactions') st.reactions = this.resolveReactions(st.reactions);
-        return st;
-      });
-    }
+    const list = (v: unknown): unknown =>
+      Array.isArray(v)
+        ? v.map((s) => {
+            const st = { ...obj(s) };
+            if (st.kind === 'task') st.task = this.resolveTask(st.task);
+            if (st.kind === 'setReactions') st.reactions = this.resolveReactions(st.reactions);
+            // Blocks: places inside them too.
+            for (const k of ['then', 'else', 'body']) if (Array.isArray(st[k])) st[k] = list(st[k]);
+            return st;
+          })
+        : v;
+    p.statements = list(p.statements);
     return p;
   }
 

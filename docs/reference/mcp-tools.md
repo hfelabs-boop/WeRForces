@@ -54,6 +54,15 @@ Give an order in plain words, the way a commander would say it: "<who> <verb> <w
 | `text` | string | yes | The order, e.g. "Team ARMOR move to Calloway covered" |
 | `dryRun` | boolean |  |  |
 
+## `send_codeword`
+
+Send a codeword to a force (players: their own). Plans waiting for it ({type:"codeword"} conditions) go on: use it to trigger phases ("EXECUTE", "PHASE 2"). Also lists codewords sent so far.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `codeword` | string | yes |  |
+| `force` | `"blue"` \| `"red"` \| `"neutral"` |  | default blue (exercise control only) |
+
 ## `get_alerts`
 
 The attention queue: what needs looking at now (units idle after finishing their orders, broken, out of fuel or ammunition, leader lost, losses, failed tasks, under fire, first contact), newest first. Pass acknowledge: true to clear them once handled.
@@ -173,7 +182,7 @@ Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMiss
 
 ## `assign_plan`
 
-Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: {kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), {kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, {kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, {kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"fuelBelow",fraction}|{type:"ammoBelow",fraction}|{type:"entityDestroyed",entityId}}.
+Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: {kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), {kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, {kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, {kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"fuelBelow",fraction}|{type:"ammoBelow",fraction}|{type:"entityDestroyed",entityId}|{type:"codeword",codeword}|{type:"all"|"any",conditions:[...]}|{type:"not",condition}}, {kind:"if", condition, then:[statements], else:[statements]}, {kind:"while", condition, body:[statements]} (repeats while the condition holds), {kind:"sendCodeword", codeword} (plans of the same force waiting for it go on), {kind:"report", text} (a radio message). Codewords coordinate units: e.g. one unit sends "PHASE 2" when it reaches a phase line, others wait for it.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |

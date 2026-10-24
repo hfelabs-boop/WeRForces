@@ -228,7 +228,14 @@ export type Condition =
   /** Average fuel of the owner's vehicles is below `fraction`. */
   | { type: 'fuelBelow'; fraction: number }
   /** Average ammunition (fraction of full loads) of the owner's members is below `fraction`. */
-  | { type: 'ammoBelow'; fraction: number };
+  | { type: 'ammoBelow'; fraction: number }
+  /** The owner's force has received this codeword (from a plan, exercise control or a player). */
+  | { type: 'codeword'; codeword: string }
+  /** Every condition holds. */
+  | { type: 'all'; conditions: Condition[] }
+  /** At least one condition holds. */
+  | { type: 'any'; conditions: Condition[] }
+  | { type: 'not'; condition: Condition };
 
 /** Automatic behaviours that run alongside tasks and plans. */
 export interface Reactions {
@@ -249,7 +256,15 @@ export type PlanStatement =
   | { kind: 'setAltitude'; altitude: number }
   | { kind: 'setFormation'; formation: Formation }
   | { kind: 'waitUntil'; condition: Condition }
-  | { kind: 'setReactions'; reactions: Reactions };
+  | { kind: 'setReactions'; reactions: Reactions }
+  /** Run `then` if the condition holds now, else `else`. */
+  | { kind: 'if'; condition: Condition; then: PlanStatement[]; else?: PlanStatement[] }
+  /** Repeat `body` for as long as the condition holds (checked before each pass). */
+  | { kind: 'while'; condition: Condition; body: PlanStatement[] }
+  /** Send a codeword to the owner's force (plans waiting on it go on). */
+  | { kind: 'sendCodeword'; codeword: string }
+  /** A radio report from the owner. */
+  | { kind: 'report'; text: string };
 
 export interface Plan {
   name?: string;
@@ -465,6 +480,8 @@ export interface ScenarioFile {
   environment?: Environment;
   /** Checkpoint only: orders still on their way. */
   orders?: PendingOrder[];
+  /** Checkpoint only: codewords sent so far. */
+  codewords?: { force: ForceId; codeword: string; time: number }[];
 }
 
 /** Optional parts of the model, for comparison runs. Missing fields mean on. */
@@ -766,6 +783,8 @@ export type Command =
   | { cmd: 'setRoe'; targetId: string; roe: Roe }
   /** Acknowledge an alert, or all of them (players: their own force's). */
   | { cmd: 'ackAlert'; id?: string; all?: boolean }
+  /** Send a codeword to a force (players: their own). Plans waiting for it go on. */
+  | { cmd: 'sendCodeword'; force: ForceId; codeword: string }
   | { cmd: 'setReactions'; targetId: string; reactions: Reactions }
   /** Put infantry (entity or unit) into a carrier (entity or unit) instantly, e.g. when setting up a scenario. */
   | { cmd: 'embark'; passengerId: string; carrierId: string }

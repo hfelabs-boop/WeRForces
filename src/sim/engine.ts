@@ -34,6 +34,7 @@ import type {
   Vec3,
   WeaponDef,
 } from '../shared/types.js';
+import { FORCE_NAMES } from '../shared/types.js';
 import { CatalogIndex, DEFAULT_CATALOG } from './catalog.js';
 import { applyBlast, applyDamage, type Detonation, effectivePk, resolveImpact, type Shot, updateCombat } from './combat.js';
 import { Entity } from './entity.js';
@@ -41,7 +42,7 @@ import { DEFAULT_ENVIRONMENT, environmentAt, groundFactor, normalizeEnvironment,
 import { checkCallsForFire } from './fires.js';
 import { decaySuppression, isPinned, updateMorale } from './morale.js';
 import { stepMovement } from './movement.js';
-import { describeStatement, PlanExecutor, type Taskable } from './plans.js';
+import { describeStatement, PlanExecutor, planTasks, type Taskable } from './plans.js';
 import { Rng } from './rng.js';
 import { SENSOR_INTERVAL, updateSensors } from './sensors.js';
 import { Obstacles } from './obstacles.js';
@@ -406,7 +407,7 @@ export class Engine {
   issueOrder(targetId: string, order: { task?: TaskSpec; plan?: Plan }): number {
     const t = this.resolveTarget(targetId);
     if (order.task) this.validateTask(order.task);
-    if (order.plan) for (const st of order.plan.statements) if (st.kind === 'task') this.validateTask(st.task);
+    if (order.plan) for (const t of planTasks(order.plan.statements)) this.validateTask(t);
     // A new order replaces one still on its way.
     this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== targetId);
     const base = this.rules.orderDelay ? ORDER_DELAY[t instanceof Unit ? t.echelon : 'entity'] : 0;
@@ -422,6 +423,25 @@ export class Engine {
   }
 
   /** A radio message from an entity (DIS gateways send it as a Signal PDU). */
+  /** Codewords a force has received: "force|WORD" -> time. */
+  readonly codewords = new Map<string, number>();
+
+  /** Send a codeword to a force: plans waiting for it go on. `from` names the sender in the log. */
+  sendCodeword(force: ForceId, codeword: string, from?: string): void {
+    const word = codeword.trim().toUpperCase();
+    const key = `${force}|${word}`;
+    if (!this.codewords.has(key)) this.codewords.set(key, this.time);
+    const sender = from ? this.entities.get(from) ?? this.units.get(from)?.leader : undefined;
+    const speaker = sender && !sender.remote && sender.alive ? sender : undefined;
+    const text = `${from ? `${this.nameOf(from)}: ` : ''}codeword ${word}`;
+    if (speaker) this.radio(speaker, text);
+    else this.log('info', `${FORCE_NAMES[force]} ${text}`, undefined);
+  }
+
+  hasCodeword(force: ForceId, codeword: string): boolean {
+    return this.codewords.has(`${force}|${codeword.trim().toUpperCase()}`);
+  }
+
   radio(from: Entity, text: string, aboutId?: string): void {
     if (from.remote || !from.alive) return;
     this.log('radio', text, from.id, aboutId);
@@ -654,7 +674,7 @@ export class Engine {
 
   assignPlan(targetId: string, plan: Plan): void {
     const t = this.resolveTarget(targetId);
-    for (const st of plan.statements) if (st.kind === 'task') this.validateTask(st.task);
+    for (const task of planTasks(plan.statements)) this.validateTask(task);
     t.plan = new PlanExecutor(plan);
     t.assignedPlan = plan;
     t.assignedTask = undefined;
@@ -1165,6 +1185,7 @@ export class Engine {
     this.graphics.clear();
     this.shots = [];
     this.pendingOrders = [];
+    this.codewords.clear();
     this.sensorDue.clear();
     this.losMemo.clear();
     this.smoke.clear();
@@ -1251,6 +1272,7 @@ export class Engine {
     }
     for (const u of s.units ?? []) if (u.parentId && this.units.has(u.parentId) && this.units.has(u.id)) this.units.get(u.id)!.parentId = u.parentId;
     this.pendingOrders = (s.orders ?? []).filter((o) => this.entities.has(o.targetId) || this.units.has(o.targetId)).map((o) => ({ ...o }));
+    for (const c of s.codewords ?? []) this.codewords.set(`${c.force}|${c.codeword.toUpperCase()}`, c.time);
     // Tasks and plans last, since they can reference any object. Checkpoints resume them part-way.
     for (const r of s.entities ?? []) {
       const e = this.entities.get(r.id)!;
@@ -1466,6 +1488,7 @@ export class Engine {
       rngState: this.time === 0 ? undefined : this.rng.state,
       rules: JSON.stringify(this.rules) === JSON.stringify(DEFAULT_RULES) ? undefined : { ...this.rules },
       orders: this.pendingOrders.length ? this.pendingOrders.map((o) => ({ ...o })) : undefined,
+      codewords: this.codewords.size ? [...this.codewords].map(([k, time]) => ({ force: Number(k.split('|')[0]) as ForceId, codeword: k.slice(k.indexOf('|') + 1), time })) : undefined,
       environment: JSON.stringify(this.environment) === JSON.stringify(DEFAULT_ENVIRONMENT) ? undefined : { ...this.environment },
       smoke: this.smoke.clouds.length ? this.smoke.clouds.map((c) => ({ ...c })) : undefined,
     };
@@ -1580,11 +1603,11 @@ export class Engine {
     for (const o of owners) {
       const p = o.plan;
       if (!p || p.finished) continue;
-      const sts = p.plan.statements;
-      for (let i = p.index; i < sts.length; i++) {
-        const st = sts[i];
-        if (st.kind !== 'waitUntil' || st.condition.type !== 'simTime' || st.condition.time <= this.time) continue;
-        const next = sts[i + 1];
+      for (let i = p.index; i < p.ops.length; i++) {
+        const op = p.ops[i];
+        const st = op.op === 'do' ? op.st : undefined;
+        if (!st || st.kind !== 'waitUntil' || st.condition.type !== 'simTime' || st.condition.time <= this.time) continue;
+        const next = p.statementAt(i + 1);
         out.push({ targetId: o.id, time: st.condition.time, text: `${this.nameOf(o.id)}: ${next ? describeStatement(next, this) : 'plan continues'}` });
       }
     }

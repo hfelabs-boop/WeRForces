@@ -142,6 +142,15 @@ function validateCondition(v: unknown): Condition {
       if (fraction <= 0 || fraction > 1) throw new ValidationError('fraction must be in (0, 1]');
       return { type: c.type, fraction };
     }
+    case 'codeword':
+      return { type: 'codeword', codeword: codeword(c.codeword) };
+    case 'all':
+    case 'any': {
+      if (!Array.isArray(c.conditions) || c.conditions.length === 0 || c.conditions.length > 20) throw new ValidationError(`${c.type}: conditions must be a list of 1 to 20 conditions`);
+      return { type: c.type, conditions: c.conditions.map(validateCondition) };
+    }
+    case 'not':
+      return { type: 'not', condition: validateCondition(c.condition) };
     default:
       throw new ValidationError(`unknown condition ${String(c.type)}`);
   }
@@ -168,13 +177,31 @@ export function validateReactions(v: unknown): Reactions {
   return out;
 }
 
-export function validatePlan(v: unknown): Plan {
-  if (!v || typeof v !== 'object') throw new ValidationError('plan must be an object');
-  const p = v as Record<string, unknown>;
-  if (!Array.isArray(p.statements) || p.statements.length > 200) throw new ValidationError('plan.statements must be an array');
-  const statements: PlanStatement[] = p.statements.map((s: unknown) => {
+/** A codeword: letters, digits, spaces and -, upper-cased. */
+export function codeword(v: unknown): string {
+  const s = str(v, 'codeword').trim().toUpperCase();
+  if (!/^[A-Z0-9][A-Z0-9 _-]{0,39}$/.test(s)) throw new ValidationError('codeword: 1-40 letters, digits, spaces, - or _');
+  return s;
+}
+
+function validateStatements(v: unknown, what: string, depth: number, count: { n: number }): PlanStatement[] {
+  if (!Array.isArray(v)) throw new ValidationError(`${what} must be an array`);
+  if (depth > 8) throw new ValidationError('plan blocks are nested too deeply');
+  return v.map((s: unknown) => {
+    if (++count.n > 200) throw new ValidationError('a plan has at most 200 statements');
     const st = (s ?? {}) as Record<string, unknown>;
     switch (st.kind) {
+      case 'if':
+        return { kind: 'if', condition: validateCondition(st.condition), then: validateStatements(st.then, 'if.then', depth + 1, count), ...(st.else !== undefined ? { else: validateStatements(st.else, 'if.else', depth + 1, count) } : {}) };
+      case 'while':
+        return { kind: 'while', condition: validateCondition(st.condition), body: validateStatements(st.body, 'while.body', depth + 1, count) };
+      case 'sendCodeword':
+        return { kind: 'sendCodeword', codeword: codeword(st.codeword) };
+      case 'report': {
+        const text = str(st.text, 'text').trim();
+        if (!text || text.length > 200) throw new ValidationError('report text: 1-200 characters');
+        return { kind: 'report', text };
+      }
       case 'task':
         return { kind: 'task', task: validateTask(st.task) };
       case 'setRoe':
@@ -193,11 +220,17 @@ export function validatePlan(v: unknown): Plan {
         throw new ValidationError(`unknown plan statement ${String(st.kind)}`);
     }
   });
+}
+
+export function validatePlan(v: unknown): Plan {
+  if (!v || typeof v !== 'object') throw new ValidationError('plan must be an object');
+  const p = v as Record<string, unknown>;
+  const statements = validateStatements(p.statements, 'plan.statements', 0, { n: 0 });
   return { name: typeof p.name === 'string' ? p.name.slice(0, 80) : undefined, statements, loop: p.loop === true };
 }
 
 /** Commands that do not change the scenario, so are not undone. */
-const NOT_EDITS = new Set(['run', 'pause', 'step', 'setTimeScale', 'undo', 'redo', 'ackAlert']);
+const NOT_EDITS = new Set(['run', 'pause', 'step', 'setTimeScale', 'undo', 'redo', 'ackAlert', 'sendCodeword']);
 
 export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
   const cmd = raw && typeof raw === 'object' ? (raw as { cmd?: unknown }).cmd : undefined;
@@ -323,6 +356,9 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         return;
       case 'setRoe':
         engine.setRoe(str(c.targetId, 'targetId'), roe(c.roe));
+        return;
+      case 'sendCodeword':
+        engine.sendCodeword(force(c.force), codeword(c.codeword));
         return;
       case 'ackAlert': {
         const force = (c as { force?: ForceId }).force;

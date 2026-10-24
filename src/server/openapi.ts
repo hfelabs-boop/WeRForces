@@ -178,6 +178,12 @@ export function buildOpenApi(baseUrl: string): Schema {
         delete: { tags: ['Entities'], summary: 'Delete an entity', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } },
       },
       '/api/v1/entities/{id}/path': { get: op('Entities', 'Remaining planned waypoints', { parameters: [idParam()] }) },
+      '/api/v1/codewords': {
+        get: op('Simulation', 'Codewords sent so far, per force (players: their own)'),
+        post: op('Simulation', 'Send a codeword to a force: plans waiting for it go on. Body: {codeword, force} (players: their own force)', {
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['codeword'], properties: { codeword: { type: 'string' }, force: { type: 'integer', enum: [0, 1, 2, 3] } } } } } },
+        }),
+      },
       '/api/v1/orders': {
         post: op('Entities', 'Give an order in words, e.g. "Team ARMOR move to Calloway covered", "Scout 1 screen 2 km north of Brenham facing north", "Paladin Platoon fire 4 rounds on 9800 12300", "Team MECH hold fire". Places: towns, graphics, objects, "x y" or "2 km north of …". Returns the order as understood and the commands run; `dryRun: true` only parses', {
           requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['text'], properties: { text: { type: 'string' }, dryRun: { type: 'boolean' } } } } } },

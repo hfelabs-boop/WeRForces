@@ -202,6 +202,16 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'send_codeword',
+    'Send a codeword to a force (players: their own). Plans waiting for it ({type:"codeword"} conditions) go on: use it to trigger phases ("EXECUTE", "PHASE 2"). Also lists codewords sent so far.',
+    { codeword: z.string(), force: z.enum(['blue', 'red', 'neutral']).optional().describe('default blue (exercise control only)') },
+    async ({ codeword, force }) => {
+      await api('POST', '/api/v1/codewords', { codeword, force: force ? { blue: 1, red: 2, neutral: 3 }[force] : undefined });
+      return api('GET', '/api/v1/codewords');
+    },
+  );
+
+  tool(
     'get_alerts',
     'The attention queue: what needs looking at now (units idle after finishing their orders, broken, out of fuel or ammunition, leader lost, losses, failed tasks, under fire, first contact), newest first. Pass acknowledge: true to clear them once handled.',
     { acknowledge: z.boolean().optional().describe('Acknowledge all open alerts after reading them') },
@@ -395,7 +405,10 @@ export function createMcpServer(call: ApiCaller): McpServer {
       '{kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), ' +
       '{kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, ' +
       '{kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, ' +
-      '{kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"fuelBelow",fraction}|{type:"ammoBelow",fraction}|{type:"entityDestroyed",entityId}}.',
+      '{kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"fuelBelow",fraction}|{type:"ammoBelow",fraction}|{type:"entityDestroyed",entityId}|{type:"codeword",codeword}|{type:"all"|"any",conditions:[...]}|{type:"not",condition}}, ' +
+      '{kind:"if", condition, then:[statements], else:[statements]}, {kind:"while", condition, body:[statements]} (repeats while the condition holds), ' +
+      '{kind:"sendCodeword", codeword} (plans of the same force waiting for it go on), {kind:"report", text} (a radio message). ' +
+      'Codewords coordinate units: e.g. one unit sends "PHASE 2" when it reaches a phase line, others wait for it.',
     {
       targetId: z.string(),
       name: z.string().optional(),

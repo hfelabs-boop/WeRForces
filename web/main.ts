@@ -38,6 +38,7 @@ import type { View3D } from './view3d.js';
 import { AarPlayer } from './aar.js';
 import { Timeline } from './timeline.js';
 import { QuickBar } from './quickbar.js';
+import { PlanEditor } from './planeditor.js';
 import { OrderLine } from './orderline.js';
 import { orderContext } from '../src/shared/orders.js';
 import type { CotStatus as CotView } from '../src/integrations/cot.js';
@@ -75,33 +76,6 @@ function moraleText(m: number | undefined, state: string | undefined): string {
   return `${Math.round(m * 100)}% · ${state ?? 'steady'}`;
 }
 
-type PlanStepKind =
-  | 'moveTo'
-  | 'followRoute'
-  | 'patrol'
-  | 'wait'
-  | 'attack'
-  | 'orbit'
-  | 'setRoe'
-  | 'setSpeed'
-  | 'setAltitude'
-  | 'setFormation'
-  | 'waitTime'
-  | 'waitArea'
-  | 'waitEnemy'
-  | 'waitFire'
-  | 'waitDestroyed'
-  | 'waitEnemyInArea'
-  | 'waitStrength'
-  | 'waitFuel'
-  | 'waitAmmo'
-  | 'resupply'
-  | 'setReaction'
-  | 'fireMission'
-  | 'setCallForFire'
-  | 'mount'
-  | 'dismount';
-
 class App {
   readonly api: Api;
   readonly map: MapView;
@@ -126,7 +100,39 @@ class App {
   role: Role = { kind: 'controller' };
   armed: string | null = null;
   events: SimEvent[] = [];
-  planDrafts = new Map<string, Plan>();
+  private readonly plans: PlanEditor = new PlanEditor({
+    pickPoint: (label, onPick) => this.map.setMode({ kind: 'pickPoint', label, onPick }),
+    pickEntity: (label, onPick) => this.map.setMode({ kind: 'pickEntity', label, onPick }),
+    graphics: () => this.state?.graphics ?? [],
+    nameOf: (id) => this.graphic(id)?.name ?? this.entity(id)?.name ?? this.unit(id)?.name ?? id,
+    aimAt: (id) => this.unit(id)?.leaderId ?? id,
+    time: () => this.state?.time ?? 0,
+    can: (what) => {
+      const id = this.selectedId;
+      if (!id) return false;
+      const d = this.domainOf(id);
+      switch (what) {
+        case 'air':
+          return d === 'air';
+        case 'ground':
+          return d !== 'air' && d !== 'surface';
+        case 'indirect':
+          return this.hasIndirect(id);
+        case 'smoke':
+          return this.hasSmoke(id);
+        case 'carrier':
+          return this.isCarrier(id);
+        case 'infantry':
+          return d === 'lifeform';
+        case 'engineer':
+          return this.canBreach(id);
+        case 'unit':
+          return !!this.unit(id);
+      }
+    },
+    assign: async (plan) => (await this.cmd({ cmd: 'assignPlan', targetId: this.selectedId!, plan })).ok,
+    toast: (m, info) => this.toast(m, info),
+  });
   private inspectorFor: string | null = null;
   private treeSignature = '';
   private lastTree = 0;
@@ -1440,8 +1446,8 @@ class App {
         }
         if (this.passengerCount(sel) > 0) {
           add('Move here and dismount', () => {
-            this.planDrafts.set(sel, { name: 'Move and dismount', statements: [{ kind: 'task', task: { type: 'moveTo', target: world } }, { kind: 'task', task: { type: 'dismount' } }] });
-            this.cmd({ cmd: 'assignPlan', targetId: sel, plan: this.planDrafts.get(sel)! });
+            this.plans.set(sel, { name: 'Move and dismount', statements: [{ kind: 'task', task: { type: 'moveTo', target: world } }, { kind: 'task', task: { type: 'dismount' } }] });
+            this.cmd({ cmd: 'assignPlan', targetId: sel, plan: this.plans.get(sel) });
           });
         }
         if (this.hasIndirect(sel)) add('Fire mission here (3 rounds)', () => this.task(sel, { type: 'fireMission', target: world, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
@@ -2115,313 +2121,20 @@ class App {
 
   // ------------------------------------------------------------ plan editor
 
-  private draft(id: string): Plan {
-    let p = this.planDrafts.get(id);
-    if (!p) {
-      p = { name: 'Plan', statements: [], loop: false };
-      this.planDrafts.set(id, p);
-    }
-    return p;
-  }
-
   addPlanStep(id: string, st: PlanStatement): void {
-    this.draft(id).statements.push(st);
-    if (this.selectedId === id) this.renderPlanList(id);
+    this.plans.add(id, st);
   }
 
-  private describe(st: PlanStatement): string {
-    const name = (gid: string) => this.graphic(gid)?.name ?? this.entity(gid)?.name ?? gid;
-    switch (st.kind) {
-      case 'task': {
-        const t = st.task;
-        switch (t.type) {
-          case 'moveTo':
-            return `Move to ${fmtGrid(t.target.x, t.target.y)}`;
-          case 'followRoute':
-            return `Follow route ${name(t.routeId)}`;
-          case 'patrol':
-            return `Patrol ${name(t.routeId)}`;
-          case 'wait':
-            return `Wait ${t.duration} s`;
-          case 'attack':
-            return `Attack ${name(t.targetId)}`;
-          case 'follow':
-            return `Follow ${name(t.targetId)}`;
-          case 'orbit':
-            return `Orbit ${fmtGrid(t.center.x, t.center.y)} r ${t.radius} m`;
-          case 'fireMission':
-            return `Fire mission ${fmtGrid(t.target.x, t.target.y)}, ${t.rounds ?? 3} rounds`;
-          case 'mount':
-            return `Mount ${this.unit(t.carrierId)?.name ?? name(t.carrierId)}`;
-          case 'dismount':
-            return 'Dismount passengers';
-          case 'breach':
-            return `Breach ${name(t.graphicId)}`;
-          case 'resupply':
-            return t.supplierId ? `Resupply from ${name(t.supplierId)}` : 'Resupply';
-          case 'overwatch':
-          case 'defend':
-          case 'screen':
-            return `${t.type[0].toUpperCase()}${t.type.slice(1)} ${fmtGrid(t.position.x, t.position.y)}`;
-          case 'ambush':
-            return `Ambush ${name(t.killZoneId)}`;
-          case 'search':
-            return `Search ${name(t.areaId)}`;
-          default:
-            return t.type;
-        }
-      }
-      case 'setRoe':
-        return `Set ROE: ${ROE_LABELS[st.roe]}`;
-      case 'setSpeed':
-        return `Set speed ${Math.round(st.speed * 3.6)} km/h`;
-      case 'setAltitude':
-        return `Set altitude ${st.altitude} m AGL`;
-      case 'setFormation':
-        return `Set formation ${st.formation}`;
-      case 'waitUntil': {
-        const c = st.condition;
-        if (c.type === 'simTime') return `Wait until time ${fmtTime(c.time)}`;
-        if (c.type === 'inArea') return `Wait until in ${name(c.areaId)}`;
-        if (c.type === 'enemyDetected') return 'Wait until enemy detected';
-        if (c.type === 'underFire') return 'Wait until under fire';
-        if (c.type === 'enemyInArea') return `Wait until enemy in ${name(c.areaId)}`;
-        if (c.type === 'strengthBelow') return `Wait until strength below ${Math.round(c.fraction * 100)}%`;
-        if (c.type === 'fuelBelow') return `Wait until fuel below ${Math.round(c.fraction * 100)}%`;
-        if (c.type === 'ammoBelow') return `Wait until ammunition below ${Math.round(c.fraction * 100)}%`;
-        return `Wait until ${name(c.entityId)} destroyed`;
-      }
-      case 'setReactions':
-        if (st.reactions.callForFire !== undefined && st.reactions.onContact === undefined) return `Set reaction: ${st.reactions.callForFire ? 'call for fire' : 'no call for fire'}`;
-        return `Set reaction: ${st.reactions.onContact === 'halt' ? 'halt on contact' : 'continue on contact'}`;
-    }
-  }
-
-  private planSection(id: string, isUnit: boolean): HTMLElement {
-    const kinds: [PlanStepKind, string][] = [
-      ['moveTo', 'Move to (pick)'],
-      ['followRoute', 'Follow route'],
-      ['patrol', 'Patrol route'],
-      ['wait', 'Wait (seconds)'],
-      ['attack', 'Attack (pick)'],
-      ['orbit', 'Orbit (pick)'],
-      ['setRoe', 'Set ROE'],
-      ['setSpeed', 'Set speed (km/h)'],
-      ['setAltitude', 'Set altitude (m AGL)'],
-      ...(isUnit ? ([['setFormation', 'Set formation']] as [PlanStepKind, string][]) : []),
-      ['waitTime', 'Wait until time (s)'],
-      ['waitArea', 'Wait until in area'],
-      ['waitEnemy', 'Wait until enemy detected'],
-      ['waitFire', 'Wait until under fire'],
-      ['waitDestroyed', 'Wait until destroyed (pick)'],
-      ['waitEnemyInArea', 'Wait until enemy in area'],
-      ['waitStrength', 'Wait until strength below (%)'],
-      ['waitFuel', 'Wait until fuel below (%)'],
-      ['waitAmmo', 'Wait until ammunition below (%)'],
-      ['resupply', 'Resupply at the nearest supply vehicle'],
-      ['setReaction', 'Set reaction on contact'],
-      ['setCallForFire', 'Set call for fire'],
-      ...(this.domainOf(id) === 'lifeform' ? ([['mount', 'Mount carrier (pick)']] as [PlanStepKind, string][]) : []),
-      ...(this.isCarrier(id) ? ([['dismount', 'Dismount passengers']] as [PlanStepKind, string][]) : []),
-      ...(this.hasIndirect(id) ? ([['fireMission', 'Fire mission (pick), rounds']] as [PlanStepKind, string][]) : []),
-    ];
-    const kindSel = h('select', {}, kinds.map(([k, l]) => h('option', { value: k, text: l }))) as HTMLSelectElement;
-    const param = h('span', {});
-    let getParam: () => unknown = () => undefined;
-    const renderParam = () => {
-      clear(param);
-      const k = kindSel.value as PlanStepKind;
-      getParam = () => undefined;
-      if (k === 'followRoute' || k === 'patrol') {
-        const s = this.routeSelect();
-        param.append(s);
-        getParam = () => s.value;
-      } else if (k === 'waitArea' || k === 'waitEnemyInArea') {
-        const areas = this.areas();
-        const s = h('select', {}, areas.length ? areas.map((a) => h('option', { value: a.id, text: a.name })) : h('option', { value: '', text: '(no areas)' })) as HTMLSelectElement;
-        param.append(s);
-        getParam = () => s.value;
-      } else if (k === 'setRoe') {
-        const s = h('select', {}, (Object.keys(ROE_LABELS) as Roe[]).map((r) => h('option', { value: r, text: ROE_LABELS[r] }))) as HTMLSelectElement;
-        param.append(s);
-        getParam = () => s.value;
-      } else if (k === 'setFormation') {
-        const s = h('select', {}, FORMATIONS.map((f) => h('option', { value: f, text: f }))) as HTMLSelectElement;
-        param.append(s);
-        getParam = () => s.value;
-      } else if (k === 'setReaction') {
-        const s = h('select', {}, h('option', { value: 'halt', text: 'Halt and fight' }), h('option', { value: 'continue', text: 'Continue' })) as HTMLSelectElement;
-        param.append(s);
-        getParam = () => s.value;
-      } else if (k === 'setCallForFire') {
-        const s = h('select', {}, h('option', { value: 'yes', text: 'Call for fire' }), h('option', { value: 'no', text: 'Stop calling for fire' })) as HTMLSelectElement;
-        param.append(s);
-        getParam = () => s.value;
-      } else if (['wait', 'setSpeed', 'setAltitude', 'waitTime', 'orbit', 'waitStrength', 'waitFuel', 'waitAmmo', 'fireMission'].includes(k)) {
-        const defaults: Record<string, string> = { wait: '60', setSpeed: '30', setAltitude: '150', waitTime: String(Math.round((this.state?.time ?? 0) + 120)), orbit: '2000', waitStrength: '50', waitFuel: '25', waitAmmo: '30', fireMission: '3' };
-        const n = h('input', { type: 'number', value: defaults[k], style: 'width:80px', title: k === 'orbit' ? 'radius (m)' : '' }) as HTMLInputElement;
-        param.append(n);
-        getParam = () => Number(n.value);
-      }
-    };
-    kindSel.addEventListener('change', renderParam);
-    renderParam();
-    const addBtn = h('button', {
-      text: 'Add',
-      onclick: () => {
-        const k = kindSel.value as PlanStepKind;
-        const v = getParam();
-        const push = (st: PlanStatement) => this.addPlanStep(id, st);
-        switch (k) {
-          case 'moveTo':
-            this.map.setMode({ kind: 'pickPoint', label: 'Click the plan waypoint', onPick: (p) => push({ kind: 'task', task: { type: 'moveTo', target: p } }) });
-            return;
-          case 'attack':
-            this.map.setMode({ kind: 'pickEntity', label: 'Click the target', onPick: (t) => push({ kind: 'task', task: { type: 'attack', targetId: this.unit(t)?.leaderId ?? t } }) });
-            return;
-          case 'orbit':
-            this.map.setMode({ kind: 'pickPoint', label: 'Click the orbit centre', onPick: (p) => push({ kind: 'task', task: { type: 'orbit', center: p, radius: Number(v) || 2000 } }) });
-            return;
-          case 'followRoute':
-          case 'patrol':
-            if (!v) return this.toast('Draw a route first');
-            return push({ kind: 'task', task: { type: k, routeId: String(v) } });
-          case 'wait':
-            return push({ kind: 'task', task: { type: 'wait', duration: Number(v) || 0 } });
-          case 'setRoe':
-            return push({ kind: 'setRoe', roe: v as Roe });
-          case 'setSpeed':
-            return push({ kind: 'setSpeed', speed: (Number(v) || 0) / 3.6 });
-          case 'setAltitude':
-            return push({ kind: 'setAltitude', altitude: Number(v) || 0 });
-          case 'setFormation':
-            return push({ kind: 'setFormation', formation: v as Formation });
-          case 'waitTime':
-            return push({ kind: 'waitUntil', condition: { type: 'simTime', time: Number(v) || 0 } });
-          case 'waitArea':
-            if (!v) return this.toast('Draw an area first');
-            return push({ kind: 'waitUntil', condition: { type: 'inArea', areaId: String(v) } });
-          case 'waitEnemy':
-            return push({ kind: 'waitUntil', condition: { type: 'enemyDetected' } });
-          case 'waitFire':
-            return push({ kind: 'waitUntil', condition: { type: 'underFire' } });
-          case 'waitEnemyInArea':
-            if (!v) return this.toast('Draw an area first');
-            return push({ kind: 'waitUntil', condition: { type: 'enemyInArea', areaId: String(v) } });
-          case 'waitStrength':
-            return push({ kind: 'waitUntil', condition: { type: 'strengthBelow', fraction: Math.min(100, Math.max(1, Number(v) || 50)) / 100 } });
-          case 'waitFuel':
-          case 'waitAmmo':
-            return push({ kind: 'waitUntil', condition: { type: k === 'waitFuel' ? 'fuelBelow' : 'ammoBelow', fraction: Math.min(100, Math.max(1, Number(v) || 25)) / 100 } });
-          case 'resupply':
-            return push({ kind: 'task', task: { type: 'resupply' } });
-          case 'setReaction':
-            return push({ kind: 'setReactions', reactions: { onContact: v === 'halt' ? 'halt' : 'continue' } });
-          case 'mount':
-            this.map.setMode({ kind: 'pickEntity', label: 'Click the carrier', onPick: (t) => push({ kind: 'task', task: { type: 'mount', carrierId: t } }) });
-            return;
-          case 'dismount':
-            return push({ kind: 'task', task: { type: 'dismount' } });
-          case 'setCallForFire':
-            return push({ kind: 'setReactions', reactions: { callForFire: v === 'yes' } });
-          case 'fireMission':
-            this.map.setMode({
-              kind: 'pickPoint',
-              label: 'Click the target location',
-              onPick: (p) => push({ kind: 'task', task: { type: 'fireMission', target: p, rounds: Math.max(1, Number(v) || 3), radius: this.unit(id) ? 50 : 0 } }),
-            });
-            return;
-          case 'waitDestroyed':
-            this.map.setMode({
-              kind: 'pickEntity',
-              label: 'Click the entity to wait for',
-              onPick: (t) => push({ kind: 'waitUntil', condition: { type: 'entityDestroyed', entityId: this.unit(t)?.leaderId ?? t } }),
-            });
-            return;
-        }
-      },
-    });
-    const plan = this.draft(id);
-    const loop = h('input', { type: 'checkbox', checked: !!plan.loop, onchange: (ev: Event) => (plan.loop = (ev.target as HTMLInputElement).checked) });
-    return h(
-      'div',
-      { class: 'section' },
-      h('h4', { text: 'Plan editor' }),
-      h(
-        'div',
-        { class: 'row' },
-        'Name',
-        h('input', { type: 'text', value: plan.name ?? 'Plan', 'data-plan-name': id, style: 'flex:1', oninput: (ev: Event) => (plan.name = (ev.target as HTMLInputElement).value.trim() || 'Plan') }),
-      ),
-      h('ol', { class: 'plan-list', 'data-plan-list': id }),
-      h('div', { class: 'row' }, kindSel, param, addBtn),
-      h(
-        'div',
-        { class: 'row' },
-        h('label', {}, loop, ' loop'),
-        h('span', { class: 'spacer' }),
-        h('button', {
-          class: 'primary',
-          text: 'Assign plan',
-          onclick: async () => {
-            const p = this.draft(id);
-            if (!p.statements.length) return this.toast('Add some plan steps first');
-            const r = await this.cmd({ cmd: 'assignPlan', targetId: id, plan: JSON.parse(JSON.stringify(p)) });
-            if (r.ok) this.toast('Plan assigned', true);
-          },
-        }),
-        h('button', {
-          text: 'Clear',
-          onclick: () => {
-            this.draft(id).statements = [];
-            this.renderPlanList(id);
-          },
-        }),
-      ),
-    );
-  }
-
-  private renderPlanList(id: string): void {
-    const list = document.querySelector<HTMLElement>(`[data-plan-list="${id}"]`);
-    if (!list) return;
-    clear(list);
-    const plan = this.draft(id);
-    if (!plan.statements.length) {
-      list.append(h('li', {}, h('span', { class: 'hint', text: 'No steps yet: build a plan from the controls below.' })));
-      return;
-    }
-    plan.statements.forEach((st, i) => {
-      list.append(
-        h(
-          'li',
-          {},
-          h('span', { text: `${i + 1}. ${this.describe(st)}` }),
-          h('button', {
-            text: '↑',
-            title: 'Move up',
-            disabled: i === 0,
-            onclick: () => {
-              [plan.statements[i - 1], plan.statements[i]] = [plan.statements[i], plan.statements[i - 1]];
-              this.renderPlanList(id);
-            },
-          }),
-          h('button', {
-            text: '✕',
-            title: 'Remove',
-            onclick: () => {
-              plan.statements.splice(i, 1);
-              this.renderPlanList(id);
-            },
-          }),
-        ),
-      );
-    });
+  private planSection(id: string, _isUnit: boolean): HTMLElement {
+    const sec = this.plans.section(id);
+    window.setTimeout(() => this.plans.render(id));
+    return sec;
   }
 
   private updateLiveFields(el: HTMLElement): void {
     const id = this.selectedId;
     if (!id) return;
-    if (el.querySelector(`[data-plan-list="${id}"]`)?.childElementCount === 0) this.renderPlanList(id);
+    if (el.querySelector(`[data-plan-list="${id}"]`)?.childElementCount === 0) this.plans.render(id);
     const set = (key: string, value: string | Node, cls?: string) => {
       const n = el.querySelector<HTMLElement>(`[data-bind="${key}"]`);
       if (!n) return;

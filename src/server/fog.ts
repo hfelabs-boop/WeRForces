@@ -4,7 +4,7 @@
 
 import type { Engine } from '../sim/engine.js';
 import type { Contact } from '../sim/entity.js';
-import type { Command, EntitySnapshot, ForceId, PlanStatement, Role, SimEvent, SimState, TaskSpec } from '../shared/types.js';
+import type { Command, Condition, EntitySnapshot, ForceId, PlanStatement, Role, SimEvent, SimState, TaskSpec } from '../shared/types.js';
 
 export const CONTROLLER: Role = { kind: 'controller' };
 
@@ -138,6 +138,7 @@ const PLAYER_COMMANDS = new Set<Command['cmd']>([
   'embark',
   'disembark',
   'ackAlert',
+  'sendCodeword',
 ]);
 
 /**
@@ -171,13 +172,19 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
     if (t.type === 'followRoute' || t.type === 'patrol') graphicOk(t.routeId);
     if (t.type === 'formation') ownObject(t.leaderId, 'leader');
   };
+  const condition = (cond: Condition | undefined) => {
+    const c = cond as (Condition & { areaId?: string; entityId?: string; conditions?: Condition[]; condition?: Condition }) | undefined;
+    if (!c || typeof c !== 'object') return;
+    if (c.areaId) graphicOk(c.areaId);
+    if (c.entityId) visible(c.entityId);
+    if (Array.isArray(c.conditions)) c.conditions.forEach(condition);
+    if (c.condition) condition(c.condition);
+  };
   const statement = (st: PlanStatement) => {
     if (st?.kind === 'task') task(st.task);
-    if (st?.kind === 'waitUntil') {
-      const cond = st.condition as { areaId?: string; entityId?: string };
-      if (cond?.areaId) graphicOk(cond.areaId);
-      if (cond?.entityId) visible(cond.entityId);
-    }
+    if (st?.kind === 'waitUntil' || st?.kind === 'if' || st?.kind === 'while') condition(st.condition);
+    if (st?.kind === 'if') [...(st.then ?? []), ...(st.else ?? [])].forEach(statement);
+    if (st?.kind === 'while') (st.body ?? []).forEach(statement);
   };
   switch (c.cmd) {
     case 'assignTask':
@@ -214,6 +221,9 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
       return;
     case 'disembark':
       ownObject(c.carrierId, 'carrier');
+      return;
+    case 'sendCodeword':
+      if (Number(c.force) !== force) throw new ForbiddenError('players send codewords to their own force only');
       return;
     case 'ackAlert':
       // Players acknowledge their own force's alerts only.

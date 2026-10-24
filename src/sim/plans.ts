@@ -73,7 +73,16 @@ export function describeStatement(st: PlanStatement, engine?: Engine): string {
       return `Wait until ${describeCondition(st.condition, engine)}`;
     case 'setReactions':
       return `Set reactions: ${describeReactions(st.reactions)}`;
+    case 'if':
+      return `If ${describeCondition(st.condition, engine)}`;
+    case 'while':
+      return `While ${describeCondition(st.condition, engine)}`;
+    case 'sendCodeword':
+      return `Send codeword ${st.codeword}`;
+    case 'report':
+      return `Report "${st.text}"`;
   }
+  return '';
 }
 
 export function describeReactions(r: { onContact?: string; withdrawBelow?: number; callForFire?: boolean }): string {
@@ -103,6 +112,14 @@ export function describeCondition(c: Condition, engine?: Engine): string {
       return `fuel below ${Math.round(c.fraction * 100)}%`;
     case 'ammoBelow':
       return `ammunition below ${Math.round(c.fraction * 100)}%`;
+    case 'codeword':
+      return `codeword ${c.codeword}`;
+    case 'all':
+      return c.conditions.map((x) => describeCondition(x, engine)).join(' and ');
+    case 'any':
+      return c.conditions.map((x) => describeCondition(x, engine)).join(' or ');
+    case 'not':
+      return `not (${describeCondition(c.condition, engine)})`;
   }
 }
 
@@ -148,24 +165,92 @@ export function evaluateCondition(c: Condition, engine: Engine, owner: Taskable)
       const v = owner.members().filter((m) => m.alive && m.type.weapons.length);
       return v.length > 0 && v.reduce((s, m) => s + ammoFraction(engine, m), 0) / v.length < c.fraction;
     }
+    case 'codeword': {
+      const force = owner.members()[0]?.force;
+      return force !== undefined && engine.hasCodeword(force, c.codeword);
+    }
+    case 'all':
+      return c.conditions.every((x) => evaluateCondition(x, engine, owner));
+    case 'any':
+      return c.conditions.some((x) => evaluateCondition(x, engine, owner));
+    case 'not':
+      return !evaluateCondition(c.condition, engine, owner);
   }
 }
 
+/** Every task in a plan, inside if/while blocks too. */
+export function planTasks(statements: PlanStatement[]): TaskSpec[] {
+  const out: TaskSpec[] = [];
+  for (const st of statements) {
+    if (st.kind === 'task') out.push(st.task);
+    else if (st.kind === 'if') out.push(...planTasks(st.then), ...planTasks(st.else ?? []));
+    else if (st.kind === 'while') out.push(...planTasks(st.body));
+  }
+  return out;
+}
+
+/** One step of a compiled plan: a statement, a conditional jump (if/while), or a jump. */
+export type PlanOp =
+  | { op: 'do'; st: PlanStatement }
+  /** Go on if the condition holds, else jump to `else`. */
+  | { op: 'test'; st: Extract<PlanStatement, { kind: 'if' | 'while' }>; else: number }
+  | { op: 'jump'; to: number };
+
+/** Flatten nested if/while blocks into steps with jumps; a flat plan compiles one step per statement. */
+export function compilePlan(statements: PlanStatement[]): PlanOp[] {
+  const ops: PlanOp[] = [];
+  const emit = (list: PlanStatement[]) => {
+    for (const st of list) {
+      if (st.kind === 'if') {
+        const test = { op: 'test', st, else: -1 } as Extract<PlanOp, { op: 'test' }>;
+        ops.push(test);
+        emit(st.then);
+        if (st.else?.length) {
+          const jump = { op: 'jump', to: -1 } as Extract<PlanOp, { op: 'jump' }>;
+          ops.push(jump);
+          test.else = ops.length;
+          emit(st.else);
+          jump.to = ops.length;
+        } else test.else = ops.length;
+      } else if (st.kind === 'while') {
+        const start = ops.length;
+        const test = { op: 'test', st, else: -1 } as Extract<PlanOp, { op: 'test' }>;
+        ops.push(test);
+        emit(st.body);
+        ops.push({ op: 'jump', to: start });
+        test.else = ops.length;
+      } else ops.push({ op: 'do', st });
+    }
+  };
+  emit(statements);
+  return ops;
+}
+
 export class PlanExecutor {
+  /** Position in `ops` (the compiled plan); saved in checkpoints. */
   index = 0;
   finished = false;
+  readonly ops: PlanOp[];
   private taskActive = false;
   /** Task spec to use instead of the statement's when resuming from a checkpoint. */
   private resumeTask?: TaskSpec;
 
-  constructor(readonly plan: Plan) {}
+  constructor(readonly plan: Plan) {
+    this.ops = compilePlan(plan.statements);
+  }
 
-  /** Continue at a statement, optionally resuming its task part-way (checkpoints). */
+  /** Continue at a step, optionally resuming its task part-way (checkpoints). */
   resume(index: number, taskState?: TaskSpec): void {
-    this.index = Math.max(0, Math.min(index, this.plan.statements.length));
+    this.index = Math.max(0, Math.min(index, this.ops.length));
     this.resumeTask = taskState;
     // A plan that had already completed stays completed.
-    if (this.index >= this.plan.statements.length && !this.plan.loop) this.finished = true;
+    if (this.index >= this.ops.length && !this.plan.loop) this.finished = true;
+  }
+
+  /** The statement at a step (an if/while for its test, nothing for a jump). */
+  statementAt(i: number): PlanStatement | undefined {
+    const op = this.ops[i];
+    return op && op.op !== 'jump' ? op.st : undefined;
   }
 
   /** The statement in progress, if it is a task statement that has started. */
@@ -177,15 +262,24 @@ export class PlanExecutor {
   update(engine: Engine, owner: Taskable): void {
     let guard = 0;
     while (!this.finished && guard++ < 50) {
-      if (this.index >= this.plan.statements.length) {
-        if (this.plan.loop && this.plan.statements.length > 0) this.index = 0;
+      if (this.index >= this.ops.length) {
+        if (this.plan.loop && this.ops.length > 0) this.index = 0;
         else {
           this.finished = true;
           engine.log('task', `${engine.nameOf(owner.id)}: plan ${this.plan.name ?? ''} complete`.replace('  ', ' '), owner.id);
           return;
         }
       }
-      const st = this.plan.statements[this.index];
+      const op = this.ops[this.index];
+      if (op.op === 'jump') {
+        this.index = op.to;
+        continue;
+      }
+      if (op.op === 'test') {
+        this.index = evaluateCondition(op.st.condition, engine, owner) ? this.index + 1 : op.else;
+        continue;
+      }
+      const st = op.st;
       if (st.kind === 'task') {
         if (!this.taskActive) {
           // A task resumed from a checkpoint is not passed down again: subordinates resume their own.
@@ -205,6 +299,18 @@ export class PlanExecutor {
         this.index++;
         continue;
       }
+      if (st.kind === 'sendCodeword') {
+        const force = owner.members()[0]?.force;
+        if (force !== undefined) engine.sendCodeword(force, st.codeword, owner.id);
+        this.index++;
+        continue;
+      }
+      if (st.kind === 'report') {
+        const speaker = owner.reference();
+        if (speaker) engine.radio(speaker, `${engine.nameOf(owner.id)}: ${st.text}`);
+        this.index++;
+        continue;
+      }
       owner.applySetting(engine, st);
       this.index++;
     }
@@ -212,8 +318,8 @@ export class PlanExecutor {
 
   describe(engine: Engine): string {
     if (this.finished) return `${this.plan.name ?? 'Plan'}: complete`;
-    const st = this.plan.statements[this.index];
+    const st = this.statementAt(this.index);
     const step = st ? describeStatement(st, engine) : '';
-    return `${this.plan.name ?? 'Plan'} ${this.index + 1}/${this.plan.statements.length}: ${step}`;
+    return `${this.plan.name ?? 'Plan'} ${this.index + 1}/${this.ops.length}: ${step}`;
   }
 }
