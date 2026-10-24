@@ -7,6 +7,7 @@ import type { Explanation, Finding, Vec2, WeaponDef } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import { groundFactor, sensorRange } from './environment.js';
+import { radarRange } from './sensors.js';
 import { AmbushTask, FormationTask, WaitTask } from './tasks.js';
 import type { Unit } from './units.js';
 
@@ -210,14 +211,16 @@ function sensing(engine: Engine, e: Entity, opts: ExplainOptions): Finding[] {
     .sort((a, b) => a.d - b.d)
     .slice(0, 3);
   for (const { t, d } of unseen) {
-    const usable = ranges.filter(({ s }) => s.detects.includes(t.domain));
+    // Radars see big targets further than small ones.
+    const usable = ranges.filter(({ s }) => s.detects.includes(t.domain)).map((r) => (r.s.radar && r.s.refRange ? { ...r, range: radarRange(engine, r.s, t.type) } : r));
     if (!usable.length) {
       out.push({ code: 'cannotDetectDomain', severity: 'info', text: `${t.name} (${km(d)}) is not detected: none of its sensors can see ${t.domain === 'air' ? 'aircraft' : t.domain}.`, aboutId: t.id });
       continue;
     }
     const best = usable.reduce((a, b) => (b.range > a.range ? b : a));
     if (d > best.range) {
-      out.push({ code: 'beyondSensorRange', severity: 'info', text: `${t.name} is ${km(d)} away, beyond what it can see (${km(best.range)}).`, aboutId: t.id });
+      const small = best.s.radar && best.s.refRange && best.range < best.s.maxRange ? ` for a radar return that size (${engine.models.radar.rcs(t.type)} m²)` : '';
+      out.push({ code: 'beyondSensorRange', severity: 'info', text: `${t.name} is ${km(d)} away, beyond what it can see (${km(best.range)}${small}).`, aboutId: t.id });
       continue;
     }
     const inView = usable.filter(({ s }) => s.fov >= Math.PI * 2 - 1e-6 || Math.abs(angleDiff(e.heading, bearing(e, t))) <= s.fov / 2);

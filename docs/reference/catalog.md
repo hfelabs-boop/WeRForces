@@ -10,25 +10,25 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 
 ### Ground vehicles
 
-| Id | Name | Max / cruise speed | Armour class | Weapons | Sensors | DIS type |
-| --- | --- | --- | --- | --- | --- | --- |
-| `us-m1a2` | M1A2 Abrams — US main battle tank | 65 / 40 km/h | armored | 120mm M256 smoothbore (APFSDS)<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.1.1.3.0 |
-| `us-m2a3` | M2A3 Bradley — US infantry fighting vehicle | 61 / 40 km/h | light | 25mm M242 Bushmaster (burst)<br>BGM-71 TOW ATGM<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.2.1.3.0 |
-| `us-hmmwv` | M1151 HMMWV — US light utility vehicle with heavy machine gun | 112 / 65 km/h | soft | 12.7mm heavy machine gun (burst) | Binoculars<br>Night-vision goggles | 1.1.225.6.1.1.0 |
-| `ru-t72b3` | T-72B3 — Russian main battle tank | 58 / 36 km/h | armored | 125mm 2A46 smoothbore<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.222.1.2.6.0 |
-| `ru-bmp2` | BMP-2 — Russian infantry fighting vehicle | 65 / 40 km/h | light | 30mm 2A42 autocannon (burst)<br>9M113 Konkurs ATGM<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.222.2.2.0.0 |
-| `ru-brdm2` | BRDM-2 — Russian amphibious scout car | 94 / 58 km/h | light | 12.7mm heavy machine gun (burst) | Binoculars | 1.1.222.3.1.0.0 |
-| `ru-ural` | Ural-4320 — Russian cargo truck | 83 / 50 km/h | soft | — | Unaided eye | 1.1.222.7.1.0.0 |
-| `ru-ural-supply` | Ural-4320 supply truck — Russian supply truck: fuel and ammunition for 10 vehicles. Halt beside it to resupply. | 83 / 50 km/h | soft | — | Unaided eye | 1.1.222.7.1.0.0 |
-| `us-hemtt` | M977 HEMTT supply truck — US heavy expanded-mobility tactical truck with fuel and ammunition for 10 vehicles. Halt beside it to resupply. | 90 / 54 km/h | soft | — | Unaided eye | 1.1.225.7.3.0.0 |
-| `ru-r330zh` | R-330Zh Zhitel jammer — Russian radio jamming vehicle: while on, enemy radios within 15 km are jammed (orders delayed, no contact sharing, no calls for fire, codewords not heard) | 79 / 50 km/h | soft | — | Unaided eye | 1.1.222.7.40.0.0 |
-| `ru-krasukha` | 1L269 Krasukha-2 radar jammer — Russian radar jamming system: while on, enemy radars within 25 km lose range (they burn through only close in) | 72 / 43 km/h | soft | — | Unaided eye | 1.1.222.7.41.0.0 |
-| `us-mfew` | M1133 Stryker EW (MFEW) — US electronic warfare Stryker: while on, enemy radios within 10 km are jammed | 97 / 58 km/h | light | — | Unaided eye | 1.1.225.2.40.0.0 |
-| `ru-sa8` | 9K33 Osa (SA-8) — Russian mobile short-range SAM system | 79 / 43 km/h | light | 9K33 Osa SAM | Search/track radar<br>Unaided eye | 1.1.222.28.1.0.0 |
-| `us-m109a7` | M109A7 Paladin — US 155mm self-propelled howitzer | 61 / 36 km/h | light | 155mm M284 howitzer (M795 HE)<br>12.7mm heavy machine gun (burst) | Unaided eye | 1.1.225.4.1.7.0 |
-| `ru-2s19` | 2S19 Msta-S — Russian 152mm self-propelled howitzer | 59 / 36 km/h | light | 152mm 2A64 howitzer (OF-45 HE)<br>12.7mm heavy machine gun (burst) | Unaided eye | 1.1.222.4.1.3.0 |
-| `us-m1150` | M1150 Assault Breacher Vehicle — US armoured breacher with mine plough and line charges (about 90 s per lane) | 65 / 32 km/h | armored | 12.7mm heavy machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.7.2.1.0 |
-| `civ-car` | Civilian Car — Neutral civilian sedan | 108 / 50 km/h | soft | — | — | 1.1.0.81.1.0.0 |
+| Id | Name | Max / cruise speed | Armour class | Protection F / S / R / T (mm) | Weapons | Sensors | DIS type |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `us-m1a2` | M1A2 Abrams — US main battle tank | 65 / 40 km/h | armored | 700 / 300 / 100 / 60 | 120mm M256 smoothbore (APFSDS)<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.1.1.3.0 |
+| `us-m2a3` | M2A3 Bradley — US infantry fighting vehicle | 61 / 40 km/h | light | 55 / 30 / 25 / 20 | 25mm M242 Bushmaster (burst)<br>BGM-71 TOW ATGM<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.2.1.3.0 |
+| `us-hmmwv` | M1151 HMMWV — US light utility vehicle with heavy machine gun | 112 / 65 km/h | soft | — | 12.7mm heavy machine gun (burst) | Binoculars<br>Night-vision goggles | 1.1.225.6.1.1.0 |
+| `ru-t72b3` | T-72B3 — Russian main battle tank | 58 / 36 km/h | armored | 550 / 150 / 60 / 40 | 125mm 2A46 smoothbore<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.222.1.2.6.0 |
+| `ru-bmp2` | BMP-2 — Russian infantry fighting vehicle | 65 / 40 km/h | light | 35 / 18 / 16 / 10 | 30mm 2A42 autocannon (burst)<br>9M113 Konkurs ATGM<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.222.2.2.0.0 |
+| `ru-brdm2` | BRDM-2 — Russian amphibious scout car | 94 / 58 km/h | light | 14 / 7 / 7 / 7 | 12.7mm heavy machine gun (burst) | Binoculars | 1.1.222.3.1.0.0 |
+| `ru-ural` | Ural-4320 — Russian cargo truck | 83 / 50 km/h | soft | — | — | Unaided eye | 1.1.222.7.1.0.0 |
+| `ru-ural-supply` | Ural-4320 supply truck — Russian supply truck: fuel and ammunition for 10 vehicles. Halt beside it to resupply. | 83 / 50 km/h | soft | — | — | Unaided eye | 1.1.222.7.1.0.0 |
+| `us-hemtt` | M977 HEMTT supply truck — US heavy expanded-mobility tactical truck with fuel and ammunition for 10 vehicles. Halt beside it to resupply. | 90 / 54 km/h | soft | — | — | Unaided eye | 1.1.225.7.3.0.0 |
+| `ru-r330zh` | R-330Zh Zhitel jammer — Russian radio jamming vehicle: while on, enemy radios within 15 km are jammed (orders delayed, no contact sharing, no calls for fire, codewords not heard) | 79 / 50 km/h | soft | — | — | Unaided eye | 1.1.222.7.40.0.0 |
+| `ru-krasukha` | 1L269 Krasukha-2 radar jammer — Russian radar jamming system: while on, enemy radars within 25 km lose range (they burn through only close in) | 72 / 43 km/h | soft | — | — | Unaided eye | 1.1.222.7.41.0.0 |
+| `us-mfew` | M1133 Stryker EW (MFEW) — US electronic warfare Stryker: while on, enemy radios within 10 km are jammed | 97 / 58 km/h | light | 30 / 20 / 15 / 10 | — | Unaided eye | 1.1.225.2.40.0.0 |
+| `ru-sa8` | 9K33 Osa (SA-8) — Russian mobile short-range SAM system | 79 / 43 km/h | light | 15 / 10 / 10 / 8 | 9K33 Osa SAM | Search/track radar<br>Unaided eye | 1.1.222.28.1.0.0 |
+| `us-m109a7` | M109A7 Paladin — US 155mm self-propelled howitzer | 61 / 36 km/h | light | 30 / 25 / 20 / 20 | 155mm M284 howitzer (M795 HE)<br>12.7mm heavy machine gun (burst) | Unaided eye | 1.1.225.4.1.7.0 |
+| `ru-2s19` | 2S19 Msta-S — Russian 152mm self-propelled howitzer | 59 / 36 km/h | light | 20 / 15 / 13 / 10 | 152mm 2A64 howitzer (OF-45 HE)<br>12.7mm heavy machine gun (burst) | Unaided eye | 1.1.222.4.1.3.0 |
+| `us-m1150` | M1150 Assault Breacher Vehicle — US armoured breacher with mine plough and line charges (about 90 s per lane) | 65 / 32 km/h | armored | 600 / 250 / 80 / 50 | 12.7mm heavy machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.7.2.1.0 |
+| `civ-car` | Civilian Car — Neutral civilian sedan | 108 / 50 km/h | soft | — | — | — | 1.1.0.81.1.0.0 |
 
 ### Dismounted
 
@@ -36,6 +36,7 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | --- | --- | --- | --- | --- | --- | --- |
 | `us-rifleman` | US Rifleman — Dismounted infantry with rifle and AT4 | 14 / 6 km/h | lifeform | 5.56mm rifle<br>AT4 84mm anti-armor | Binoculars<br>Night-vision goggles | 3.1.225.1.1.0.0 |
 | `us-stinger-team` | Stinger Team — US MANPADS air-defense team | 13 / 5 km/h | lifeform | FIM-92 Stinger<br>5.56mm rifle | Binoculars<br>Night-vision goggles | 3.1.225.1.3.0.0 |
+| `us-javelin-team` | Javelin Team — US anti-armour team with a top-attack Javelin missile | 13 / 5 km/h | lifeform | FGM-148 Javelin<br>5.56mm rifle | Vehicle thermal sight<br>Binoculars | 3.1.225.1.4.0.0 |
 | `ru-rifleman` | Russian Rifleman — Dismounted infantry with rifle and RPG | 14 / 6 km/h | lifeform | 5.45mm rifle<br>RPG-7 | Binoculars | 3.1.222.1.1.0.0 |
 | `us-mortar-team` | 81mm Mortar Team — US dismounted 81mm mortar team | 11 / 5 km/h | lifeform | 81mm M252 mortar (M821 HE)<br>5.56mm rifle | Unaided eye | 3.1.225.1.6.0.0 |
 | `us-fo-team` | Forward Observer Team — US forward observers; call for fire on enemies they see | 14 / 6 km/h | lifeform | 5.56mm rifle | Observer optics (thermal, laser rangefinder) | 3.1.225.1.7.0.0 |
@@ -47,54 +48,55 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 
 ### Aircraft
 
-| Id | Name | Max / cruise speed | Armour class | Weapons | Sensors | DIS type |
-| --- | --- | --- | --- | --- | --- | --- |
-| `us-ah64` | AH-64D Apache — US attack helicopter | 288 / 216 km/h, 60 m AGL | air | AGM-114 Hellfire<br>30mm M230 chain gun (burst) | Mast-mounted sight | 1.2.225.20.1.3.0 |
-| `us-uh60` | UH-60M Black Hawk — US utility helicopter | 288 / 234 km/h, 100 m AGL | air | 7.62mm machine gun (burst) | Unaided eye | 1.2.225.21.1.7.0 |
-| `us-f16` | F-16C Fighting Falcon — US multirole fighter | 1440 / 828 km/h, 3000 m AGL | air | AIM-120 AMRAAM<br>AIM-9X Sidewinder | Fire-control radar<br>Unaided eye | 1.2.225.1.3.3.0 |
-| `us-mq9` | MQ-9 Reaper — US armed reconnaissance UAV | 432 / 270 km/h, 2500 m AGL | air | AGM-114 Hellfire | EO/IR turret | 1.2.225.50.2.1.0 |
-| `ru-mi24` | Mi-24V Hind — Russian attack helicopter | 306 / 216 km/h, 80 m AGL | air | 9K114 Shturm ATGM<br>12.7mm heavy machine gun (burst) | Binoculars | 1.2.222.20.3.0.0 |
-| `ru-su27` | Su-27 Flanker — Russian air-superiority fighter | 1512 / 828 km/h, 3500 m AGL | air | R-73 air-to-air missile | Fire-control radar<br>Unaided eye | 1.2.222.1.9.0.0 |
+| Id | Name | Max / cruise speed | Armour class | RCS (m²) | Weapons | Sensors | DIS type |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `us-ah64` | AH-64D Apache — US attack helicopter | 288 / 216 km/h, 60 m AGL | air | 3 | AGM-114 Hellfire<br>30mm M230 chain gun (burst) | Mast-mounted sight | 1.2.225.20.1.3.0 |
+| `us-uh60` | UH-60M Black Hawk — US utility helicopter | 288 / 234 km/h, 100 m AGL | air | 10 | 7.62mm machine gun (burst) | Unaided eye | 1.2.225.21.1.7.0 |
+| `us-f16` | F-16C Fighting Falcon — US multirole fighter | 1440 / 828 km/h, 3000 m AGL | air | 1.2 | AIM-120 AMRAAM<br>AIM-9X Sidewinder | Fire-control radar<br>Unaided eye | 1.2.225.1.3.3.0 |
+| `us-mq9` | MQ-9 Reaper — US armed reconnaissance UAV | 432 / 270 km/h, 2500 m AGL | air | 1 | AGM-114 Hellfire | EO/IR turret | 1.2.225.50.2.1.0 |
+| `ru-mi24` | Mi-24V Hind — Russian attack helicopter | 306 / 216 km/h, 80 m AGL | air | 15 | 9K114 Shturm ATGM<br>12.7mm heavy machine gun (burst) | Binoculars | 1.2.222.20.3.0.0 |
+| `ru-su27` | Su-27 Flanker — Russian air-superiority fighter | 1512 / 828 km/h, 3500 m AGL | air | 15 | R-73 air-to-air missile | Fire-control radar<br>Unaided eye | 1.2.222.1.9.0.0 |
 
 ### Surface vessels
 
-| Id | Name | Max / cruise speed | Armour class | Weapons | Sensors | DIS type |
-| --- | --- | --- | --- | --- | --- | --- |
-| `us-ddg51` | DDG-51 Arleigh Burke — US guided-missile destroyer | 54 / 32 km/h | ship | RIM-66 SM-2 SAM<br>127mm Mk 45 naval gun | Naval surface/air radar<br>Binoculars | 1.3.225.4.1.0.0 |
-| `us-patrol-boat` | Mk VI Patrol Boat — US patrol boat | 83 / 50 km/h | ship | 12.7mm heavy machine gun (burst) | Binoculars | 1.3.225.61.1.0.0 |
+| Id | Name | Max / cruise speed | Armour class | RCS (m²) | Weapons | Sensors | DIS type |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `us-ddg51` | DDG-51 Arleigh Burke — US guided-missile destroyer | 54 / 32 km/h | ship | 1000 | RIM-66 SM-2 SAM<br>127mm Mk 45 naval gun | Naval surface/air radar<br>Binoculars | 1.3.225.4.1.0.0 |
+| `us-patrol-boat` | Mk VI Patrol Boat — US patrol boat | 83 / 50 km/h | ship | 30 | 12.7mm heavy machine gun (burst) | Binoculars | 1.3.225.61.1.0.0 |
 
 ## Weapons
 
-Pk is the probability of a catastrophic kill per shot at short range against each armour class, before range, motion and concealment modifiers (see [Concepts](../concepts.md#combat-and-damage)).
+Pk is the probability of a catastrophic kill per shot at short range against each armour class, before range, motion, concealment and armour modifiers (see [Concepts](../concepts.md#combat-and-damage)). Penetration (mm RHA equivalent) is set against the protection of the face hit; spread (mrad) and range-estimate error turn on the ballistic model for unguided rounds.
 
-| Id | Name | Range | Reload | Ammo | Guided | Engages | Pk by target class |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `gun-120mm` | 120mm M256 smoothbore (APFSDS) | 50–4000 m | 6 s | 40 | no | ground, lifeform, surface | armored 0.7, light 0.9, soft 0.9, lifeform 0.3, ship 0.15 |
-| `gun-125mm` | 125mm 2A46 smoothbore | 50–3000 m | 8 s | 39 | no | ground, lifeform, surface | armored 0.6, light 0.85, soft 0.9, lifeform 0.3, ship 0.15 |
-| `gun-25mm` | 25mm M242 Bushmaster (burst) | 0–2500 m | 3 s | 30 | no | ground, lifeform, surface, air | armored 0.04, light 0.45, soft 0.6, lifeform 0.4, air 0.1, ship 0.1 |
-| `gun-30mm-2a42` | 30mm 2A42 autocannon (burst) | 0–2000 m | 3 s | 30 | no | ground, lifeform, surface, air | armored 0.03, light 0.4, soft 0.6, lifeform 0.4, air 0.1, ship 0.1 |
-| `atgm-tow` | BGM-71 TOW ATGM | 65–3750 m | 20 s | 7 | yes | ground, surface | armored 0.8, light 0.9, soft 0.9, ship 0.3 |
-| `atgm-konkurs` | 9M113 Konkurs ATGM | 75–4000 m | 25 s | 4 | yes | ground, surface | armored 0.7, light 0.9, soft 0.9, ship 0.3 |
-| `mg-762` | 7.62mm machine gun (burst) | 0–900 m | 2 s | 100 | no | lifeform, ground | lifeform 0.25, soft 0.08, light 0.01 |
-| `mg-127` | 12.7mm heavy machine gun (burst) | 0–1500 m | 2.5 s | 60 | no | lifeform, ground, surface, air | lifeform 0.3, soft 0.25, light 0.06, air 0.05, ship 0.04 |
-| `rifle-556` | 5.56mm rifle | 0–500 m | 2 s | 70 | no | lifeform, ground | lifeform 0.15, soft 0.02 |
-| `rifle-545` | 5.45mm rifle | 0–500 m | 2 s | 70 | no | lifeform, ground | lifeform 0.15, soft 0.02 |
-| `at4` | AT4 84mm anti-armor | 20–300 m | 15 s | 2 | no | ground | armored 0.25, light 0.6, soft 0.7 |
-| `rpg7` | RPG-7 | 20–300 m | 10 s | 4 | no | ground | armored 0.25, light 0.6, soft 0.7 |
-| `hellfire` | AGM-114 Hellfire | 500–8000 m | 8 s | 8 | yes | ground, surface | armored 0.85, light 0.9, soft 0.9, ship 0.4 |
-| `gun-30mm-m230` | 30mm M230 chain gun (burst) | 0–1700 m | 3 s | 40 | no | ground, lifeform, surface | light 0.35, soft 0.6, lifeform 0.5, armored 0.02 |
-| `shturm` | 9K114 Shturm ATGM | 400–5000 m | 12 s | 4 | yes | ground, surface | armored 0.75, light 0.9, soft 0.9, ship 0.35 |
-| `aim120` | AIM-120 AMRAAM | 1000–40000 m | 10 s | 4 | yes | air | air 0.7 |
-| `aim9` | AIM-9X Sidewinder | 300–15000 m | 6 s | 2 | yes | air | air 0.75 |
-| `r73` | R-73 air-to-air missile | 300–20000 m | 6 s | 4 | yes | air | air 0.7 |
-| `stinger` | FIM-92 Stinger | 200–4800 m | 15 s | 3 | yes | air | air 0.6 |
-| `sam-osa` | 9K33 Osa SAM | 1500–10000 m | 10 s | 6 | yes | air | air 0.6 |
-| `naval-127mm` | 127mm Mk 45 naval gun | 200–15000 m | 3 s | 600 | no | surface, ground, lifeform | ship 0.15, light 0.3, soft 0.5, armored 0.1, lifeform 0.3 |
-| `sm2` | RIM-66 SM-2 SAM | 2000–70000 m | 5 s | 32 | yes | air | air 0.75 |
-| `how-155mm` | 155mm M284 howitzer (M795 HE) | 2000–22000 m | 15 s | 39 | no | ground, lifeform, surface | armored 0.3, light 0.65, soft 0.85, lifeform 0.75, ship 0.1 |
-| `how-152mm` | 152mm 2A64 howitzer (OF-45 HE) | 2000–24700 m | 12 s | 50 | no | ground, lifeform, surface | armored 0.28, light 0.6, soft 0.85, lifeform 0.75, ship 0.1 |
-| `mortar-81mm` | 81mm M252 mortar (M821 HE) | 80–5600 m | 5 s | 30 | no | ground, lifeform | armored 0.02, light 0.2, soft 0.65, lifeform 0.7 |
-| `mortar-120mm` | 120mm 2B11 mortar (OF-843 HE) | 480–7100 m | 6 s | 24 | no | ground, lifeform | armored 0.06, light 0.35, soft 0.75, lifeform 0.75 |
+| Id | Name | Range | Speed | Reload | Ammo | Guided | Engages | Pk by target class | Penetration | Spread / range error |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `gun-120mm` | 120mm M256 smoothbore (APFSDS) | 50–4000 m | 1650 m/s | 6 s | 40 | no | ground, lifeform, surface | armored 0.7, light 0.9, soft 0.9, lifeform 0.3, ship 0.15 | 750 mm | 0.3 mrad / 1 % |
+| `gun-125mm` | 125mm 2A46 smoothbore | 50–3000 m | 1700 m/s | 8 s | 39 | no | ground, lifeform, surface | armored 0.6, light 0.85, soft 0.9, lifeform 0.3, ship 0.15 | 650 mm | 0.4 mrad / 1 % |
+| `gun-25mm` | 25mm M242 Bushmaster (burst) | 0–2500 m | 1100 m/s | 3 s | 30 | no | ground, lifeform, surface, air | armored 0.04, light 0.45, soft 0.6, lifeform 0.4, air 0.1, ship 0.1 | 60 mm | 0.6 mrad / 2 % |
+| `gun-30mm-2a42` | 30mm 2A42 autocannon (burst) | 0–2000 m | 960 m/s | 3 s | 30 | no | ground, lifeform, surface, air | armored 0.03, light 0.4, soft 0.6, lifeform 0.4, air 0.1, ship 0.1 | 50 mm | 0.8 mrad / 5 % |
+| `atgm-tow` | BGM-71 TOW ATGM | 65–3750 m | 280 m/s | 20 s | 7 | yes | ground, surface | armored 0.8, light 0.9, soft 0.9, ship 0.3 | 900 mm | — |
+| `atgm-konkurs` | 9M113 Konkurs ATGM | 75–4000 m | 200 m/s | 25 s | 4 | yes | ground, surface | armored 0.7, light 0.9, soft 0.9, ship 0.3 | 650 mm | — |
+| `mg-762` | 7.62mm machine gun (burst) | 0–900 m | 850 m/s | 2 s | 100 | no | lifeform, ground | lifeform 0.25, soft 0.08, light 0.01 | — | — |
+| `mg-127` | 12.7mm heavy machine gun (burst) | 0–1500 m | 890 m/s | 2.5 s | 60 | no | lifeform, ground, surface, air | lifeform 0.3, soft 0.25, light 0.06, air 0.05, ship 0.04 | 20 mm | — |
+| `rifle-556` | 5.56mm rifle | 0–500 m | 900 m/s | 2 s | 70 | no | lifeform, ground | lifeform 0.15, soft 0.02 | — | — |
+| `rifle-545` | 5.45mm rifle | 0–500 m | 880 m/s | 2 s | 70 | no | lifeform, ground | lifeform 0.15, soft 0.02 | — | — |
+| `at4` | AT4 84mm anti-armor | 20–300 m | 290 m/s | 15 s | 2 | no | ground | armored 0.25, light 0.6, soft 0.7 | 420 mm | 1.5 mrad / 10 % |
+| `rpg7` | RPG-7 | 20–300 m | 240 m/s | 10 s | 4 | no | ground | armored 0.25, light 0.6, soft 0.7 | 450 mm | 2 mrad / 10 % |
+| `javelin` | FGM-148 Javelin | 65–2500 m | 140 m/s | 20 s | 3 | yes (top attack) | ground | armored 0.85, light 0.9, soft 0.9 | 750 mm | — |
+| `hellfire` | AGM-114 Hellfire | 500–8000 m | 425 m/s | 8 s | 8 | yes (top attack) | ground, surface | armored 0.85, light 0.9, soft 0.9, ship 0.4 | 1200 mm | — |
+| `gun-30mm-m230` | 30mm M230 chain gun (burst) | 0–1700 m | 805 m/s | 3 s | 40 | no | ground, lifeform, surface | light 0.35, soft 0.6, lifeform 0.5, armored 0.02 | 25 mm | 1 mrad / 1 % |
+| `shturm` | 9K114 Shturm ATGM | 400–5000 m | 400 m/s | 12 s | 4 | yes | ground, surface | armored 0.75, light 0.9, soft 0.9, ship 0.35 | 650 mm | — |
+| `aim120` | AIM-120 AMRAAM | 1000–40000 m | 1200 m/s | 10 s | 4 | yes | air | air 0.7 | — | — |
+| `aim9` | AIM-9X Sidewinder | 300–15000 m | 900 m/s | 6 s | 2 | yes | air | air 0.75 | — | — |
+| `r73` | R-73 air-to-air missile | 300–20000 m | 850 m/s | 6 s | 4 | yes | air | air 0.7 | — | — |
+| `stinger` | FIM-92 Stinger | 200–4800 m | 750 m/s | 15 s | 3 | yes | air | air 0.6 | — | — |
+| `sam-osa` | 9K33 Osa SAM | 1500–10000 m | 800 m/s | 10 s | 6 | yes | air | air 0.6 | — | — |
+| `naval-127mm` | 127mm Mk 45 naval gun | 200–15000 m | 800 m/s | 3 s | 600 | no | surface, ground, lifeform | ship 0.15, light 0.3, soft 0.5, armored 0.1, lifeform 0.3 | — | — |
+| `sm2` | RIM-66 SM-2 SAM | 2000–70000 m | 1100 m/s | 5 s | 32 | yes | air | air 0.75 | — | — |
+| `how-155mm` | 155mm M284 howitzer (M795 HE) | 2000–22000 m | 320 m/s | 15 s | 39 | no | ground, lifeform, surface | armored 0.3, light 0.65, soft 0.85, lifeform 0.75, ship 0.1 | 120 mm | — |
+| `how-152mm` | 152mm 2A64 howitzer (OF-45 HE) | 2000–24700 m | 320 m/s | 12 s | 50 | no | ground, lifeform, surface | armored 0.28, light 0.6, soft 0.85, lifeform 0.75, ship 0.1 | 110 mm | — |
+| `mortar-81mm` | 81mm M252 mortar (M821 HE) | 80–5600 m | 200 m/s | 5 s | 30 | no | ground, lifeform | armored 0.02, light 0.2, soft 0.65, lifeform 0.7 | 25 mm | — |
+| `mortar-120mm` | 120mm 2B11 mortar (OF-843 HE) | 480–7100 m | 220 m/s | 6 s | 24 | no | ground, lifeform | armored 0.06, light 0.35, soft 0.75, lifeform 0.75 | 45 mm | — |
 
 ## Sensors
 
@@ -106,10 +108,10 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `thermal-sight` | Vehicle thermal sight | 4500 m | 120° | ground, lifeform, surface, air | no |
 | `mast-sight` | Mast-mounted sight | 8000 m | 360° | ground, lifeform, surface, air | no |
 | `eo-turret` | EO/IR turret | 10000 m | 360° | ground, lifeform, surface | no |
-| `air-radar` | Fire-control radar | 60000 m | 120° | air | yes |
-| `sam-radar` | Search/track radar | 25000 m | 360° | air | yes |
+| `air-radar` | Fire-control radar | 60000 m (50000 m against 5 m²) | 120° | air | yes |
+| `sam-radar` | Search/track radar | 30000 m (25000 m against 5 m²) | 360° | air | yes |
 | `observer-optics` | Observer optics (thermal, laser rangefinder) | 6000 m | 360° | ground, lifeform, surface | no |
-| `naval-radar` | Naval surface/air radar | 80000 m | 360° | air, surface | yes |
+| `naval-radar` | Naval surface/air radar | 80000 m (60000 m against 1 m²) | 360° | air, surface | yes |
 
 ## Unit templates
 

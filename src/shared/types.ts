@@ -100,6 +100,14 @@ export interface WeaponDef {
   dispersion?: number;
   /** Indirect fire that can also fire smoke rounds: cloud radius (m) and how long it lasts (s). */
   smoke?: { radius: number; duration: number };
+  /** Armour penetration in mm of rolled homogeneous armour (RHA) equivalent; missing: armour is ignored. */
+  penetration?: number;
+  /** Attacks from above (e.g. Javelin): hits the target's top armour, as indirect fire does. */
+  topAttack?: boolean;
+  /** Unguided direct fire: one-sigma angular spread (aim plus round-to-round) in milliradians; turns on the ballistic model. */
+  spreadMrad?: number;
+  /** Unguided direct fire: one-sigma error of the range estimate used to set the sight, as a fraction (0.01 laser rangefinder, 0.1 by eye; default 0.05). */
+  rangeError?: number;
 }
 
 export interface SensorDef {
@@ -116,6 +124,10 @@ export interface SensorDef {
   thermal?: boolean;
   /** Image intensifier (night-vision goggles): keeps much of its range at night. */
   nightVision?: boolean;
+  /** Radar: detection range (m) against a target of `refRcs`; range scales with RCS^¼, up to `maxRange`. Missing: `maxRange` for every target. */
+  refRange?: number;
+  /** Radar: the radar cross-section (m²) `refRange` is quoted for (default 1). */
+  refRcs?: number;
 }
 
 export interface EntityTypeDef {
@@ -127,6 +139,10 @@ export interface EntityTypeDef {
   /** MIL-STD-2525C letter SIDC pattern (dimension and function ID used), e.g. "S-G-UCFM--"; default from `symbol`. */
   sidc?: string;
   armor: ArmorClass;
+  /** Armour by aspect in mm RHA equivalent, met by weapons that give a penetration; missing: no armour model. */
+  protection?: { front: number; side: number; rear: number; top: number };
+  /** Radar cross-section in m²; default by symbol and domain (e.g. 5 for fighters, 20 for ground vehicles). */
+  rcs?: number;
   dis: DisEntityType;
   /** Maximum speed in m/s. */
   maxSpeed: number;

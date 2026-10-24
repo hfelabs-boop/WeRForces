@@ -44,6 +44,7 @@ import { checkCallsForFire } from './fires.js';
 import { decaySuppression, isPinned, updateMorale } from './morale.js';
 import { stepMovement } from './movement.js';
 import { describeStatement, PlanExecutor, planTasks, type Taskable } from './plans.js';
+import { DEFAULT_MODELS, type Models } from './models.js';
 import { Rng } from './rng.js';
 import { SENSOR_INTERVAL, updateSensors } from './sensors.js';
 import { Obstacles } from './obstacles.js';
@@ -164,6 +165,8 @@ export class Engine {
   readonly life = new Life(this);
   /** Electronic warfare: who is jammed. */
   readonly ew = new Ew(this);
+  /** Hit/kill, ballistic and radar models in use (see models.ts). */
+  models: Models = { ...DEFAULT_MODELS };
 
   private hostilities = new Set<string>(['1-2']);
   private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
@@ -1048,7 +1051,7 @@ export class Engine {
           : det.outcome === 'firepower'
             ? `${shot.weapon.name} hit ${tname}: firepower kill`
             : det.hit
-              ? `${shot.weapon.name} hit ${tname}`
+              ? `${shot.weapon.name} hit ${tname}${det.armourHeld ? `: ${det.aspect} armour held` : ''}`
               : `${shot.weapon.name} missed ${tname}`;
     this.log('detonation', text, shot.shooterId, shot.targetId, { to: det.location, hit: det.hit, weaponId: shot.weapon.id });
     for (const fn of this.listeners.detonation) fn(det);

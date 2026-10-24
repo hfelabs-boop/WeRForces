@@ -355,7 +355,8 @@ detected when all of these hold:
 
 1. it is of another force and not destroyed;
 2. it is within the sensor's **range** and of a **domain** the sensor can see
-   (e.g. air-search radars only see aircraft);
+   (e.g. air-search radars only see aircraft). A radar's range depends on the
+   target's size (see [Radar range](#radar-range) below);
 3. it is inside the sensor's **field of view**, measured from the entity's
    heading (thermal sights cover 120°; eyes and binoculars cover 360°);
 4. there is **line of sight** to it;
@@ -377,6 +378,25 @@ detected when all of these hold:
 
 A contact is dropped if it is not seen again for 15 s. The first time an entity
 detects a hostile, the event log shows *X detected Y*.
+
+### Radar range
+
+Radars follow the **radar range equation**: the echo's signal-to-noise ratio
+falls as RCS ÷ range⁴, so the range at which a radar detects a target grows with
+the fourth root of the target's **radar cross-section** (RCS). A radar with a
+reference range `refRange` against a target of `refRcs` m² detects a target of
+σ m² out to
+
+*R* = refRange × (σ ÷ refRcs)^¼, but never beyond the radar's `maxRange`.
+
+A sixteenth of the cross-section halves the range. The SA-8's search radar, for
+example, sees 25 km against 5 m²: a Black Hawk (10 m²) at 29.7 km, an Apache
+(3 m²) at 22 km, an F-16 (1.2 m²) at 17.5 km. Entity types give their `rcs`;
+otherwise it defaults by symbol (fixed wing 5 m², helicopter 10, UAV 1, ship
+5000, boat 50) or domain (aircraft 5, vessels 500, ground vehicles 20, people
+1). The range then goes into the detection probability above in place of the
+sensor range, and [radar jamming](#electronic-warfare) multiplies it as before.
+Radars without a `refRange` see every target out to `maxRange`.
 
 ## Combat and damage
 
@@ -412,7 +432,7 @@ speeds up or turns while the round is in flight is missed.
 
 | Condition | Factor |
 | --- | --- |
-| Range | × (1 − 0.5 × (range / max range)²) |
+| Range | the [range factor](#ballistics) |
 | Shooter moving > 2 m/s (unguided) | × 0.7 |
 | Target moving > 8 m/s (unguided) | × 0.8 |
 | Ground or person target in forest | × 0.75 |
@@ -421,12 +441,15 @@ speeds up or turns while the round is in flight is missed.
 | Target pinned | × 0.5 |
 | Target dug in / hull-down | × 0.4 / × 0.6 |
 | Infantry target among buildings | × 0.6 |
+| Armour of the face hit | × the [perforation chance](#armour-by-aspect) |
 
 **Outcome.**
 
-- The round hits with probability min(1, 1.8 × Pk).
-- A hit destroys the target with probability Pk ÷ hit chance. Overall, the
-  chance of a kill per shot is exactly Pk.
+- The round hits with probability min(1, 1.8 × Pk), with Pk taken before the
+  armour factor (hitting does not depend on the armour).
+- A hit that does not defeat the armour has no effect (*hit T-72B3: front
+  armour held*). One that does destroys the target with probability Pk ÷ hit
+  chance. Overall, the chance of a kill per shot is exactly the effective Pk.
 - Other hits on vehicles cause a **mobility or firepower kill**, picking a system
   that still works. Losing both means destroyed.
 - Hits on people and aircraft either destroy them or have no effect.
@@ -438,6 +461,70 @@ of a missile in flight saves its target.
 
 **Remote targets.** Damage to remote (DIS) entities is decided by the
 simulation that owns them. WeRForces only sends the detonation.
+
+### Armour by aspect
+
+Armoured vehicles give their `protection` on each face in mm of rolled
+homogeneous armour (RHA) equivalent, and anti-armour weapons their
+`penetration` (see the [catalog](reference/catalog.md)). The face a round strikes
+comes from where it was fired, relative to the target's hull heading:
+
+| Face | When |
+| --- | --- |
+| top | indirect fire, top-attack weapons (Javelin, Hellfire), or a round arriving steeper than 45° |
+| front | the shooter within 30° of the target's nose |
+| rear | the shooter within 30° of its tail |
+| side | anything else |
+
+A hit defeats the armour with probability Φ(ln(penetration ÷ protection) ÷
+0.35), Φ being the standard normal distribution: one half when they are equal,
+about 0.1 when the armour is half again as thick as the round penetrates, and
+about 0.98 when the round penetrates twice the armour. The spread stands for
+weak spots and the angle of impact. Weapon Pk is the kill chance once the armour
+is defeated. Some figures at short range:
+
+| Shot | Front | Side | Rear |
+| --- | --- | --- | --- |
+| RPG-7 (450 mm) on an M1A2 (700 / 300 / 100 mm) | 2.6 % | 22 % | 25 % |
+| 120 mm (750 mm) on a T-72B3 (550 / 150 / 60 mm), 1 km | 57 % | 70 % | 70 % |
+| 125 mm (650 mm) on an M1A2, 1 km | 25 % | 59 % | 60 % |
+
+Weapons without a penetration, and types without protection, skip this step
+(factor 1). Blast and fragments from indirect fire meet the **top** armour, so
+a 120 mm mortar (45 mm) rarely hurts an M1A2 (60 mm roof) but easily wrecks a
+BMP-2 (10 mm).
+
+### Ballistics
+
+The **range factor** depends on the weapon. Unguided direct-fire weapons with a
+`spreadMrad` (tank guns, autocannons, RPG-7, AT4) use a ballistic model; the
+others (guided missiles, machine guns and rifles, whose bursts are area fire)
+keep 1 − 0.5 × (range / max range)².
+
+The round's one-sigma miss distance at range *R* combines two errors:
+
+- **spread:** `spreadMrad` ÷ 1000 × *R* (aim and round-to-round dispersion);
+- **drop:** gravity pulls the round down by ½ g t², t = *R* ÷ projectile speed.
+  The sight allows for it at the range the gunner estimated; with an estimate
+  off by `rangeError` (one sigma, 1 % with a laser rangefinder, 10 % by eye) the
+  round lands high or low by 2 × drop × rangeError.
+
+σ = √(spread² + (2 × drop × rangeError)²), and the round lands within the
+target's presented radius *a* (1.5 m for vehicles, 0.4 m for people, 2.5 m for
+aircraft, 5 m for vessels) with probability 1 − exp(−a² ÷ 2σ²). The range factor
+is that probability relative to its value at 100 m, where Pk is quoted. Slow
+rounds lose the most: an RPG-7 (240 m/s, 2 mrad, by eye) keeps about 0.34 at
+300 m; a 30 mm 2A42 (960 m/s, stadia rangefinder) 0.15 at 2 km; a 120 mm tank
+gun (1650 m/s, laser rangefinder) over 0.9 at 2 km.
+
+### Models
+
+The hit/kill (armour by aspect), ballistic and radar models are named functions
+in `src/sim/models.ts`, each behind one small interface (`HitKillModel`,
+`BallisticModel`, `RadarModel`). An engine uses `engine.models`, which starts
+with the defaults (`aspect-armour`, `drop-and-spread`, `radar-equation`); a
+study can put its own in, e.g.
+`engine.models = { ...engine.models, ballistic: myModel }`.
 
 ## Suppression and morale
 
@@ -564,8 +651,9 @@ The event log notes *US Combined Arms Team: radio jammed* and *radio back*, the
 the inspector shows *RADIO JAMMED*.
 
 **Radar jamming.** A jammed radar sees only part of its range: the distance to
-the jammer as a share of the jammer's reach, and never less than 30 %. Closing
-on the jammer burns through. The inspector shows *RADAR JAMMED*.
+the jammer as a share of the jammer's reach, and never less than 30 %, of the
+range it would have against that target (see [Radar range](#radar-range)).
+Closing on the jammer burns through. The inspector shows *RADAR JAMMED*.
 
 ## Pattern of life
 
@@ -602,7 +690,8 @@ fire **fire missions** at a location, with no line of sight needed.
   155 mm), half that at short range.
 - **Effect.** Every entity, of any force, within the **blast radius** (50 m for
   155 mm, 25 m for 81 mm) is damaged with probability Pk × (1 − d / radius)²,
-  where *d* is its distance from the burst; people in forest get × 0.7. Entities
+  where *d* is its distance from the burst, times the chance the blast defeats
+  the [top armour](#armour-by-aspect); people in forest get × 0.7. Entities
   within three blast radii come under fire (for *underFire* and *return fire*).
   Armour is hard to kill this way; troops in the open and soft vehicles are not.
 

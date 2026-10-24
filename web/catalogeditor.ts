@@ -63,6 +63,8 @@ export class CatalogEditor {
           { key: 'domain', label: 'Domain', kind: 'enum', options: () => DOMAINS },
           { key: 'symbol', label: 'Symbol', kind: 'enum', options: () => SYMBOLS },
           { key: 'armor', label: 'Armour class', kind: 'enum', options: () => ARMOR },
+          ...(['front', 'side', 'rear', 'top'] as const).map((a) => ({ key: `protection.${a}`, label: `Armour ${a} (mm RHA)`, kind: 'number' as const, hint: 'Set all four, or none' })),
+          { key: 'rcs', label: 'Radar cross-section (m²)', kind: 'number' },
           { key: 'maxSpeed', label: 'Top speed (km/h)', kind: 'kmh' },
           { key: 'cruiseSpeed', label: 'Cruise speed (km/h)', kind: 'kmh' },
           { key: 'acceleration', label: 'Acceleration (m/s²)', kind: 'number' },
@@ -100,6 +102,10 @@ export class CatalogEditor {
           { key: 'indirect', label: 'Indirect fire (artillery)', kind: 'bool' },
           { key: 'blastRadius', label: 'Blast radius (m)', kind: 'number' },
           { key: 'dispersion', label: 'Dispersion at max range (m)', kind: 'number' },
+          { key: 'penetration', label: 'Penetration (mm RHA)', kind: 'number', hint: 'Set against the armour of the face hit' },
+          { key: 'topAttack', label: 'Top attack', kind: 'bool' },
+          { key: 'spreadMrad', label: 'Spread (mrad), unguided', kind: 'number', hint: 'Turns on gravity drop and spread with range' },
+          { key: 'rangeError', label: 'Range estimate error (0-1)', kind: 'number', hint: '0.01 laser rangefinder, 0.1 by eye' },
           { key: 'smoke.radius', label: 'Smoke cloud radius (m)', kind: 'number' },
           { key: 'smoke.duration', label: 'Smoke duration (s)', kind: 'number' },
         ];
@@ -110,6 +116,8 @@ export class CatalogEditor {
           { key: 'fov', label: 'Field of view (°)', kind: 'deg' },
           { key: 'detects', label: 'Detects', kind: 'multi', options: () => DOMAINS },
           { key: 'radar', label: 'Radar', kind: 'bool' },
+          { key: 'refRange', label: 'Radar: range (m) against reference RCS', kind: 'number', hint: 'Range scales with RCS^¼, up to the range above' },
+          { key: 'refRcs', label: 'Radar: reference RCS (m²)', kind: 'number' },
           { key: 'thermal', label: 'Thermal', kind: 'bool' },
           { key: 'nightVision', label: 'Night vision', kind: 'bool' },
         ];
