@@ -54,6 +54,24 @@ Give an order in plain words, the way a commander would say it: "<who> <verb> <w
 | `text` | string | yes | The order, e.g. "Team ARMOR move to Calloway covered" |
 | `dryRun` | boolean |  |  |
 
+## `set_sync_matrix`
+
+Plan an operation in phases for a force (a synchronization matrix, or global plan). Each phase has a trigger and orders for units; phases start in order, each giving all its orders at once and announcing its name as a codeword (e.g. phase "Phase 2 Assault" sends codeword "PHASE 2 ASSAULT", which unit plans can wait for). Triggers: {type:"manual"} (start_phase), {type:"time",time} (s), {type:"codeword",codeword}, {type:"previousDone",delay?} (when the previous phase's orders are carried out), {type:"condition",ownerId,condition} (plan conditions). Orders: {targetId, text} with the order in words as for give_order without the name ("move to Calloway covered", "defend OBJ CALLOWAY facing north", "hold fire"), or {targetId, task}. An empty phases list removes the matrix.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `force` | `"blue"` \| `"red"` \| `"neutral"` | yes |  |
+| `phases` | array of {id, name, trigger, orders} | yes |  |
+
+## `start_phase`
+
+Start a phase of a synchronization matrix now, whatever its trigger.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `force` | `"blue"` \| `"red"` \| `"neutral"` | yes |  |
+| `phaseId` | string | yes |  |
+
 ## `send_codeword`
 
 Send a codeword to a force (players: their own). Plans waiting for it ({type:"codeword"} conditions) go on: use it to trigger phases ("EXECUTE", "PHASE 2"). Also lists codewords sent so far.

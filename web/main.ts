@@ -39,6 +39,7 @@ import { AarPlayer } from './aar.js';
 import { Timeline } from './timeline.js';
 import { QuickBar } from './quickbar.js';
 import { PlanEditor } from './planeditor.js';
+import { SyncMatrixDialog } from './syncmatrix.js';
 import { OrderLine } from './orderline.js';
 import { orderContext } from '../src/shared/orders.js';
 import type { CotStatus as CotView } from '../src/integrations/cot.js';
@@ -80,6 +81,7 @@ class App {
   readonly api: Api;
   readonly map: MapView;
   private quick!: QuickBar;
+  private syncDialog!: SyncMatrixDialog;
   private orderLine!: OrderLine;
   catalog: Catalog | null = null;
   types = new Map<string, EntityTypeDef>();
@@ -190,6 +192,21 @@ class App {
       toast: (m, info) => this.toast(m, info),
       nameOf: (id) => this.entity(id)?.name ?? this.unit(id)?.name ?? id,
     });
+    this.syncDialog = new SyncMatrixDialog({
+      v1: (m, path, body) => this.api.v1(m, path, body),
+      context: (force) =>
+        this.state && this.terrainData ? orderContext(this.state, this.terrainData.towns, this.terrainData.spec.size, (id) => this.types.get(id), force) : null,
+      rows: (force) => [
+        ...(this.state?.units ?? []).filter((u) => u.force === force).map((u) => ({ id: u.id, name: u.name })),
+        ...(this.state?.entities ?? []).filter((e) => e.force === force && !e.unitId && !e.remote && e.damage !== 'destroyed').map((e) => ({ id: e.id, name: e.name })),
+      ],
+      playerForce: () => (this.role.kind === 'player' ? this.role.force : undefined),
+      time: () => this.state?.time ?? 0,
+      describe: (task) => this.plans.describe({ kind: 'task', task }),
+      modal: (c) => this.modal(c),
+      toast: (m, info) => this.toast(m, info),
+    });
+    $('#btn-sync').addEventListener('click', () => void this.syncDialog.open());
     this.orderLine = new OrderLine($('#orderline'), {
       context: () =>
         this.state && this.terrainData
@@ -307,6 +324,7 @@ class App {
     this.renderEnvironment(s.environment);
     this.renderAlerts();
     this.quick.update();
+    this.renderPhase(s);
     $('#scenario-name').textContent = s.scenarioName;
     const run = $('#btn-run');
     run.textContent = s.running ? '⏸ Pause' : '▶ Run';
@@ -574,6 +592,16 @@ class App {
         this.orderLine.focus();
       }
     });
+  }
+
+  /** The phase in progress on the toolbar button. */
+  private renderPhase(s: SimState): void {
+    const force = this.role.kind === 'player' ? this.role.force : 1;
+    const m = s.sync?.find((x) => x.force === force) ?? s.sync?.[0];
+    const cur = m?.phases.find((p) => p.id === m.current);
+    const btn = $('#btn-sync');
+    const text = cur ? `Phase: ${cur.name}` : m ? 'Phases (not started)' : 'Phases';
+    if (btn.textContent !== text) btn.textContent = text;
   }
 
   // ------------------------------------------------------------ alerts

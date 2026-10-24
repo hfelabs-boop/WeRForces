@@ -55,6 +55,7 @@ import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
 import { formationOffset, perMemberTask, splitOrder, Unit } from './units.js';
 import { Alerts } from './alerts.js';
 import { TravelCache } from './eta.js';
+import { SyncPlans } from './sync.js';
 
 export const DEFAULT_DT = 0.1;
 export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
@@ -146,6 +147,8 @@ export class Engine {
   /** Things the operator should look at (idle, broken, out of fuel...). Read-only toward the simulation. */
   readonly alerts: Alerts = new Alerts(this);
   private readonly travel = new TravelCache(this);
+  /** Global plans: a synchronization matrix per force. */
+  readonly sync = new SyncPlans(this);
 
   private hostilities = new Set<string>(['1-2']);
   private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
@@ -1164,6 +1167,7 @@ export class Engine {
       updateMorale(this);
       updateResupply(this);
       this.alerts.update();
+      this.sync.update();
     }
     for (const e of this.entities.values()) updateCombat(this, e);
     this.processImpacts();
@@ -1186,6 +1190,7 @@ export class Engine {
     this.shots = [];
     this.pendingOrders = [];
     this.codewords.clear();
+    this.sync.clear();
     this.sensorDue.clear();
     this.losMemo.clear();
     this.smoke.clear();
@@ -1273,6 +1278,7 @@ export class Engine {
     for (const u of s.units ?? []) if (u.parentId && this.units.has(u.parentId) && this.units.has(u.id)) this.units.get(u.id)!.parentId = u.parentId;
     this.pendingOrders = (s.orders ?? []).filter((o) => this.entities.has(o.targetId) || this.units.has(o.targetId)).map((o) => ({ ...o }));
     for (const c of s.codewords ?? []) this.codewords.set(`${c.force}|${c.codeword.toUpperCase()}`, c.time);
+    for (const m of s.syncMatrices ?? []) this.sync.set({ force: m.force, phases: m.phases }, m.started);
     // Tasks and plans last, since they can reference any object. Checkpoints resume them part-way.
     for (const r of s.entities ?? []) {
       const e = this.entities.get(r.id)!;
@@ -1488,6 +1494,7 @@ export class Engine {
       rngState: this.time === 0 ? undefined : this.rng.state,
       rules: JSON.stringify(this.rules) === JSON.stringify(DEFAULT_RULES) ? undefined : { ...this.rules },
       orders: this.pendingOrders.length ? this.pendingOrders.map((o) => ({ ...o })) : undefined,
+      syncMatrices: this.sync.all().length ? this.sync.states().map((m) => ({ force: m.force, phases: m.phases, ...(this.time > 0 && Object.keys(m.started).length ? { started: m.started } : {}) })) : undefined,
       codewords: this.codewords.size ? [...this.codewords].map(([k, time]) => ({ force: Number(k.split('|')[0]) as ForceId, codeword: k.slice(k.indexOf('|') + 1), time })) : undefined,
       environment: JSON.stringify(this.environment) === JSON.stringify(DEFAULT_ENVIRONMENT) ? undefined : { ...this.environment },
       smoke: this.smoke.clouds.length ? this.smoke.clouds.map((c) => ({ ...c })) : undefined,
@@ -1593,6 +1600,7 @@ export class Engine {
         : undefined,
       schedule: this.schedule(),
       alerts: this.alerts.open().slice(0, 50),
+      sync: this.sync.all().length ? this.sync.states() : undefined,
     };
   }
 

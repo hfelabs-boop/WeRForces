@@ -56,6 +56,9 @@ const PLAYER_ROUTES: [string, RegExp][] = [
   ['GET', /^\/api\/v1\/alerts\/?$/],
   ['POST', /^\/api\/v1\/orders\/?$/],
   ['GET', /^\/api\/v1\/codewords\/?$/],
+  ['GET', /^\/api\/v1\/sync-matrix\/?$/],
+  ['PUT', /^\/api\/v1\/sync-matrix\/[^/]+\/?$/],
+  ['POST', /^\/api\/v1\/sync-matrix\/[^/]+\/phases\/[^/]+\/start\/?$/],
   ['POST', /^\/api\/v1\/codewords\/?$/],
   ['POST', /^\/api\/v1\/alerts\/([^/]+\/)?acknowledge\/?$/],
   ['POST', /^\/api\/v1\/(entities|units)\/[^/]+\/(task|plan|stop|embark|disembark)\/?$/],
@@ -154,6 +157,45 @@ export class ApiV1 {
     const u = this.state().units.find((x) => x.id === id);
     if (!u) throw new HttpError(404, `unknown unit ${id}`);
     return u;
+  }
+
+  /**
+   * Phase orders may be given as words ({targetId, text: "move to Calloway covered"}):
+   * turn them into tasks with the order parser, as the target's commander would say them.
+   */
+  private resolvePhases(v: unknown, force: ForceId): unknown {
+    if (!Array.isArray(v)) return v;
+    const t = this.engine.terrain;
+    let ctx: ReturnType<typeof orderContext> | null = null;
+    return v.map((raw) => {
+      const p = { ...obj(raw) };
+      if (Array.isArray(p.orders)) {
+        p.orders = p.orders.map((ro: unknown) => {
+          const o = { ...obj(ro) };
+          if (typeof o.text !== 'string' || o.task || o.roe || o.stop) return o;
+          ctx ??= orderContext(this.state(), t.towns, t.spec.size, (id) => this.engine.catalog.types.get(id), force);
+          try {
+            const parsed = parseOrder(`${String(o.targetId)} ${o.text}`, ctx);
+            const c = parsed.commands[0] as { cmd: string; task?: unknown; roe?: unknown };
+            if (parsed.commands.length !== 1 || parsed.targets[0]?.id !== o.targetId) throw new OrderError('give one order for this unit');
+            if (c.cmd === 'assignTask') o.task = c.task;
+            else if (c.cmd === 'setRoe') o.roe = c.roe;
+            else if (c.cmd === 'stop') o.stop = true;
+          } catch (err) {
+            throw new HttpError(400, `${this.engine.nameOf(String(o.targetId))} in ${String(p.name ?? p.id ?? 'a phase')}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          return o;
+        });
+      }
+      return p;
+    });
+  }
+
+  /** A force in a path: 1-3 or blue/red/neutral. */
+  private forceParam(v: string): ForceId {
+    const f = ({ blue: 1, red: 2, neutral: 3, '0': 0, '1': 1, '2': 2, '3': 3 } as Record<string, ForceId>)[v.toLowerCase()];
+    if (f === undefined) throw new HttpError(400, `unknown force ${v} (blue, red, neutral or 0-3)`);
+    return f;
   }
 
   /** Open alerts the caller may see. */
@@ -569,6 +611,20 @@ export class ApiV1 {
     });
 
     // ---------------------------------------------------------------- events
+    r.get(`${P}/sync-matrix`, () => {
+      const list = this.engine.sync.states();
+      return { json: this.role.kind === 'player' ? list.filter((m) => m.force === (this.role as { force: ForceId }).force) : list };
+    });
+    r.put(`${P}/sync-matrix/{force}`, (req) => {
+      const force = this.forceParam(req.params.force);
+      this.run({ cmd: 'setSyncMatrix', force, phases: this.resolvePhases(obj(req.body).phases, force) as never });
+      return { json: this.engine.sync.states().find((m) => m.force === force) ?? { force, phases: [], started: {} } };
+    });
+    r.post(`${P}/sync-matrix/{force}/phases/{id}/start`, (req) => {
+      const force = this.forceParam(req.params.force);
+      this.run({ cmd: 'startPhase', force, phaseId: req.params.id });
+      return { json: this.engine.sync.states().find((m) => m.force === force) };
+    });
     r.get(`${P}/codewords`, () => {
       const list = [...this.engine.codewords].map(([k, time]) => ({ force: Number(k.split('|')[0]) as ForceId, codeword: k.slice(k.indexOf('|') + 1), time }));
       return { json: this.role.kind === 'player' ? list.filter((c) => c.force === (this.role as { force: ForceId }).force) : list };

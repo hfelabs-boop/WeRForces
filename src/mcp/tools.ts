@@ -202,6 +202,23 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'set_sync_matrix',
+    'Plan an operation in phases for a force (a synchronization matrix, or global plan). Each phase has a trigger and orders for units; phases start in order, each giving all its orders at once and announcing its name as a codeword (e.g. phase "Phase 2 Assault" sends codeword "PHASE 2 ASSAULT", which unit plans can wait for). Triggers: {type:"manual"} (start_phase), {type:"time",time} (s), {type:"codeword",codeword}, {type:"previousDone",delay?} (when the previous phase\'s orders are carried out), {type:"condition",ownerId,condition} (plan conditions). Orders: {targetId, text} with the order in words as for give_order without the name ("move to Calloway covered", "defend OBJ CALLOWAY facing north", "hold fire"), or {targetId, task}. An empty phases list removes the matrix.',
+    {
+      force: z.enum(['blue', 'red', 'neutral']),
+      phases: z.array(z.object({ id: z.string().optional(), name: z.string(), trigger: z.record(z.string(), z.unknown()).optional(), orders: z.array(z.record(z.string(), z.unknown())) })),
+    },
+    async ({ force, phases }) => api('PUT', `/api/v1/sync-matrix/${force}`, { phases }),
+  );
+
+  tool(
+    'start_phase',
+    'Start a phase of a synchronization matrix now, whatever its trigger.',
+    { force: z.enum(['blue', 'red', 'neutral']), phaseId: z.string() },
+    async ({ force, phaseId }) => api('POST', `/api/v1/sync-matrix/${force}/phases/${encodeURIComponent(phaseId)}/start`),
+  );
+
+  tool(
     'send_codeword',
     'Send a codeword to a force (players: their own). Plans waiting for it ({type:"codeword"} conditions) go on: use it to trigger phases ("EXECUTE", "PHASE 2"). Also lists codewords sent so far.',
     { codeword: z.string(), force: z.enum(['blue', 'red', 'neutral']).optional().describe('default blue (exercise control only)') },

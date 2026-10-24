@@ -1368,3 +1368,62 @@ body.player [data-controller-only] {
 .plan-add select {
   max-width: 100%;
 }
+
+/* Synchronization matrix */
+.sync-scroll {
+  overflow: auto;
+  max-height: 60vh;
+  margin: 8px 0;
+}
+.sync-table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.sync-table th,
+.sync-table td {
+  border: 1px solid var(--border);
+  padding: 4px;
+  vertical-align: top;
+  min-width: 190px;
+}
+.sync-table th:first-child,
+.sync-table td:first-child {
+  min-width: 140px;
+  position: sticky;
+  left: 0;
+  background: var(--panel);
+}
+.sync-table th.started {
+  background: rgba(76, 209, 122, 0.12);
+}
+.sync-table th .row {
+  flex-wrap: nowrap;
+}
+.sync-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.sync-trigger {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0;
+}
+.sync-param {
+  width: 80px;
+}
+.sync-cell {
+  width: 100%;
+}
+.sync-cell.ok {
+  border-color: #2c6e45;
+}
+.sync-cell.bad {
+  border-color: var(--bad);
+}
+.sync-started {
+  color: var(--good);
+}
+.sync-unit {
+  font-weight: 600;
+}

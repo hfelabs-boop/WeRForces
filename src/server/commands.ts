@@ -1,6 +1,8 @@
 // Remote-control command dispatcher shared by the REST and WebSocket APIs.
 
-import type { Command, CommandResult, Condition, Environment, ForceId, Formation, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
+import type { Command, CommandResult, Condition, Environment, ForceId, Formation, Phase, PhaseOrder, PhaseTrigger, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
+import { FORCE_NAMES } from '../shared/types.js';
+import type { Engine } from '../sim/engine.js';
 import type { SimRunner } from './runner.js';
 
 const FORCES = new Set([0, 1, 2, 3]);
@@ -222,6 +224,56 @@ function validateStatements(v: unknown, what: string, depth: number, count: { n:
   });
 }
 
+function validateTrigger(v: unknown): PhaseTrigger {
+  const t = (v ?? { type: 'manual' }) as Record<string, unknown>;
+  switch (t.type) {
+    case 'manual':
+      return { type: 'manual' };
+    case 'time':
+      return { type: 'time', time: num(t.time, 'time') };
+    case 'codeword':
+      return { type: 'codeword', codeword: codeword(t.codeword) };
+    case 'previousDone': {
+      const delay = t.delay === undefined ? undefined : num(t.delay, 'delay');
+      if (delay !== undefined && delay < 0) throw new ValidationError('delay must be 0 or more');
+      return delay ? { type: 'previousDone', delay } : { type: 'previousDone' };
+    }
+    case 'condition':
+      return { type: 'condition', ownerId: str(t.ownerId, 'ownerId'), condition: validateCondition(t.condition) };
+    default:
+      throw new ValidationError(`unknown phase trigger ${String(t.type)}`);
+  }
+}
+
+/** A force's synchronization matrix: up to 20 phases of up to 100 orders, each for an object of that force. */
+export function validatePhases(engine: Engine, f: ForceId, v: unknown): Phase[] {
+  if (!Array.isArray(v) || v.length > 20) throw new ValidationError('phases must be a list of at most 20 phases');
+  const ids = new Set<string>();
+  return v.map((raw: unknown, i) => {
+    const p = (raw ?? {}) as Record<string, unknown>;
+    const id = p.id === undefined ? `P${i + 1}` : str(p.id, 'phase id');
+    if (!/^[A-Za-z0-9_-]{1,24}$/.test(id) || ids.has(id)) throw new ValidationError(`phase id ${id} must be unique: letters, digits, - and _`);
+    ids.add(id);
+    const name = (p.name === undefined ? `Phase ${i + 1}` : str(p.name, 'phase name')).trim().slice(0, 60) || `Phase ${i + 1}`;
+    if (!Array.isArray(p.orders ?? []) || ((p.orders as unknown[]) ?? []).length > 100) throw new ValidationError('orders must be a list of at most 100');
+    const orders: PhaseOrder[] = ((p.orders as unknown[]) ?? []).map((ro) => {
+      const o = (ro ?? {}) as Record<string, unknown>;
+      const targetId = str(o.targetId, 'targetId');
+      const owner = engine.entities.get(targetId)?.force ?? engine.units.get(targetId)?.force;
+      if (owner === undefined) throw new ValidationError(`unknown object ${targetId}`);
+      if (owner !== f) throw new ValidationError(`${engine.nameOf(targetId)} is not ${FORCE_NAMES[f]}`);
+      const out: PhaseOrder = { targetId };
+      if (o.task !== undefined && o.task !== null) out.task = validateTask(o.task);
+      if (o.roe !== undefined && o.roe !== null) out.roe = roe(o.roe);
+      if (o.stop === true) out.stop = true;
+      if (typeof o.text === 'string') out.text = o.text.slice(0, 200);
+      if (!out.task && !out.roe && !out.stop) throw new ValidationError(`order for ${engine.nameOf(targetId)} has no task, roe or stop`);
+      return out;
+    });
+    return { id, name, trigger: validateTrigger(p.trigger), orders };
+  });
+}
+
 export function validatePlan(v: unknown): Plan {
   if (!v || typeof v !== 'object') throw new ValidationError('plan must be an object');
   const p = v as Record<string, unknown>;
@@ -360,6 +412,18 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
       case 'sendCodeword':
         engine.sendCodeword(force(c.force), codeword(c.codeword));
         return;
+      case 'setSyncMatrix': {
+        const f = force(c.force);
+        engine.sync.set({ force: f, phases: validatePhases(engine, f, c.phases) });
+        return;
+      }
+      case 'startPhase': {
+        const f = force(c.force);
+        const id = str(c.phaseId, 'phaseId');
+        if (!engine.sync.get(f)?.phases.some((p) => p.id === id)) throw new ValidationError(`unknown phase ${id}`);
+        engine.sync.start(f, id, 'started by hand');
+        return;
+      }
       case 'ackAlert': {
         const force = (c as { force?: ForceId }).force;
         if (c.all) {

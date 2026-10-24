@@ -178,6 +178,14 @@ export function buildOpenApi(baseUrl: string): Schema {
         delete: { tags: ['Entities'], summary: 'Delete an entity', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } },
       },
       '/api/v1/entities/{id}/path': { get: op('Entities', 'Remaining planned waypoints', { parameters: [idParam()] }) },
+      '/api/v1/sync-matrix': { get: op('Simulation', 'Synchronization matrices (global plans) per force, with the phases started and when (players: their own)') },
+      '/api/v1/sync-matrix/{force}': {
+        put: op('Simulation', 'Replace a force\'s synchronization matrix. Body: {phases:[{id, name, trigger, orders:[{targetId, task | roe | stop | text}]}]}. Triggers: {type:"manual"}, {type:"time",time}, {type:"codeword",codeword}, {type:"previousDone",delay?}, {type:"condition",ownerId,condition}. An order can be written in words ({targetId, text:"move to Calloway covered"}). Phases start in order; each gives its orders and announces its name as a codeword. `{phases: []}` removes the matrix', {
+          parameters: [idParam('force')],
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['phases'], properties: { phases: { type: 'array', items: { type: 'object' } } } } } } },
+        }),
+      },
+      '/api/v1/sync-matrix/{force}/phases/{id}/start': { post: op('Simulation', 'Start a phase now, whatever its trigger (the phases before it must have started)', { parameters: [idParam('force'), idParam()] }) },
       '/api/v1/codewords': {
         get: op('Simulation', 'Codewords sent so far, per force (players: their own)'),
         post: op('Simulation', 'Send a codeword to a force: plans waiting for it go on. Body: {codeword, force} (players: their own force)', {

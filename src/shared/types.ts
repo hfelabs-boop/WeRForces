@@ -482,6 +482,8 @@ export interface ScenarioFile {
   orders?: PendingOrder[];
   /** Checkpoint only: codewords sent so far. */
   codewords?: { force: ForceId; codeword: string; time: number }[];
+  /** Global plans: one synchronization matrix per force (with, in checkpoints, which phases started). */
+  syncMatrices?: (SyncMatrix & { started?: Record<string, number> })[];
 }
 
 /** Optional parts of the model, for comparison runs. Missing fields mean on. */
@@ -534,6 +536,54 @@ export interface EnvironmentState extends Required<Environment> {
   /** Fraction of daylight range left to the naked eye (1 by day, under 0.1 at night). */
   light: number;
   period: 'day' | 'twilight' | 'night';
+}
+
+// ---------------------------------------------------------------- synchronization matrix
+
+/** What starts a phase of a synchronization matrix. */
+export type PhaseTrigger =
+  /** Exercise control or the force's player starts it. */
+  | { type: 'manual' }
+  /** At a simulation time. */
+  | { type: 'time'; time: number }
+  /** When the force receives a codeword. */
+  | { type: 'codeword'; codeword: string }
+  /** When the previous phase's orders are all carried out (and `delay` s more). */
+  | { type: 'previousDone'; delay?: number }
+  /** When a condition holds for a unit or entity (`ownerId`). */
+  | { type: 'condition'; ownerId: string; condition: Condition };
+
+/** One order of a phase: a task, a change of ROE, or stop. `text` is the order as typed. */
+export interface PhaseOrder {
+  targetId: string;
+  task?: TaskSpec;
+  roe?: Roe;
+  stop?: boolean;
+  text?: string;
+}
+
+export interface Phase {
+  id: string;
+  name: string;
+  trigger: PhaseTrigger;
+  orders: PhaseOrder[];
+}
+
+/**
+ * A force's global plan: phases that start one after another, each giving its units
+ * their orders at once. When a phase starts its name goes out as a codeword
+ * ("PHASE 2 ASSAULT"), so unit plans can wait for it.
+ */
+export interface SyncMatrix {
+  force: ForceId;
+  phases: Phase[];
+}
+
+/** A matrix as seen while running: which phases have started, and when. */
+export interface SyncMatrixState extends SyncMatrix {
+  started: Record<string, number>;
+  /** The phase in progress (the last one started). */
+  current?: string;
 }
 
 // ---------------------------------------------------------------- diagnostics
@@ -724,6 +774,8 @@ export interface SimState {
   load?: number;
   /** Open alerts, newest first. */
   alerts?: Alert[];
+  /** Synchronization matrices (global plans), per force. */
+  sync?: SyncMatrixState[];
   /** Plan steps waiting for a set time, soonest first (for the timeline). */
   schedule?: { targetId: string; time: number; text: string }[];
   dis?: DisStatus;
@@ -783,6 +835,10 @@ export type Command =
   | { cmd: 'setRoe'; targetId: string; roe: Roe }
   /** Acknowledge an alert, or all of them (players: their own force's). */
   | { cmd: 'ackAlert'; id?: string; all?: boolean }
+  /** Replace a force's synchronization matrix (an empty list of phases removes it). */
+  | { cmd: 'setSyncMatrix'; force: ForceId; phases: Phase[] }
+  /** Start a phase now, whatever its trigger. */
+  | { cmd: 'startPhase'; force: ForceId; phaseId: string }
   /** Send a codeword to a force (players: their own). Plans waiting for it go on. */
   | { cmd: 'sendCodeword'; force: ForceId; codeword: string }
   | { cmd: 'setReactions'; targetId: string; reactions: Reactions }

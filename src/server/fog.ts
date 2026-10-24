@@ -139,6 +139,8 @@ const PLAYER_COMMANDS = new Set<Command['cmd']>([
   'disembark',
   'ackAlert',
   'sendCodeword',
+  'setSyncMatrix',
+  'startPhase',
 ]);
 
 /**
@@ -224,6 +226,20 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
       return;
     case 'sendCodeword':
       if (Number(c.force) !== force) throw new ForbiddenError('players send codewords to their own force only');
+      return;
+    case 'setSyncMatrix':
+    case 'startPhase':
+      if (Number(c.force) !== force) throw new ForbiddenError("players plan for their own force only");
+      if (c.cmd === 'setSyncMatrix') {
+        for (const p of (Array.isArray(c.phases) ? c.phases : []) as { orders?: { targetId?: string; task?: TaskSpec }[]; trigger?: { ownerId?: string; condition?: Condition } }[]) {
+          for (const o of p?.orders ?? []) {
+            ownObject(o?.targetId, 'object');
+            task(o?.task);
+          }
+          if (p?.trigger?.ownerId) ownObject(p.trigger.ownerId, 'object');
+          condition(p?.trigger?.condition);
+        }
+      }
       return;
     case 'ackAlert':
       // Players acknowledge their own force's alerts only.
