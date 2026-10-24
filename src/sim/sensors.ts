@@ -48,7 +48,7 @@ export function updateSensors(engine: Engine, observer: Entity): void {
           if (off > s.fov / 2) continue;
         }
         const aim = { x: target.x, y: target.y, z: target.z + Math.min(2, target.type.sensorHeight || 2) };
-        if (!engine.terrain.lineOfSight(eye, aim)) continue;
+        if (!engine.lineOfSight(eye, aim, !!s.radar)) continue;
         if (!engine.rng.chance(detectionProbability(engine, observer, target, range, s.maxRange, !!s.radar))) continue;
         recordContact(engine, observer, target, now);
         break;

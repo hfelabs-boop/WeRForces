@@ -426,14 +426,14 @@ export class Terrain extends TerrainGrid {
    * time (so they prefer roads) and avoid water and steep slopes.
    * Returns waypoints excluding the start point, or null if unreachable.
    */
-  planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number): Vec2[] | null {
+  planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number, overlay: Float32Array | null = null): Vec2[] | null {
     if (domain === 'air') return [to];
     const cs = this.spec.cellSize;
     const grid = this.costGrid(domain, offroadFactor);
     const cols = this.cols;
-    const cost = (c: number, r: number) => grid[r * cols + c];
+    const cost = overlay ? (c: number, r: number) => grid[r * cols + c] * overlay[r * cols + c] : (c: number, r: number) => grid[r * cols + c];
     // Short hops with a clear straight line do not need a grid search.
-    if (dist2d(from, to) < cs * 6 && Number.isFinite(this.segmentCost(from, to, domain, offroadFactor))) {
+    if (dist2d(from, to) < cs * 6 && Number.isFinite(this.segmentCost(from, to, domain, offroadFactor, overlay))) {
       return [to];
     }
     const start = this.nearestPassable(from, cost);
@@ -442,7 +442,7 @@ export class Terrain extends TerrainGrid {
     const res = gridAStar(this.cols, this.rows, start, goal, cost, 1);
     if (!res) return null;
     const pts = res.nodes.map((i) => this.postPosition(i));
-    const smoothed = this.smoothPath(pts, domain, offroadFactor);
+    const smoothed = this.smoothPath(pts, domain, offroadFactor, overlay);
     smoothed.shift(); // drop the start node; the entity is already there
     const last = smoothed[smoothed.length - 1];
     if (!last || dist2d(last, to) > 1) {
@@ -470,33 +470,37 @@ export class Terrain extends TerrainGrid {
   }
 
   /** Time-cost of a straight segment, Infinity if any sample is impassable. */
-  segmentCost(a: Vec2, b: Vec2, domain: Domain, offroadFactor: number): number {
+  segmentCost(a: Vec2, b: Vec2, domain: Domain, offroadFactor: number, overlay: Float32Array | null = null): number {
     const d = dist2d(a, b);
     const step = this.spec.cellSize / 2;
     const n = Math.max(1, Math.ceil(d / step));
     let cost = 0;
     for (let k = 0; k <= n; k++) {
       const t = k / n;
-      const f = this.mobilityFactor(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, domain, offroadFactor);
+      const x = a.x + (b.x - a.x) * t;
+      const y = a.y + (b.y - a.y) * t;
+      const f = this.mobilityFactor(x, y, domain, offroadFactor);
       if (f <= 0.01) return Infinity;
-      cost += 1 / f;
+      const extra = overlay ? overlay[this.nearestPost(x, y)] : 1;
+      if (!Number.isFinite(extra)) return Infinity;
+      cost += extra / f;
     }
     return (cost / (n + 1)) * d;
   }
 
   /** Greedy string pulling: skip nodes when a straight segment is not slower. */
-  private smoothPath(pts: Vec2[], domain: Domain, offroadFactor: number): Vec2[] {
+  private smoothPath(pts: Vec2[], domain: Domain, offroadFactor: number, overlay: Float32Array | null): Vec2[] {
     if (pts.length <= 2) return pts;
     const prefix: number[] = [0];
     for (let i = 1; i < pts.length; i++) {
-      prefix.push(prefix[i - 1] + this.segmentCost(pts[i - 1], pts[i], domain, offroadFactor));
+      prefix.push(prefix[i - 1] + this.segmentCost(pts[i - 1], pts[i], domain, offroadFactor, overlay));
     }
     const out: Vec2[] = [pts[0]];
     let i = 0;
     while (i < pts.length - 1) {
       let best = i + 1;
       for (let j = Math.min(pts.length - 1, i + 60); j > i + 1; j--) {
-        const direct = this.segmentCost(pts[i], pts[j], domain, offroadFactor);
+        const direct = this.segmentCost(pts[i], pts[j], domain, offroadFactor, overlay);
         if (direct <= (prefix[j] - prefix[i]) * 1.02) {
           best = j;
           break;

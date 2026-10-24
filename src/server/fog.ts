@@ -67,7 +67,8 @@ export function filterState(engine: Engine, s: SimState, force: ForceId): SimSta
     ...s,
     entities,
     units: s.units.filter((u) => u.force === force),
-    graphics: s.graphics.filter((g) => g.force === force || g.force === 0),
+    // Obstacles can be seen; an enemy minefield only once this force knows about it.
+    graphics: s.graphics.filter((g) => g.force === force || g.force === 0 || g.kind === 'obstacle' || (g.kind === 'minefield' && (g.knownBy ?? []).includes(force))),
     dis: undefined,
   };
 }

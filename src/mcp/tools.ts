@@ -274,8 +274,8 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'create_graphic',
-    'Draw a tactical graphic: a route (for follow/patrol tasks), an area (for "in area" plan conditions), a phase line or a point.',
-    { kind: z.enum(['route', 'area', 'phaseLine', 'point']), points: z.array(position).min(1), name: z.string().optional(), force: force.optional() },
+    'Draw a tactical graphic: a route (for follow/patrol tasks), an area (for "in area" plan conditions), a phase line, a point, a minefield (an area that damages what crosses it; density 0.1-1.5) or an obstacle line (ditch or wire that vehicles cannot cross; engineers can breach both).',
+    { kind: z.enum(['route', 'area', 'phaseLine', 'point', 'minefield', 'obstacle']), points: z.array(position).min(1), name: z.string().optional(), force: force.optional(), density: z.number().min(0.05).max(3).optional() },
     async (a) => api('POST', '/api/v1/graphics', a),
   );
 
@@ -295,16 +295,18 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'assign_task',
-    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
+    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
     {
       targetId: z.string().describe('entity (E..) or unit (U..) id'),
-      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission', 'mount', 'dismount']),
+      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission', 'mount', 'dismount', 'breach']),
       to: position.optional(),
       routeId: z.string().optional(),
       targetEntityId: z.string().optional(),
       duration: z.number().optional().describe('seconds'),
       radius: z.number().optional().describe('orbit radius in m (default 2000), or fire mission sheaf radius (default 0)'),
       rounds: z.number().int().min(1).max(100).optional().describe('fire mission rounds per tube (default 3)'),
+      smoke: z.boolean().optional().describe('fire mission: smoke rounds instead of high explosive'),
+      graphicId: z.string().optional().describe('breach: the minefield or obstacle graphic'),
       speedKmh: z.number().optional(),
     },
     async (a) => {
@@ -321,7 +323,9 @@ export function createMcpServer(call: ApiCaller): McpServer {
             : a.type === 'dismount'
             ? { type: 'dismount' }
             : a.type === 'fireMission'
-            ? { type: 'fireMission', target: need(a.to, 'to'), rounds: a.rounds, radius: a.radius }
+            ? { type: 'fireMission', target: need(a.to, 'to'), rounds: a.rounds, radius: a.radius, smoke: a.smoke }
+            : a.type === 'breach'
+            ? { type: 'breach', graphicId: need(a.graphicId, 'graphicId') }
             : a.type === 'orbit'
             ? { type: 'orbit', center: need(a.to, 'to'), radius: a.radius ?? 2000, duration: a.duration }
             : a.type === 'followRoute' || a.type === 'patrol'

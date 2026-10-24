@@ -79,8 +79,17 @@ export function validateTask(v: unknown): TaskSpec {
       if (rounds !== undefined && (rounds < 1 || rounds > 100)) throw new ValidationError('rounds must be between 1 and 100');
       const radius = t.radius === undefined ? undefined : num(t.radius, 'radius');
       if (radius !== undefined && (radius < 0 || radius > 1000)) throw new ValidationError('radius must be between 0 and 1000 m');
-      return { type: 'fireMission', target: vec(t.target, 'target'), rounds, radius, weaponId: t.weaponId === undefined ? undefined : str(t.weaponId, 'weaponId') };
+      return {
+        type: 'fireMission',
+        target: vec(t.target, 'target'),
+        rounds,
+        radius,
+        weaponId: t.weaponId === undefined ? undefined : str(t.weaponId, 'weaponId'),
+        smoke: t.smoke === true || undefined,
+      };
     }
+    case 'breach':
+      return { type: 'breach', graphicId: str(t.graphicId, 'graphicId') };
     default:
       throw new ValidationError(`unknown task type ${String(t.type)}`);
   }
@@ -296,14 +305,21 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
       }
       case 'createGraphic': {
         if (!Array.isArray(c.points)) throw new ValidationError('points must be an array');
-        const kinds = ['route', 'area', 'point', 'phaseLine'];
+        const kinds = ['route', 'area', 'point', 'phaseLine', 'minefield', 'obstacle'];
         if (!kinds.includes(c.kind as string)) throw new ValidationError('invalid graphic kind');
-        return engine.addGraphic(
+        const g = engine.addGraphic(
           c.kind,
           c.points.map((p, i) => vec(p, `points[${i}]`)),
           c.name === undefined ? undefined : str(c.name, 'name'),
           c.force === undefined ? 1 : force(c.force),
-        ).id;
+        );
+        const density = (c as { density?: unknown }).density;
+        if (density !== undefined && g.kind === 'minefield') {
+          const d = num(density, 'density');
+          if (d <= 0 || d > 3) throw new ValidationError('density must be in (0, 3]');
+          g.density = d;
+        }
+        return g.id;
       }
       case 'updateGraphic': {
         const g = engine.graphics.get(str(c.id, 'id'));
@@ -313,6 +329,12 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
           if (!Array.isArray(c.points) || c.points.length === 0) throw new ValidationError('points must be a non-empty array');
           g.points = c.points.map((p, i) => vec(p, `points[${i}]`));
         }
+        if (c.density !== undefined) {
+          const d = num(c.density, 'density');
+          if (d <= 0 || d > 3) throw new ValidationError('density must be in (0, 3]');
+          g.density = d;
+        }
+        engine.obstacles.changed();
         return;
       }
       default:

@@ -74,7 +74,7 @@ class PathFollower {
 
   plan(e: Entity, engine: Engine, goal: Vec2): boolean {
     this.goal = { ...goal };
-    const route = engine.terrain.planRoute(e, goal, e.domain, e.type.offroadFactor);
+    const route = engine.planRoute(e, goal, e.domain, e.type.offroadFactor, e.force);
     if (!route) return false;
     this.waypoints = route;
     this.index = 0;
@@ -428,6 +428,7 @@ export class FireMissionTask extends Task {
     entity.steer = { x: entity.x, y: entity.y, speed: 0, arrive: true };
     if (entity.firepowerKill) return this.fail('weapon out of action');
     const w = indirectWeaponFor(engine, entity, this.mission.target, this.mission.weaponId);
+    if (w && this.mission.smoke && !w.smoke) return this.fail('no smoke rounds for this weapon');
     if (!w) {
       if (this.fired > 0) return 'done';
       const any = entity.type.weapons.map((id) => engine.catalog.weapon(id)).filter((x) => x.indirect && (!this.mission.weaponId || x.id === this.mission.weaponId));
@@ -447,14 +448,14 @@ export class FireMissionTask extends Task {
       const d = r * Math.sqrt(engine.rng.next());
       point = { x: point.x + Math.sin(a) * d, y: point.y + Math.cos(a) * d };
     }
-    fireIndirect(engine, entity, w, point);
+    fireIndirect(engine, entity, w, point, this.mission.smoke);
     this.fired++;
     return this.fired >= this.rounds ? 'done' : 'running';
   }
 
   describe(): string {
     const t = this.mission.target;
-    const at = `Fire mission at (${Math.round(t.x)}, ${Math.round(t.y)})`;
+    const at = `${this.mission.smoke ? 'Smoke mission' : 'Fire mission'} at (${Math.round(t.x)}, ${Math.round(t.y)})`;
     return this.fired === 0 ? `${at}, ${this.rounds} round${this.rounds > 1 ? 's' : ''}` : `${at}: ${this.fired}/${this.rounds} fired`;
   }
 
@@ -549,6 +550,61 @@ export class DismountTask extends Task {
   }
 }
 
+/** Engineers: move up to a minefield or obstacle and breach a lane through it. */
+export class BreachTask extends Task {
+  private path = new PathFollower();
+  private replanIn = 0;
+  private site?: Vec2;
+  /** Seconds of breaching work done. */
+  work = 0;
+
+  constructor(readonly graphicId: string) {
+    super({ type: 'breach', graphicId });
+  }
+
+  protected override start({ engine, entity }: TaskContext): void {
+    const g = engine.graphics.get(this.graphicId);
+    if (!entity.type.breachTime) this.fail('not an engineer');
+    else if (!g || (g.kind !== 'minefield' && g.kind !== 'obstacle')) this.fail('not a minefield or obstacle');
+  }
+
+  protected tick({ engine, entity, dt }: TaskContext): TaskStatus {
+    const g = engine.graphics.get(this.graphicId);
+    if (!g) return this.fail('obstacle removed');
+    if (!this.site) {
+      // Work from just outside the edge nearest to where the engineers are.
+      const edge = engine.obstacles.nearestEdge(g, entity);
+      const d = dist2d(entity, edge);
+      this.site = d < 15 ? { x: entity.x, y: entity.y } : { x: edge.x + ((entity.x - edge.x) / d) * 12, y: edge.y + ((entity.y - edge.y) / d) * 12 };
+    }
+    if (dist2d(entity, this.site) > 10) {
+      this.replanIn -= dt;
+      if (this.replanIn <= 0) {
+        this.replanIn = 15;
+        if (!this.path.plan(entity, engine, this.site)) return this.fail('no route to the obstacle');
+      }
+      this.path.step(entity, engine, dt, entity.cruiseSpeed, true);
+      return 'running';
+    }
+    entity.steer = { x: entity.x, y: entity.y, speed: 0, arrive: true };
+    // Work goes slowly under fire.
+    this.work += dt * (1 - 0.8 * entity.suppression);
+    if (this.work < entity.type.breachTime!) return 'running';
+    engine.obstacles.breach(g, entity);
+    engine.log('task', `${entity.name} breached a lane through ${g.name}`, entity.id);
+    return 'done';
+  }
+
+  describe(engine: Engine): string {
+    const g = engine.graphics.get(this.graphicId);
+    return `Breach ${g?.name ?? this.graphicId}${this.work > 0 ? `: ${Math.round(this.work)} s of work` : ''}`;
+  }
+
+  override get remainingPath(): Vec2[] {
+    return this.path.remaining;
+  }
+}
+
 export function createTask(spec: TaskSpec): Task {
   switch (spec.type) {
     case 'moveTo':
@@ -573,5 +629,7 @@ export function createTask(spec: TaskSpec): Task {
       return new MountTask(spec.carrierId);
     case 'dismount':
       return new DismountTask();
+    case 'breach':
+      return new BreachTask(spec.graphicId);
   }
 }

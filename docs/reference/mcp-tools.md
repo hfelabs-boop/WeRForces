@@ -107,14 +107,15 @@ Create a unit (e.g. a tank platoon) from a unit template id; members are placed 
 
 ## `create_graphic`
 
-Draw a tactical graphic: a route (for follow/patrol tasks), an area (for "in area" plan conditions), a phase line or a point.
+Draw a tactical graphic: a route (for follow/patrol tasks), an area (for "in area" plan conditions), a phase line, a point, a minefield (an area that damages what crosses it; density 0.1-1.5) or an obstacle line (ditch or wire that vehicles cannot cross; engineers can breach both).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `kind` | `"route"` \| `"area"` \| `"phaseLine"` \| `"point"` | yes |  |
+| `kind` | `"route"` \| `"area"` \| `"phaseLine"` \| `"point"` \| `"minefield"` \| `"obstacle"` | yes |  |
 | `points` | array of {x, y, lat, lon, town} | yes |  |
 | `name` | string |  |  |
 | `force` | `1` or `2` or `3` or `0` |  | 1 Blue, 2 Red, 3 Neutral, 0 Other |
+| `density` | number (0.05–3) |  |  |
 
 ## `delete_object` _(destructive)_
 
@@ -126,18 +127,20 @@ Delete an entity, a unit (with its members) or a graphic.
 
 ## `assign_task`
 
-Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
+Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `targetId` | string | yes | entity (E..) or unit (U..) id |
-| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` \| `"mount"` \| `"dismount"` | yes |  |
+| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` \| `"mount"` \| `"dismount"` \| `"breach"` | yes |  |
 | `to` | {x, y, lat, lon, town} |  | Location as {x,y}, {lat,lon} or {town} |
 | `routeId` | string |  |  |
 | `targetEntityId` | string |  |  |
 | `duration` | number |  | seconds |
 | `radius` | number |  | orbit radius in m (default 2000), or fire mission sheaf radius (default 0) |
 | `rounds` | integer (1–100) |  | fire mission rounds per tube (default 3) |
+| `smoke` | boolean |  | fire mission: smoke rounds instead of high explosive |
+| `graphicId` | string |  | breach: the minefield or obstacle graphic |
 | `speedKmh` | number |  |  |
 
 ## `assign_plan`

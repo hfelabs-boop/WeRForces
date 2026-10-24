@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { TerrainGrid } from '../src/shared/terrainGrid.js';
-import type { EntitySnapshot, ForceId, Graphic, SimEvent, SimState, SymbolKind, TerrainData, Vec2 } from '../src/shared/types.js';
+import type { EntitySnapshot, ForceId, Graphic, SimEvent, SmokeCloud, SimState, SymbolKind, TerrainData, Vec2 } from '../src/shared/types.js';
 
 export interface View3DCallbacks {
   select(id: string | null): void;
@@ -221,6 +221,7 @@ export class View3D {
     this.texCanvas = this.composeTexture(terrainImage);
     this.buildTerrain();
     this.graphicsKey = '';
+    this.smokeKey = '';
     for (const o of this.entities.values()) this.entityGroup.remove(o.group);
     this.entities.clear();
     this.resetCamera();
@@ -232,6 +233,7 @@ export class View3D {
     this.state = state;
     if (!this.data) return;
     this.syncGraphics(state.graphics);
+    this.syncSmoke(state.smoke ?? []);
     this.syncEntities(state.entities);
   }
 
@@ -420,7 +422,8 @@ export class View3D {
         this.graphicsGroup.add(cone);
         continue;
       }
-      const pts = this.drape(g.points, g.kind === 'area');
+      const closed = g.kind === 'area' || g.kind === 'minefield';
+      const pts = this.drape(g.points, closed);
       const geom = new THREE.BufferGeometry().setFromPoints(pts);
       const mat =
         g.kind === 'phaseLine'
@@ -429,20 +432,24 @@ export class View3D {
       const line = new THREE.Line(geom, mat);
       if (g.kind === 'phaseLine') line.computeLineDistances();
       this.graphicsGroup.add(line);
-      if (g.kind === 'area') {
-        // Translucent "curtain" so objectives read in 3D.
+      if (closed || g.kind === 'obstacle') {
+        // Translucent "curtain" so objectives, minefields and obstacles read in 3D.
         const curtain: number[] = [];
+        const top = (g.kind === 'area' ? 120 : g.kind === 'minefield' ? 25 : 12) * this.exaggeration;
         for (let i = 0; i < pts.length - 1; i++) {
           const a = pts[i];
           const b = pts[i + 1];
-          const top = 120 * this.exaggeration;
           curtain.push(a.x, a.y, a.z, b.x, b.y, b.z, b.x, b.y + top, b.z, a.x, a.y, a.z, b.x, b.y + top, b.z, a.x, a.y + top, a.z);
         }
         const cg = new THREE.BufferGeometry();
         cg.setAttribute('position', new THREE.Float32BufferAttribute(curtain, 3));
-        this.graphicsGroup.add(new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false })));
+        this.graphicsGroup.add(new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: g.kind === 'area' ? 0.16 : 0.35, side: THREE.DoubleSide, depthWrite: false })));
       }
-      const anchor = g.kind === 'area' ? pts.reduce((s, p) => s.add(p), new THREE.Vector3()).divideScalar(pts.length) : pts[0];
+      for (const l of g.lanes ?? []) {
+        const lane = this.drape([l.from, l.to], false);
+        this.graphicsGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(lane), new THREE.LineBasicMaterial({ color: 0xffffff })));
+      }
+      const anchor = closed ? pts.reduce((s, p) => s.add(p), new THREE.Vector3()).divideScalar(pts.length) : pts[0];
       const { tex, aspect } = labelTexture(g.name, '#ffffff');
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, sizeAttenuation: false }));
       sprite.scale.set(0.03 * aspect, 0.03, 1);
@@ -451,6 +458,24 @@ export class View3D {
       sprite.visible = this.labels;
       sprite.userData.label = true;
       this.graphicsGroup.add(sprite);
+    }
+  }
+
+  private smokeKey = '';
+  private smokeGroup = new THREE.Group();
+
+  private syncSmoke(clouds: SmokeCloud[]): void {
+    const key = clouds.map((c) => c.id).join(',') + this.exaggeration;
+    if (key === this.smokeKey) return;
+    this.smokeKey = key;
+    if (!this.smokeGroup.parent) this.scene.add(this.smokeGroup);
+    this.smokeGroup.clear();
+    const mat = new THREE.MeshLambertMaterial({ color: 0xdddddd, transparent: true, opacity: 0.55, depthWrite: false });
+    for (const c of clouds) {
+      const puff = new THREE.Mesh(geo.sphere, mat);
+      puff.scale.set(c.radius * 2, 50 * this.exaggeration, c.radius * 2);
+      puff.position.copy(this.toScene(c.x, c.y, this.grid!.surfaceHeight(c.x, c.y) + 5));
+      this.smokeGroup.add(puff);
     }
   }
 

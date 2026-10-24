@@ -40,6 +40,8 @@ import { stepMovement } from './movement.js';
 import { PlanExecutor, type Taskable } from './plans.js';
 import { Rng } from './rng.js';
 import { SENSOR_INTERVAL, updateSensors } from './sensors.js';
+import { Obstacles } from './obstacles.js';
+import { Smoke } from './smoke.js';
 import { SpatialIndex } from './spatial.js';
 import { createTask, MountTask, type Task, type TaskStatus } from './tasks.js';
 import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
@@ -122,6 +124,10 @@ export class Engine {
   readonly units = new Map<string, Unit>();
   /** Grid of entity positions for neighbourhood queries, rebuilt on demand each tick. */
   readonly spatial = new SpatialIndex();
+  /** Minefields and obstacle lines (from graphics), lanes and route-cost overlays. */
+  readonly obstacles = new Obstacles(this);
+  /** Smoke clouds. */
+  readonly smoke = new Smoke(this);
   readonly graphics = new Map<string, Graphic>();
   readonly listeners: EngineListeners = { event: [], fire: [], detonation: [], removed: [], reset: [], step: [] };
 
@@ -221,6 +227,7 @@ export class Engine {
     e.disNumber = ++this.disCounter;
     for (const w of type.weapons) e.ammo.set(w, this.catalog.weapon(w).ammo);
     if (type.reactions) e.reactions = { ...type.reactions };
+    e.smokeLeft = type.smokeGrenades ?? 0;
     this.spatial.invalidate();
     if (type.domain === 'air') {
       e.altitudeOverride = opts.altitude;
@@ -316,12 +323,14 @@ export class Engine {
   addGraphic(kind: GraphicKind, points: Vec2[], name?: string, force: ForceId = 1, id?: string): Graphic {
     if (points.length === 0) throw new Error('a graphic needs at least one point');
     if (kind === 'area' && points.length < 3) throw new Error('an area needs at least three points');
-    if ((kind === 'route' || kind === 'phaseLine') && points.length < 2) throw new Error(`a ${kind} needs at least two points`);
+    if ((kind === 'route' || kind === 'phaseLine' || kind === 'obstacle') && points.length < 2) throw new Error(`a ${kind} needs at least two points`);
+    if (kind === 'minefield' && points.length < 3) throw new Error('a minefield needs at least three points');
     const gid = id ?? this.nextId('G');
     this.bumpCounter(gid);
-    const label = { route: 'Route', area: 'Area', point: 'Point', phaseLine: 'PL' }[kind];
+    const label = { route: 'Route', area: 'Area', point: 'Point', phaseLine: 'PL', minefield: 'MF', obstacle: 'OBST' }[kind];
     const g: Graphic = { id: gid, kind, name: name ?? `${label} ${gid.slice(1)}`, points: points.map((p) => ({ x: p.x, y: p.y })), force };
     this.graphics.set(gid, g);
+    if (kind === 'minefield' || kind === 'obstacle') this.obstacles.changed();
     return g;
   }
 
@@ -345,7 +354,10 @@ export class Engine {
       this.units.delete(id);
       return;
     }
-    if (this.graphics.delete(id)) return;
+    if (this.graphics.delete(id)) {
+      this.obstacles.changed();
+      return;
+    }
     throw new Error(`unknown object ${id}`);
   }
 
@@ -631,6 +643,13 @@ export class Engine {
     this.shots.push(shot);
     const shooter = this.entities.get(shot.shooterId);
     const target = shot.targetId ? this.entities.get(shot.targetId) : undefined;
+    // A vehicle with smoke grenades screens itself when a missile is fired at it.
+    if (target && !target.remote && target.alive && shot.weapon.guided && target.smokeLeft > 0) {
+      target.smokeLeft--;
+      const d = Math.hypot(shot.from.x - target.x, shot.from.y - target.y) || 1;
+      this.smoke.add({ x: target.x + ((shot.from.x - target.x) / d) * 30, y: target.y + ((shot.from.y - target.y) / d) * 30 }, 25, 45);
+      this.log('info', `${target.name} fired smoke grenades`, target.id);
+    }
     const at = target?.name ?? (shot.targetId ? 'target' : `(${Math.round(shot.to.x)}, ${Math.round(shot.to.y)})`);
     this.log('fire', `${shooter?.name ?? shot.shooterId} fired ${shot.weapon.name} at ${at} (${Math.round(shot.range)} m)`, shot.shooterId, shot.targetId, {
       from: shot.from,
@@ -648,11 +667,45 @@ export class Engine {
   losCached(from: Entity, to: Entity): boolean {
     const key = `${from.id}>${to.id}`;
     const c = this.losMemo.get(key);
-    if (c && c.ax === from.x && c.ay === from.y && c.az === from.z && c.bx === to.x && c.by === to.y && c.bz === to.z && c.v === this.terrainVersion) return c.visible;
-    const visible = this.terrain.lineOfSight(from.eye, { x: to.x, y: to.y, z: to.z + 1.5 });
+    const v = this.terrainVersion * 1e6 + this.smoke.version;
+    if (c && c.ax === from.x && c.ay === from.y && c.az === from.z && c.bx === to.x && c.by === to.y && c.bz === to.z && c.v === v) return c.visible;
+    const visible = this.lineOfSight(from.eye, { x: to.x, y: to.y, z: to.z + 1.5 });
     if (this.losMemo.size > 200_000) this.losMemo.clear();
-    this.losMemo.set(key, { ax: from.x, ay: from.y, az: from.z, bx: to.x, by: to.y, bz: to.z, v: this.terrainVersion, visible });
+    this.losMemo.set(key, { ax: from.x, ay: from.y, az: from.z, bx: to.x, by: to.y, bz: to.z, v, visible });
     return visible;
+  }
+
+  /** Line of sight through terrain, canopy and smoke (radar sees through smoke). */
+  lineOfSight(a: Vec3, b: Vec3, radar = false): boolean {
+    return this.terrain.lineOfSight(a, b) && (radar || !this.smoke.blocks(a, b));
+  }
+
+  /** A route for a domain, avoiding obstacles and the minefields `force` knows about. */
+  planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number, force?: ForceId): Vec2[] | null {
+    const overlay = this.obstacles.overlay(force, domain);
+    const route = this.terrain.planRoute(from, to, domain, offroadFactor, overlay);
+    return route && overlay && domain !== 'lifeform' ? this.obstacles.threadLanes(route, from) : route;
+  }
+
+  /** An entity set off a mine. */
+  mineStrike(e: Entity, field: Graphic): void {
+    const roll = this.rng.next();
+    const armor = e.type.armor;
+    // Kill / mobility-kill chances by armour; the rest of the time the blast does no lasting harm.
+    const [kill, mobility] = armor === 'lifeform' ? [0.5, 0] : armor === 'armored' ? [0.1, 0.75] : armor === 'light' ? [0.3, 0.6] : [0.6, 0.35];
+    let outcome = 'noEffect';
+    if (roll < kill) {
+      e.destroyed = true;
+      outcome = 'kill';
+    } else if (roll < kill + mobility) {
+      if (e.mobilityKill) e.destroyed = true;
+      e.mobilityKill = true;
+      outcome = e.destroyed ? 'kill' : 'mobility';
+    }
+    e.underFireUntil = this.time + 15;
+    this.log('detonation', `${e.name} struck a mine in ${field.name}${outcome === 'noEffect' ? ', no damage' : ''}`, e.id, undefined, { to: e.position, hit: outcome !== 'noEffect' });
+    this.obstacles.reveal(field, e.force);
+    if (outcome !== 'noEffect') this.afterDamage(e, outcome, undefined, `a mine in ${field.name}`);
   }
 
   /** Munitions currently in flight. */
@@ -674,6 +727,11 @@ export class Engine {
 
   private reportDetonation(det: Detonation): void {
     const shot = det.shot;
+    if (det.smoke) {
+      this.log('detonation', `${shot.weapon.name} smoke at (${Math.round(det.location.x)}, ${Math.round(det.location.y)})`, shot.shooterId, undefined, { to: det.location, hit: false, weaponId: shot.weapon.id });
+      for (const fn of this.listeners.detonation) fn(det);
+      return;
+    }
     if (det.effects) {
       const names = det.effects.map((f) => `${this.nameOf(f.entityId)}${f.outcome === 'kill' ? ' destroyed' : ` ${f.outcome} kill`}`);
       const at = `(${Math.round(det.location.x)}, ${Math.round(det.location.y)})`;
@@ -705,7 +763,7 @@ export class Engine {
     if (target) this.afterDamage(target, det.outcome, shot.shooterId);
   }
 
-  private afterDamage(target: Entity, outcome: string, byId?: string): void {
+  private afterDamage(target: Entity, outcome: string, byId?: string, cause?: string): void {
     if ((outcome === 'kill' || outcome === 'mobility') && !target.remote) {
       // Passengers of a knocked-out carrier: some die with it, the rest bail out.
       if (outcome === 'kill') {
@@ -724,7 +782,7 @@ export class Engine {
       target.plan = null;
       target.steer = null;
       target.contacts.clear();
-      const by = byId ? this.nameOf(byId) : 'unknown';
+      const by = byId ? this.nameOf(byId) : (cause ?? 'unknown');
       this.log('destroyed', `${target.name} destroyed by ${by}`, target.id, byId);
     } else if (outcome === 'mobility' || outcome === 'firepower') {
       this.log('damaged', `${target.name} suffered a ${outcome} kill`, target.id, byId);
@@ -853,9 +911,17 @@ export class Engine {
       }
     }
 
+    let hasObstacles = false;
+    for (const g of this.graphics.values()) if (g.kind === 'minefield' || g.kind === 'obstacle') hasObstacles = true;
     for (const e of this.entities.values()) {
       if (!e.embarkedIn) {
-        stepMovement(e, this.terrain, dt);
+        if (hasObstacles && !e.remote && !e.destroyed && (e.domain === 'ground' || e.domain === 'lifeform')) {
+          const prev = { x: e.x, y: e.y };
+          stepMovement(e, this.terrain, dt);
+          this.obstacles.afterMove(e, prev);
+        } else {
+          stepMovement(e, this.terrain, dt);
+        }
         continue;
       }
       const c = this.entities.get(e.embarkedIn);
@@ -872,6 +938,7 @@ export class Engine {
       }
     }
     if (Math.round(this.time * 10) % 10 === 0) {
+      this.smoke.expire();
       checkCallsForFire(this);
       updateMorale(this);
     }
@@ -896,6 +963,8 @@ export class Engine {
     this.shots = [];
     this.sensorDue.clear();
     this.losMemo.clear();
+    this.smoke.clear();
+    this.obstacles.changed();
     this.counters = { E: 0, U: 0, G: 0 };
     this.disCounter = 0;
     this.time = 0;
@@ -998,6 +1067,7 @@ export class Engine {
         unit.assignedTask = u.task;
       }
     }
+    if (s.smoke) this.smoke.restore(s.smoke);
     for (const r of s.shots ?? []) {
       const weapon = this.catalog.weapons.get(r.weaponId);
       if (weapon) this.shots.push({ ...r, weapon });
@@ -1027,6 +1097,7 @@ export class Engine {
     e.withdrawn = !!st.withdrawn;
     if (st.embarkedIn) e.embarkedIn = st.embarkedIn;
     if (st.callForFireAt !== undefined) e.callForFireAt = st.callForFireAt;
+    if (st.smokeLeft !== undefined) e.smokeLeft = st.smokeLeft;
     if (st.suppression !== undefined) e.suppression = st.suppression;
     if (st.morale !== undefined) e.morale = st.morale;
     if (st.moraleState) e.moraleState = st.moraleState;
@@ -1076,6 +1147,7 @@ export class Engine {
         embarkedIn: e.embarkedIn,
         taskDone: (!!e.assignedTask && !(e.task && e.task.status === 'running')) || undefined,
         callForFireAt: finite(e.callForFireAt),
+        smokeLeft: e.smokeLeft !== (e.type.smokeGrenades ?? 0) ? e.smokeLeft : undefined,
         suppression: e.suppression || undefined,
         morale: e.morale < 1 ? e.morale : undefined,
         moraleState: e.moraleState !== 'steady' ? e.moraleState : undefined,
@@ -1154,6 +1226,7 @@ export class Engine {
       })),
       rngState: this.time === 0 ? undefined : this.rng.state,
       rules: Object.values(this.rules).every((v) => v) ? undefined : { ...this.rules },
+      smoke: this.smoke.clouds.length ? this.smoke.clouds.map((c) => ({ ...c })) : undefined,
     };
   }
 
@@ -1235,6 +1308,7 @@ export class Engine {
       entities: [...this.entities.values()].map((e) => this.snapshotEntity(e, passengers)),
       units,
       graphics: [...this.graphics.values()],
+      smoke: this.smoke.clouds.length ? this.smoke.clouds : undefined,
     };
   }
 

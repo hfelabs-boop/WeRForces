@@ -37,6 +37,7 @@ export type SymbolKind =
   | 'wheeled'
   | 'air-defense'
   | 'artillery'
+  | 'engineer'
   | 'rotary'
   | 'fixed-wing'
   | 'uav'
@@ -94,6 +95,8 @@ export interface WeaponDef {
   blastRadius?: number;
   /** One-sigma radial aiming error in metres at maximum range (half that at short range). */
   dispersion?: number;
+  /** Indirect fire that can also fire smoke rounds: cloud radius (m) and how long it lasts (s). */
+  smoke?: { radius: number; duration: number };
 }
 
 export interface SensorDef {
@@ -139,6 +142,10 @@ export interface EntityTypeDef {
   crew: number;
   /** Seats for dismounted infantry (lifeform entities) carried as passengers. */
   capacity?: number;
+  /** Smoke grenade salvos, fired automatically when a guided missile is launched at it. */
+  smokeGrenades?: number;
+  /** Engineers: seconds to breach a lane through a minefield or obstacle. */
+  breachTime?: number;
   /** Reactions that new entities of this type start with (e.g. observers call for fire). */
   reactions?: Reactions;
 }
@@ -174,7 +181,9 @@ export type TaskSpec =
    * Indirect fire on a location: `rounds` per tube (default 3), spread over `radius`
    * metres around the target (default 0, all rounds at the aim point).
    */
-  | { type: 'fireMission'; target: Vec2; rounds?: number; radius?: number; weaponId?: string }
+  | { type: 'fireMission'; target: Vec2; rounds?: number; radius?: number; weaponId?: string; smoke?: boolean }
+  /** Engineers: go to a minefield or obstacle and breach a 30 m lane through it. */
+  | { type: 'breach'; graphicId: string }
   /** Infantry walk to a carrier (entity, or any member of a unit with free seats) and board it. */
   | { type: 'mount'; carrierId: string }
   /** A carrier stops and lets all its passengers out. */
@@ -220,7 +229,7 @@ export interface Plan {
 
 // ---------------------------------------------------------------- tactical graphics
 
-export type GraphicKind = 'route' | 'area' | 'point' | 'phaseLine';
+export type GraphicKind = 'route' | 'area' | 'point' | 'phaseLine' | 'minefield' | 'obstacle';
 
 export interface Graphic {
   id: string;
@@ -228,6 +237,22 @@ export interface Graphic {
   name: string;
   points: Vec2[];
   force: ForceId;
+  /** Minefields: mines per metre of front, roughly (0.1 sparse .. 1.5 dense; default 0.5). */
+  density?: number;
+  /** Minefields and obstacles: breached lanes (a centreline; lanes are 30 m wide). */
+  lanes?: { from: Vec2; to: Vec2 }[];
+  /** Minefields: forces that know where it is (its own force always does). */
+  knownBy?: ForceId[];
+}
+
+/** A smoke cloud: blocks sight (not radar) until it disperses. */
+export interface SmokeCloud {
+  id: number;
+  x: number;
+  y: number;
+  radius: number;
+  /** Simulation time it is gone. */
+  until: number;
 }
 
 // ---------------------------------------------------------------- terrain
@@ -334,6 +359,8 @@ export interface EntityState {
   taskDone?: boolean;
   /** Simulation time this observer may call for fire again. */
   callForFireAt?: number;
+  /** Smoke grenade salvos left. */
+  smokeLeft?: number;
   suppression?: number;
   morale?: number;
   moraleState?: MoraleState;
@@ -365,6 +392,8 @@ export interface ShotRecord {
   fireTime: number;
   impactTime: number;
   range: number;
+  /** A smoke round. */
+  smoke?: boolean;
 }
 
 export interface ScenarioFile {
@@ -381,6 +410,8 @@ export interface ScenarioFile {
   graphics: Graphic[];
   /** Checkpoint only: munitions in flight and the random number generator state. */
   shots?: ShotRecord[];
+  /** Checkpoint only: smoke clouds still hanging about. */
+  smoke?: SmokeCloud[];
   rngState?: number;
   /** Which optional models are on (all default to on). */
   rules?: SimulationRules;
@@ -497,6 +528,8 @@ export interface SimState {
   entities: EntitySnapshot[];
   units: UnitSnapshot[];
   graphics: Graphic[];
+  /** Smoke clouds on the battlefield. */
+  smoke?: SmokeCloud[];
   dis?: DisStatus;
 }
 
@@ -557,8 +590,8 @@ export type Command =
   | { cmd: 'setRules'; rules: SimulationRules }
   | { cmd: 'setFormation'; unitId: string; formation: Formation }
   | { cmd: 'rename'; id: string; name: string }
-  | { cmd: 'createGraphic'; kind: GraphicKind; name?: string; points: Vec2[]; force?: ForceId }
-  | { cmd: 'updateGraphic'; id: string; name?: string; points?: Vec2[] };
+  | { cmd: 'createGraphic'; kind: GraphicKind; name?: string; points: Vec2[]; force?: ForceId; density?: number }
+  | { cmd: 'updateGraphic'; id: string; name?: string; points?: Vec2[]; density?: number };
 
 export interface CommandResult {
   ok: boolean;

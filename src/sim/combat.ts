@@ -18,6 +18,8 @@ export interface Shot {
   fireTime: number;
   impactTime: number;
   range: number;
+  /** A smoke round: makes a cloud where it lands instead of a blast. */
+  smoke?: boolean;
 }
 
 export type DetonationOutcome = 'kill' | 'mobility' | 'firepower' | 'miss' | 'noEffect';
@@ -29,6 +31,8 @@ export interface Detonation {
   outcome: DetonationOutcome;
   /** A command-guided missile lost guidance (launcher killed or lost sight). */
   guidanceLost?: boolean;
+  /** A smoke round: it made a cloud. */
+  smoke?: boolean;
   /** Area-effect rounds: every local entity damaged by the blast. */
   effects?: { entityId: string; outcome: Exclude<DetonationOutcome, 'miss' | 'noEffect'> }[];
 }
@@ -144,7 +148,7 @@ function fire(engine: Engine, shooter: Entity, target: Entity, w: WeaponDef, ran
 }
 
 /** Launch an indirect-fire round at a ground point. */
-export function fireIndirect(engine: Engine, shooter: Entity, w: WeaponDef, point: Vec2): void {
+export function fireIndirect(engine: Engine, shooter: Entity, w: WeaponDef, point: Vec2, smoke = false): void {
   const now = engine.time;
   shooter.ammo.set(w.id, (shooter.ammo.get(w.id) ?? 0) - 1);
   shooter.weaponReadyAt.set(w.id, now + w.reloadTime * engine.rng.range(0.9, 1.1) * reloadFactor(engine, shooter));
@@ -159,6 +163,7 @@ export function fireIndirect(engine: Engine, shooter: Entity, w: WeaponDef, poin
     fireTime: now,
     impactTime: now + Math.max(1, range / w.projectileSpeed),
     range,
+    smoke: smoke || undefined,
   });
 }
 
@@ -235,6 +240,10 @@ export function resolveImpact(engine: Engine, shot: Shot): Detonation {
     const x = shot.to.x + gaussian(engine) * sigma;
     const y = shot.to.y + gaussian(engine) * sigma;
     const location = { x, y, z: engine.terrain.surfaceHeight(x, y) };
+    if (shot.smoke && w.smoke) {
+      engine.smoke.add(location, w.smoke.radius, w.smoke.duration);
+      return { shot, location, hit: false, outcome: 'noEffect', smoke: true };
+    }
     const effects = w.blastRadius ? applyBlast(engine, w, location, shot.shooterId) : [];
     const outcome = effects.some((f) => f.outcome === 'kill') ? 'kill' : effects[0]?.outcome ?? 'noEffect';
     return { shot, location, hit: effects.length > 0, outcome, effects };

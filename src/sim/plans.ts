@@ -43,8 +43,10 @@ export function describeStatement(st: PlanStatement, engine?: Engine): string {
           return `Mount ${engine?.entities.get(t.carrierId)?.name ?? engine?.units.get(t.carrierId)?.name ?? t.carrierId}`;
         case 'dismount':
           return 'Dismount passengers';
+        case 'breach':
+          return `Breach ${engine?.graphics.get(t.graphicId)?.name ?? t.graphicId}`;
         case 'fireMission':
-          return `Fire mission at (${Math.round(t.target.x)}, ${Math.round(t.target.y)}), ${t.rounds ?? DEFAULT_MISSION_ROUNDS} rounds`;
+          return `${t.smoke ? 'Smoke' : 'Fire'} mission at (${Math.round(t.target.x)}, ${Math.round(t.target.y)}), ${t.rounds ?? DEFAULT_MISSION_ROUNDS} rounds`;
       }
       break;
     }

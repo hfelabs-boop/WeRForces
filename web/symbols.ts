@@ -97,6 +97,15 @@ function icon(ctx: CanvasRenderingContext2D, kind: SymbolKind, s: number): void 
     case 'artillery':
       ctx.arc(0, 0, s * 0.2, 0, Math.PI * 2);
       break;
+    case 'engineer':
+      // The NATO engineer sign: a squared-off "E" lying on its back.
+      ctx.moveTo(-w * 0.6, h * 0.35);
+      ctx.lineTo(-w * 0.6, -h * 0.3);
+      ctx.lineTo(w * 0.6, -h * 0.3);
+      ctx.lineTo(w * 0.6, h * 0.35);
+      ctx.moveTo(0, -h * 0.3);
+      ctx.lineTo(0, h * 0.35);
+      break;
     case 'rotary':
       ctx.moveTo(-w, -h * 0.6);
       ctx.lineTo(w, h * 0.6);

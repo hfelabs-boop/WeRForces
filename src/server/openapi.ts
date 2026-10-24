@@ -256,7 +256,14 @@ export function buildOpenApi(baseUrl: string): Schema {
                 rounds: { type: 'integer', minimum: 1, maximum: 100, description: 'rounds per tube (default 3)' },
                 radius: { type: 'number', minimum: 0, maximum: 1000, description: 'spread rounds over this radius in m (default 0)' },
                 weaponId: { type: 'string', description: 'indirect-fire weapon to use (default: first that can reach)' },
+                smoke: { type: 'boolean', description: 'fire smoke rounds: a cloud that blocks sight instead of a blast' },
               },
+            },
+            {
+              type: 'object',
+              required: ['type', 'graphicId'],
+              description: 'Engineers: move to a minefield or obstacle line and breach a 30 m lane through it.',
+              properties: { type: { const: 'breach' }, graphicId: { type: 'string' } },
             },
           ],
         },
@@ -311,7 +318,13 @@ export function buildOpenApi(baseUrl: string): Schema {
         CreateGraphic: {
           type: 'object',
           required: ['kind', 'points'],
-          properties: { kind: { enum: ['route', 'area', 'phaseLine', 'point'] }, name: { type: 'string' }, force: ref('Force'), points: { type: 'array', items: ref('Position') } },
+          properties: {
+            kind: { enum: ['route', 'area', 'phaseLine', 'point', 'minefield', 'obstacle'], description: 'minefield: an area that damages what crosses it; obstacle: a line vehicles cannot cross (ditch, wire)' },
+            name: { type: 'string' },
+            force: ref('Force'),
+            points: { type: 'array', items: ref('Position') },
+            density: { type: 'number', description: 'minefields: 0.1 sparse .. 1.5 dense (default 0.5)' },
+          },
         },
         Entity: {
           type: 'object',

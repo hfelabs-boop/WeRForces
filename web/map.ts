@@ -219,7 +219,7 @@ export class MapView {
       const pts = g.points.map((p) => this.toScreen(p));
       for (let i = 0; i < pts.length; i++) {
         if (Math.hypot(pts[i].x - sx, pts[i].y - sy) < 8) return g.id;
-        const j = g.kind === 'area' ? (i + 1) % pts.length : i + 1;
+        const j = g.kind === 'area' || g.kind === 'minefield' ? (i + 1) % pts.length : i + 1;
         if (j < pts.length && distToSeg(sx, sy, pts[i], pts[j]) < 5) return g.id;
       }
     }
@@ -362,7 +362,7 @@ export class MapView {
     const m = this.mode;
     if (m.kind !== 'draw') return;
     const pts = dedupe(m.points);
-    const min = m.graphic === 'area' ? 3 : m.graphic === 'point' ? 1 : 2;
+    const min = m.graphic === 'area' || m.graphic === 'minefield' ? 3 : m.graphic === 'point' ? 1 : 2;
     this.setMode({ kind: 'select' });
     if (pts.length >= min) m.onDone(pts);
   }
@@ -394,6 +394,7 @@ export class MapView {
     if (this.layers.grid) this.drawGrid(size);
     this.drawRoads();
     this.drawTowns();
+    this.drawSmoke();
     this.drawGraphics();
     this.drawSelectionOverlays();
     this.drawSymbols();
@@ -487,13 +488,23 @@ export class MapView {
       ctx.setLineDash(g.kind === 'phaseLine' ? [10, 5] : []);
       ctx.beginPath();
       pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
-      if (g.kind === 'area') {
+      if (g.kind === 'area' || g.kind === 'minefield') {
         ctx.closePath();
-        ctx.fillStyle = hexAlpha(col, 0.16);
+        ctx.fillStyle = hexAlpha(col, g.kind === 'minefield' ? 0.22 : 0.16);
         ctx.fill();
       }
       ctx.stroke();
       ctx.setLineDash([]);
+      if (g.kind === 'minefield') this.drawMines(g, pts);
+      if (g.kind === 'obstacle') {
+        // Teeth along the line.
+        for (let i = 1; i < pts.length; i++) teeth(ctx, pts[i - 1], pts[i]);
+      }
+      if (g.lanes?.length) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        for (const l of g.lanes) laneMarker(ctx, this.toScreen(l.from), this.toScreen(l.to), Math.max(4, 15 * this.scale));
+      }
       if (g.kind === 'route') {
         for (let i = 1; i < pts.length; i++) arrow(ctx, pts[i - 1], pts[i]);
         for (const p of pts) {
@@ -516,9 +527,49 @@ export class MapView {
         ctx.stroke();
       }
       if (this.layers.labels) {
-        const anchor = g.kind === 'area' ? centroid(pts) : pts[0];
+        const anchor = g.kind === 'area' || g.kind === 'minefield' ? centroid(pts) : pts[0];
         label(ctx, g.name, anchor.x + 6, anchor.y - (g.kind === 'point' ? 16 : 4), '#fff', 'bold 11px system-ui');
       }
+    }
+  }
+
+  /** Mine symbols scattered inside a minefield (a fixed pattern, so they don't move as you pan). */
+  private drawMines(g: Graphic, pts: Vec2[]): void {
+    const ctx = this.ctx;
+    const xs = g.points.map((p) => p.x);
+    const ys = g.points.map((p) => p.y);
+    const step = Math.max(40, 18 / this.scale);
+    const snap = (v: number) => Math.ceil(v / step) * step;
+    ctx.save();
+    ctx.beginPath();
+    pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.closePath();
+    ctx.clip();
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    let n = 0;
+    for (let y = snap(Math.min(...ys)); y <= Math.max(...ys) && n < 400; y += step) {
+      for (let x = snap(Math.min(...xs)) + ((y / step) % 2 ? step / 2 : 0); x <= Math.max(...xs) && n < 400; x += step, n++) {
+        const s = this.toScreen({ x, y });
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  private drawSmoke(): void {
+    const ctx = this.ctx;
+    for (const c of this.state?.smoke ?? []) {
+      const s = this.toScreen(c);
+      const r = c.radius * this.scale;
+      const grad = ctx.createRadialGradient(s.x, s.y, r * 0.2, s.x, s.y, r);
+      grad.addColorStop(0, 'rgba(225,225,225,0.75)');
+      grad.addColorStop(1, 'rgba(225,225,225,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
@@ -687,7 +738,7 @@ export class MapView {
         else ctx.lineTo(s.x, s.y);
       });
       if (this.mouse) ctx.lineTo(this.mouse.x, this.mouse.y);
-      if (m.graphic === 'area') ctx.closePath();
+      if (m.graphic === 'area' || m.graphic === 'minefield') ctx.closePath();
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 4]);
@@ -810,3 +861,34 @@ export function forceName(f: number): string {
 }
 
 export type { Graphic };
+
+/** Obstacle teeth along a segment. */
+function teeth(ctx: CanvasRenderingContext2D, a: Vec2, b: Vec2): void {
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (len < 4) return;
+  const ux = (b.x - a.x) / len;
+  const uy = (b.y - a.y) / len;
+  ctx.beginPath();
+  for (let d = 6; d < len; d += 12) {
+    const x = a.x + ux * d;
+    const y = a.y + uy * d;
+    ctx.moveTo(x - ux * 4, y - uy * 4);
+    ctx.lineTo(x - uy * 7, y + ux * 7);
+    ctx.lineTo(x + ux * 4, y + uy * 4);
+  }
+  ctx.stroke();
+}
+
+/** A breached lane: two edge lines with arrows through. */
+function laneMarker(ctx: CanvasRenderingContext2D, a: Vec2, b: Vec2, half: number): void {
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const nx = (-(b.y - a.y) / len) * half;
+  const ny = ((b.x - a.x) / len) * half;
+  ctx.beginPath();
+  ctx.moveTo(a.x + nx, a.y + ny);
+  ctx.lineTo(b.x + nx, b.y + ny);
+  ctx.moveTo(a.x - nx, a.y - ny);
+  ctx.lineTo(b.x - nx, b.y - ny);
+  ctx.stroke();
+  arrow(ctx, a, b);
+}

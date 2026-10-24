@@ -58,6 +58,8 @@ export class Entity {
   embarkedIn?: string;
   /** Simulation time this observer may call for fire again. */
   callForFireAt = -Infinity;
+  /** Smoke grenade salvos left. */
+  smokeLeft = 0;
   /** 0..1 suppression from incoming fire (decays). */
   suppression = 0;
   /** True while pinned down by fire (infantry). */

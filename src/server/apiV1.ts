@@ -447,7 +447,8 @@ export class ApiV1 {
         name: b.name as string | undefined,
         points: b.points.map((p, i) => this.point(p, `points[${i}]`)),
         force: b.force as ForceId | undefined,
-      });
+        density: b.density as number | undefined,
+      } as Command);
       return { status: 201, json: this.engine.graphics.get(res.id!) };
     });
     r.get(`${P}/graphics/{id}`, (req) => {
@@ -462,7 +463,8 @@ export class ApiV1 {
         id: req.params.id,
         name: b.name as string | undefined,
         points: Array.isArray(b.points) ? b.points.map((p, i) => this.point(p, `points[${i}]`)) : undefined,
-      });
+        density: b.density as number | undefined,
+      } as Command);
       return { json: this.engine.graphics.get(req.params.id) };
     });
     r.delete(`${P}/graphics/{id}`, (req) => {

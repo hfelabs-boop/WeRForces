@@ -293,6 +293,23 @@ class App {
     });
   }
 
+  /** Entity types of the entity, or of every member of the unit. */
+  private memberTypes(id: string): EntityTypeDef[] {
+    const u = this.unit(id);
+    return (u ? u.memberIds : [id]).map((m) => this.types.get(this.entity(m)?.typeId ?? '')).filter((t): t is EntityTypeDef => !!t);
+  }
+
+  /** True if the entity (or the unit's leader) is an engineer. */
+  canBreach(id: string): boolean {
+    const lead = this.unit(id)?.leaderId ?? id;
+    return !!this.types.get(this.entity(lead)?.typeId ?? '')?.breachTime;
+  }
+
+  /** True if the entity or a member of the unit has a weapon that fires smoke rounds. */
+  hasSmoke(id: string): boolean {
+    return this.memberTypes(id).some((t) => t.weapons.some((w) => this.catalog?.weapons.find((x) => x.id === w)?.smoke));
+  }
+
   /** Seats of an entity type (0 for non-carriers). */
   capacityOf(id: string | undefined): number {
     const e = id ? this.entity(id) : undefined;
@@ -1087,6 +1104,9 @@ class App {
       } else if (hitGraphic && (hitGraphic.kind === 'route' || hitGraphic.kind === 'phaseLine')) {
         add(`Follow route ${hitGraphic.name}`, () => this.task(sel, { type: 'followRoute', routeId: hitGraphic.id }));
         add(`Patrol route ${hitGraphic.name}`, () => this.task(sel, { type: 'patrol', routeId: hitGraphic.id }));
+      } else if (hitGraphic && (hitGraphic.kind === 'minefield' || hitGraphic.kind === 'obstacle') && this.canBreach(sel)) {
+        add(`Breach a lane through ${hitGraphic.name}`, () => this.task(sel, { type: 'breach', graphicId: hitGraphic.id }));
+        add('Move here', () => this.task(sel, { type: 'moveTo', target: world }));
       } else {
         add('Move here', () => this.task(sel, { type: 'moveTo', target: world }));
         if (this.passengerCount(sel) > 0) {
@@ -1096,6 +1116,7 @@ class App {
           });
         }
         if (this.hasIndirect(sel)) add('Fire mission here (3 rounds)', () => this.task(sel, { type: 'fireMission', target: world, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
+        if (this.hasSmoke(sel)) add('Smoke screen here (2 rounds)', () => this.task(sel, { type: 'fireMission', target: world, rounds: 2, radius: this.unit(sel) ? 60 : 0, smoke: true }));
         if (this.domainOf(sel) === 'air') add('Orbit here (2 km)', () => this.task(sel, { type: 'orbit', center: world, radius: 2000 }));
         add('Add "move here" to plan', () => this.addPlanStep(sel, { kind: 'task', task: { type: 'moveTo', target: world } }));
       }
@@ -1260,9 +1281,19 @@ class App {
         g.kind === 'area' ? 'Area' : g.kind === 'point' ? 'Location' : 'Length',
         g.kind === 'area' ? `${(area / 1e6).toFixed(2)} km²` : g.kind === 'point' ? fmtGrid(g.points[0].x, g.points[0].y) : `${(len / 1000).toFixed(2)} km`,
       ),
-      h('p', { class: 'hint', text: g.kind === 'route' || g.kind === 'phaseLine' ? 'Select an entity or unit, then right-click this route to follow or patrol it.' : g.kind === 'area' ? 'Areas can be used in plans: "wait until in area".' : '' }),
+      ...(g.kind === 'minefield' ? [this.densityEditor(g)] : []),
+      ...(g.kind === 'minefield' || g.kind === 'obstacle'
+        ? [h('div', { class: 'kv' }, 'Lanes', String(g.lanes?.length ?? 0), 'Known to', [g.force, ...(g.knownBy ?? [])].map((f) => FORCE_NAMES[f]).join(', '))]
+        : []),
+      h('p', { class: 'hint', text: GRAPHIC_HINTS[g.kind] }),
       h('div', { class: 'section row' }, h('button', { text: 'Center', onclick: () => this.centerOn(g.id) }), h('button', { class: 'danger', text: 'Delete', onclick: () => this.deleteSelected() })),
     );
+  }
+
+  private densityEditor(g: Graphic): HTMLElement {
+    const input = h('input', { type: 'number', min: '0.05', max: '5', step: '0.05', value: String(g.density ?? 0.5) }) as HTMLInputElement;
+    input.addEventListener('change', () => this.cmd({ cmd: 'updateGraphic', id: g.id, density: Number(input.value) }));
+    return h('div', { class: 'kv' }, 'Density', input);
   }
 
   private reactionsSection(id: string, isUnit: boolean): HTMLElement {
@@ -1812,3 +1843,12 @@ declare global {
 window.werforces = new App();
 
 export type { UnitTemplate };
+
+const GRAPHIC_HINTS: Record<GraphicKind, string> = {
+  route: 'Select an entity or unit, then right-click this route to follow or patrol it.',
+  phaseLine: 'Select an entity or unit, then right-click this line to follow or patrol it.',
+  area: 'Areas can be used in plans: "wait until in area".',
+  point: '',
+  minefield: 'Vehicles and troops crossing it may set off mines (density: chance per 100 m driven). Forces avoid it once they know it is there. Select engineers, then right-click it to breach a lane.',
+  obstacle: 'Vehicles cannot cross it; infantry climb through slowly. Select engineers, then right-click it to breach a lane.',
+};
