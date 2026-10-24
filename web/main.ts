@@ -18,6 +18,7 @@ import type {
   SimEvent,
   SimState,
   TaskSpec,
+  TerrainData,
   UnitSnapshot,
   UnitTemplate,
   Vec2,
@@ -27,6 +28,9 @@ import { Api } from './api.js';
 import { $, clear, fmtDeg, fmtGrid, fmtLatLon, fmtTime, h } from './dom.js';
 import { MapView } from './map.js';
 import { symbolCanvas } from './symbols.js';
+import type { View3D } from './view3d.js';
+import type { CotStatus as CotView } from '../src/integrations/cot.js';
+import type { Webhook as WebhookView } from '../src/integrations/webhooks.js';
 
 const ROE_LABELS: Record<Roe, string> = { fireAtWill: 'Fire at will', returnFire: 'Return fire', holdFire: 'Hold fire' };
 const FORMATIONS: Formation[] = ['column', 'line', 'wedge', 'vee', 'echelonRight'];
@@ -59,6 +63,9 @@ class App {
   frame: LocalFrame | null = null;
   grid: TerrainGrid | null = null;
   terrainVersion = -1;
+  terrainData: TerrainData | null = null;
+  view3d: View3D | null = null;
+  view: '2d' | '3d' | 'split' = '2d';
   selectedId: string | null = null;
   force: ForceId = 1;
   armed: string | null = null;
@@ -93,8 +100,9 @@ class App {
     this.bindToolbar();
     this.bindLeft();
     this.bindLog();
+    this.bindViews();
     setInterval(() => this.refreshPath(), 1000);
-    this.api.connect();
+    void this.api.ensureAuth().then(() => this.api.connect());
   }
 
   // ------------------------------------------------------------ server messages
@@ -112,11 +120,14 @@ class App {
     this.grid = TerrainGrid.fromData(data);
     this.frame = new LocalFrame(data.spec.origin.lat, data.spec.origin.lon);
     this.map.setTerrain(data);
+    this.terrainData = data;
+    if (this.view3d && this.grid && this.map.terrainImage) this.view3d.setTerrain(data, this.grid, this.map.terrainImage);
   }
 
   private onState(s: SimState): void {
     this.state = s;
     this.map.setState(s);
+    this.view3d?.setState(s);
     $('#sim-time').textContent = fmtTime(s.time);
     $('#scenario-name').textContent = s.scenarioName;
     const run = $('#btn-run');
@@ -164,6 +175,7 @@ class App {
     this.events.push(...evs.slice(start));
     if (this.events.length > LOG_LIMIT) this.events.splice(0, this.events.length - LOG_LIMIT);
     this.map.addEvents(evs);
+    this.view3d?.addEvents(evs);
     this.renderLog(evs);
   }
 
@@ -221,7 +233,14 @@ class App {
       e.stopPropagation();
       fileMenu.classList.toggle('open');
     });
+    const layersMenu = $('#layers-menu');
+    $('#btn-layers').addEventListener('click', (e) => {
+      e.stopPropagation();
+      layersMenu.classList.toggle('open');
+    });
+    layersMenu.querySelector('.menu-items')!.addEventListener('click', (e) => e.stopPropagation());
     document.addEventListener('click', () => {
+      layersMenu.classList.remove('open');
       fileMenu.classList.remove('open');
       $('#context-menu').classList.add('hidden');
     });
@@ -259,6 +278,7 @@ class App {
     document.querySelectorAll<HTMLInputElement>('[data-layer]').forEach((cb) =>
       cb.addEventListener('change', () => {
         (this.map.layers as unknown as Record<string, boolean>)[cb.dataset.layer!] = cb.checked;
+        if (cb.dataset.layer === 'labels' && this.view3d) this.view3d.labels = cb.checked;
         this.map.invalidate();
       }),
     );
@@ -292,6 +312,7 @@ class App {
   private modal(content: HTMLElement): () => void {
     const m = $('#modal');
     const body = $('#modal-body');
+    body.className = 'modal-body';
     clear(body);
     body.append(content);
     m.classList.remove('hidden');
@@ -375,6 +396,190 @@ class App {
     document.body.append(a);
     a.click();
     a.remove();
+  }
+
+  // ------------------------------------------------------------ 2D / 3D views
+
+  private bindViews(): void {
+    document.querySelectorAll<HTMLButtonElement>('#view-seg button').forEach((b) => b.addEventListener('click', () => void this.setView(b.dataset.view as '2d')));
+    $('#btn-integrations').addEventListener('click', () => this.integrationsDialog());
+  }
+
+  async setView(view: '2d' | '3d' | 'split'): Promise<void> {
+    this.view = view;
+    document.querySelectorAll<HTMLButtonElement>('#view-seg button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+    $('#map-wrap').className = `view-${view}`;
+    if (view !== '2d' && !this.view3d) {
+      // Load three.js and create the WebGL view on first use.
+      const { View3D } = await import('./view3d.js');
+      if (this.view3d) return this.setView(view);
+      this.view3d = new View3D($('#view3d'), {
+        select: (id) => this.select(id),
+        contextMenu: (w, c, hit) => this.contextMenu(w, c, hit),
+      });
+      if (this.terrainData && this.grid && this.map.terrainImage) this.view3d.setTerrain(this.terrainData, this.grid, this.map.terrainImage);
+      if (this.state) this.view3d.setState(this.state);
+      this.view3d.setSelected(this.selectedId);
+    }
+    this.view3d?.setVisible(view !== '2d');
+    if (this.view3d) this.view3d.labels = this.map.layers.labels;
+    this.map.invalidate();
+  }
+
+  // ------------------------------------------------------------ integrations dialog
+
+  private async integrationsDialog(): Promise<void> {
+    let close = () => {};
+    const origin = location.origin;
+    const keyArg = this.api.key ? ` --header "Authorization: Bearer ${this.api.key}"` : '';
+    const snippet = (text: string) => h('pre', { class: 'snippet', text });
+    const status = await this.api.v1<{ cot: CotView; webhooks: WebhookView[] }>('GET', '/integrations').catch((e: Error) => {
+      this.toast(e.message);
+      return null;
+    });
+    if (!status) return;
+
+    // --- CoT
+    const cotEnabled = h('input', { type: 'checkbox', checked: status.cot.enabled }) as HTMLInputElement;
+    const cotUrl = h('input', { type: 'text', value: status.cot.url }) as HTMLInputElement;
+    const cotInterval = h('input', { type: 'number', value: String(status.cot.interval), min: '0.2', step: '0.5', style: 'width:70px' }) as HTMLInputElement;
+    const cotRemote = h('input', { type: 'checkbox', checked: status.cot.includeRemote }) as HTMLInputElement;
+    const cotStatus = h('div', { class: 'hint' });
+    const showCot = (c: CotView) =>
+      (cotStatus.textContent = `${c.enabled ? (c.connected ? 'Streaming' : 'Connecting…') : 'Off'} · ${c.eventsSent} events sent${c.errors ? ` · ${c.errors} errors (${c.lastError ?? ''})` : ''}`);
+    showCot(status.cot);
+
+    // --- Webhooks
+    const hookList = h('div', { class: 'int-list' });
+    const renderHooks = (hooks: WebhookView[]) => {
+      clear(hookList);
+      if (!hooks.length) hookList.append(h('div', { class: 'hint', text: 'No webhooks yet.' }));
+      for (const w of hooks) {
+        hookList.append(
+          h(
+            'div',
+            { class: 'item' },
+            h('span', { text: `${w.name} · ${w.format} · ${w.kinds.join(', ')}`, title: w.url }),
+            h('span', { class: 'hint', text: `${w.delivered} sent${w.failed ? ` · ${w.failed} failed${w.lastError ? ` (${w.lastError})` : ''}` : ''}` }),
+            h('button', {
+              text: 'Test',
+              onclick: async () => {
+                try {
+                  await this.api.v1('POST', `/webhooks/${w.id}/test`);
+                  renderHooks(await this.api.v1<WebhookView[]>('GET', '/webhooks'));
+                } catch (e) {
+                  this.toast((e as Error).message);
+                }
+              },
+            }),
+            h('button', {
+              class: 'danger',
+              text: 'Remove',
+              onclick: async () => {
+                await this.api.v1('DELETE', `/webhooks/${w.id}`);
+                renderHooks(await this.api.v1<WebhookView[]>('GET', '/webhooks'));
+              },
+            }),
+          ),
+        );
+      }
+    };
+    renderHooks(status.webhooks);
+    const hookUrl = h('input', { type: 'text', placeholder: 'https://hooks.slack.com/services/… or your endpoint' }) as HTMLInputElement;
+    const hookFormat = h('select', {}, ['json', 'slack', 'discord'].map((f) => h('option', { value: f, text: f }))) as HTMLSelectElement;
+    hookUrl.addEventListener('input', () => {
+      if (/hooks\.slack\.com/.test(hookUrl.value)) hookFormat.value = 'slack';
+      else if (/discord(app)?\.com\/api\/webhooks/.test(hookUrl.value)) hookFormat.value = 'discord';
+    });
+    const kindNames = ['detonation', 'damaged', 'destroyed', 'detected', 'task', 'info', 'fire', 'created', 'deleted'];
+    const defaultKinds = new Set(['damaged', 'destroyed', 'task', 'info']);
+    const kindBoxes = kindNames.map((k) => [k, h('input', { type: 'checkbox', checked: defaultKinds.has(k) }) as HTMLInputElement] as const);
+
+    const gis = (label: string, path: string) => h('a', { href: this.api.link(`/api/v1/export/${path}`), target: '_blank', text: label });
+
+    close = this.modal(
+      h(
+        'div',
+        {},
+        h('h3', { text: 'Integrations' }),
+        h(
+          'div',
+          { class: 'int-section' },
+          h('h4', { text: 'REST API' }),
+          h('div', { class: 'hint', text: 'Resource-oriented API for entities, units, graphics, tasks, plans, terrain queries and exports.' }),
+          h('div', { class: 'int-row' }, h('a', { href: this.api.link('/api/docs'), target: '_blank', text: 'API reference' }), h('a', { href: this.api.link('/api/v1/openapi.json'), target: '_blank', text: 'openapi.json' })),
+          snippet(`curl -s ${origin}/api/v1/simulation${this.api.key ? ` -H "Authorization: Bearer ${this.api.key}"` : ''}`),
+        ),
+        h(
+          'div',
+          { class: 'int-section' },
+          h('h4', { text: 'MCP (AI agents)' }),
+          h('div', { class: 'hint', text: 'Let Claude or another MCP client inspect and command the simulation. Streamable HTTP endpoint:' }),
+          snippet(`claude mcp add --transport http werforces ${origin}/mcp${keyArg}`),
+          h('div', { class: 'hint', text: 'Or as a stdio server (e.g. Claude Desktop config):' }),
+          snippet(
+            JSON.stringify(
+              { mcpServers: { werforces: { command: 'node', args: ['/path/to/WeRForces/dist/mcp/stdio.js', '--url', origin, ...(this.api.key ? ['--api-key', this.api.key] : [])] } } },
+              null,
+              2,
+            ),
+          ),
+        ),
+        h(
+          'div',
+          { class: 'int-section' },
+          h('h4', { text: 'TAK / Cursor-on-Target' }),
+          h('div', { class: 'hint', text: 'Stream entity positions to ATAK/WinTAK (UDP multicast, default 239.2.3.1:6969) or a TAK Server TCP input (tcp://host:8087).' }),
+          h('div', { class: 'int-row' }, h('label', {}, cotEnabled, ' enabled'), cotUrl),
+          h('div', { class: 'int-row' }, 'every', cotInterval, 's', h('label', {}, cotRemote, ' include DIS remote entities'), h('span', { class: 'spacer' }),
+            h('button', {
+              class: 'primary',
+              text: 'Apply',
+              onclick: async () => {
+                try {
+                  showCot(await this.api.v1<CotView>('PUT', '/integrations/cot', { enabled: cotEnabled.checked, url: cotUrl.value.trim(), interval: Number(cotInterval.value), includeRemote: cotRemote.checked }));
+                  this.toast('CoT settings applied', true);
+                } catch (e) {
+                  this.toast((e as Error).message);
+                }
+              },
+            }),
+          ),
+          cotStatus,
+        ),
+        h(
+          'div',
+          { class: 'int-section' },
+          h('h4', { text: 'Webhooks' }),
+          h('div', { class: 'hint', text: 'POST batched simulation events to Slack, Discord or any HTTP endpoint.' }),
+          hookList,
+          h('div', { class: 'int-row' }, hookUrl, hookFormat,
+            h('button', {
+              text: 'Add',
+              onclick: async () => {
+                try {
+                  await this.api.v1('POST', '/webhooks', { url: hookUrl.value.trim(), format: hookFormat.value, kinds: kindBoxes.filter(([, b]) => b.checked).map(([k]) => k) });
+                  hookUrl.value = '';
+                  renderHooks(await this.api.v1<WebhookView[]>('GET', '/webhooks'));
+                } catch (e) {
+                  this.toast((e as Error).message);
+                }
+              },
+            }),
+          ),
+          h('div', { class: 'kinds' }, kindBoxes.map(([k, b]) => h('label', {}, b, ` ${k}`))),
+        ),
+        h(
+          'div',
+          { class: 'int-section' },
+          h('h4', { text: 'GIS export' }),
+          h('div', { class: 'hint', text: 'Live feeds for QGIS, Google Earth, ArcGIS or web maps.' }),
+          h('div', { class: 'int-row' }, gis('entities.geojson', 'entities.geojson'), gis('graphics.geojson', 'graphics.geojson'), gis('scene.kml', 'scene.kml'), gis('Google Earth live link (.kml)', 'live.kml')),
+        ),
+        h('div', { class: 'row' }, h('span', { class: 'spacer' }), h('button', { text: 'Close', onclick: () => close() })),
+      ),
+    );
+    $('#modal-body').classList.add('wide');
   }
 
   private async saveOnServer(): Promise<void> {
@@ -529,6 +734,7 @@ class App {
   select(id: string | null): void {
     this.selectedId = id;
     this.map.selectedId = id;
+    this.view3d?.setSelected(id);
     this.map.selectedPath = [];
     this.map.selectedRanges = this.rangesFor(id);
     this.map.invalidate();
@@ -571,6 +777,7 @@ class App {
     const g = this.graphic(id);
     const p = e ?? (u ? (this.entity(u.leaderId) ?? u) : g?.points[0]);
     if (p) this.map.centerOn(p);
+    if (this.view !== '2d') this.view3d?.focus(id);
   }
 
   private async deleteSelected(): Promise<void> {

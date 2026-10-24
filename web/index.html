@@ -44,18 +44,28 @@
         <button data-draw="point" title="Place point">Point</button>
       </div>
       <div class="sep"></div>
-      <div class="layers">
-        <label><input type="checkbox" data-layer="labels" checked /> Labels</label>
-        <label><input type="checkbox" data-layer="grid" checked /> Grid</label>
-        <label><input type="checkbox" data-layer="contacts" checked /> Contacts</label>
-        <label><input type="checkbox" data-layer="ranges" /> Ranges</label>
-        <label><input type="checkbox" data-layer="paths" checked /> Paths</label>
-        <select id="sel-aggregate" title="Unit display">
-          <option value="auto">Units: auto</option>
-          <option value="units">Units: aggregate</option>
-          <option value="entities">Units: entities</option>
-        </select>
+      <div class="menu" id="layers-menu">
+        <button id="btn-layers">Layers ▾</button>
+        <div class="menu-items layers">
+          <label><input type="checkbox" data-layer="labels" checked /> Labels</label>
+          <label><input type="checkbox" data-layer="grid" checked /> Grid</label>
+          <label><input type="checkbox" data-layer="contacts" checked /> Sensor contacts</label>
+          <label><input type="checkbox" data-layer="ranges" /> Weapon/sensor ranges</label>
+          <label><input type="checkbox" data-layer="paths" checked /> Planned paths</label>
+          <select id="sel-aggregate" title="Unit display">
+            <option value="auto">Units: auto</option>
+            <option value="units">Units: aggregate</option>
+            <option value="entities">Units: entities</option>
+          </select>
+        </div>
       </div>
+      <div class="sep"></div>
+      <div class="seg" id="view-seg" title="Map view">
+        <button data-view="2d" class="active">2D</button>
+        <button data-view="3d">3D</button>
+        <button data-view="split">Split</button>
+      </div>
+      <button id="btn-integrations" title="API, MCP, TAK, webhooks and GIS export">Integrations</button>
       <div class="spacer"></div>
       <span id="dis-status" class="pill">DIS off</span>
       <span id="conn-status" class="pill bad">offline</span>
@@ -85,9 +95,9 @@
         </section>
       </aside>
 
-      <div id="map-wrap">
-        <div id="map"></div>
-        <div id="cursor-readout"></div>
+      <div id="map-wrap" class="view-2d">
+        <div id="map-pane"><div id="map"></div><div id="cursor-readout"></div></div>
+        <div id="view3d"></div>
       </div>
 
       <aside id="right">

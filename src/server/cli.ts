@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util';
 import { createUdpTransport, DisGateway } from '../dis/gateway.js';
 import { Engine } from '../sim/engine.js';
 import type { ScenarioFile } from '../shared/types.js';
+import { IntegrationHub, type IntegrationOptions } from '../integrations/hub.js';
 import { SimRunner } from './runner.js';
 import { SimServer } from './server.js';
 
@@ -28,9 +29,17 @@ Options:
       --exercise <n>          DIS exercise id (default 1)
       --site <n>              DIS site id (default 1)
       --application <n>       DIS application id (default 3001)
+      --api-key <key>         Require this key on /api, /ws and /mcp (or env WERFORCES_API_KEY)
+      --cors <origin>         Allow cross-origin browser access from an origin ('*' for any); repeatable
+      --cot <url>             Stream Cursor-on-Target to TAK: udp://239.2.3.1:6969 or tcp://host:8087
+      --cot-interval <s>      Seconds between CoT position reports (default 2)
+      --webhook <url>         POST simulation events to a URL (Slack/Discord URLs get chat formatting); repeatable
       --headless              No web server; run the scenario and print events
       --duration <s>          Headless only: simulated seconds to run as fast as possible
   -h, --help                  Show this help
+
+MCP: the server exposes an MCP endpoint at /mcp (streamable HTTP). For stdio clients run
+\`werforces-mcp --url http://127.0.0.1:8080\`.
 `;
 
 function projectRoot(): string {
@@ -68,6 +77,11 @@ async function main(): Promise<void> {
       exercise: { type: 'string', default: '1' },
       site: { type: 'string', default: '1' },
       application: { type: 'string', default: '3001' },
+      'api-key': { type: 'string', default: process.env.WERFORCES_API_KEY },
+      cors: { type: 'string', multiple: true },
+      cot: { type: 'string' },
+      'cot-interval': { type: 'string', default: '2' },
+      webhook: { type: 'string', multiple: true },
       headless: { type: 'boolean', default: false },
       duration: { type: 'string' },
       help: { type: 'boolean', short: 'h', default: false },
@@ -118,7 +132,19 @@ async function main(): Promise<void> {
   runner.setRunning(values.run || values.headless);
   runner.start();
 
+  const integrations: IntegrationOptions = {
+    cot: values.cot ? { enabled: true, url: values.cot, interval: Number(values['cot-interval']) } : undefined,
+    webhooks: (values.webhook ?? []).map((url) => ({
+      url,
+      format: /hooks\.slack\.com/.test(url) ? 'slack' : /discord(app)?\.com\/api\/webhooks/.test(url) ? 'discord' : 'json',
+    })),
+  };
+  if (values.cot) console.log(`Cursor-on-Target: ${values.cot}`);
+  for (const w of integrations.webhooks ?? []) console.log(`Webhook (${w.format}): ${w.url}`);
+
   if (values.headless) {
+    const hub = new IntegrationHub(runner, integrations);
+    process.on('exit', () => hub.close());
     engine.on('event', (ev) => {
       if (ev.kind !== 'fire') console.log(`${fmtTime(ev.time)}  ${ev.kind.padEnd(10)} ${ev.text}`);
     });
@@ -129,9 +155,13 @@ async function main(): Promise<void> {
       host: values.host!,
       webRoot: path.join(root, 'dist', 'web'),
       scenarioDir,
+      apiKey: values['api-key'] || undefined,
+      corsOrigins: values.cors,
+      integrations,
     });
     await server.listen();
     console.log(`WeRForces running at ${server.address}  (scenario: ${engine.scenarioName})`);
+    console.log(`  REST API docs ${server.address}/api/docs  ·  MCP endpoint ${server.address}/mcp${values['api-key'] ? '  ·  API key required' : ''}`);
   }
   const shutdown = () => {
     runner.stop();

@@ -74,12 +74,12 @@ describe('HTTP and WebSocket API', () => {
 
   it('accepts commands over REST', async () => {
     const town = terrain.towns[1];
-    const r = await fetch(`${base}/api/command`, { method: 'POST', body: JSON.stringify({ cmd: 'createEntity', typeId: 'ru-bmp2', force: 2, x: town.x, y: town.y }) });
+    const r = await fetch(`${base}/api/command`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cmd: 'createEntity', typeId: 'ru-bmp2', force: 2, x: town.x, y: town.y }) });
     expect(r.status).toBe(200);
     const body = await r.json();
     expect(body.ok).toBe(true);
     expect(engine.entities.has(body.id)).toBe(true);
-    const bad = await fetch(`${base}/api/command`, { method: 'POST', body: '{not json' });
+    const bad = await fetch(`${base}/api/command`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{not json' });
     expect(bad.status).toBe(400);
   });
 

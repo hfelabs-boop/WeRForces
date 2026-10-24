@@ -45,7 +45,7 @@ export class MapView {
   private ctx: CanvasRenderingContext2D;
   terrain: TerrainData | null = null;
   grid: TerrainGrid | null = null;
-  private terrainImage: HTMLCanvasElement | null = null;
+  terrainImage: HTMLCanvasElement | null = null;
   state: SimState | null = null;
   private entityById = new Map<string, EntitySnapshot>();
   private unitById = new Map<string, UnitSnapshot>();

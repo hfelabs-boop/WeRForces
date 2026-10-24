@@ -8,12 +8,16 @@ cpSync('web/index.html', 'dist/web/index.html');
 cpSync('web/style.css', 'dist/web/style.css');
 
 const opts = {
-  entryPoints: ['web/main.ts'],
+  entryPoints: { app: 'web/main.ts' },
   bundle: true,
   format: 'esm',
+  // The 3D view (three.js) is loaded on demand as a separate chunk.
+  splitting: true,
+  minify: !watch,
   target: 'es2022',
   sourcemap: true,
-  outfile: 'dist/web/app.js',
+  outdir: 'dist/web',
+  chunkNames: 'chunks/[name]-[hash]',
   logLevel: 'info',
 };
 

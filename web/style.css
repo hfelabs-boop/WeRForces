@@ -125,18 +125,24 @@ input[type='search'] {
 }
 
 .sim-controls,
-.tools,
-.layers {
+.tools {
   display: flex;
   gap: 6px;
   align-items: center;
 }
 
-.layers label {
-  color: var(--muted);
+.menu.open .menu-items.layers {
   display: flex;
-  gap: 3px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.layers label {
+  display: flex;
+  gap: 6px;
   align-items: center;
+  white-space: nowrap;
 }
 
 .sim-time {
@@ -234,9 +240,74 @@ aside {
   min-height: 0;
 }
 
+#map-pane,
+#view3d {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
 #map {
   position: absolute;
   inset: 0;
+}
+
+.view-2d #map-pane {
+  left: 0;
+  right: 0;
+}
+
+.view-2d #view3d {
+  display: none;
+}
+
+.view-3d #map-pane {
+  display: none;
+}
+
+.view-3d #view3d {
+  left: 0;
+  right: 0;
+}
+
+.view-split #map-pane {
+  left: 0;
+  right: 50%;
+  border-right: 1px solid var(--border);
+}
+
+.view-split #view3d {
+  left: 50%;
+  right: 0;
+}
+
+.view3d-canvas {
+  display: block;
+}
+
+.view3d-bar {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: rgba(10, 14, 20, 0.72);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.view3d-bar label {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.view3d-bar .hint {
+  font-size: 11px;
 }
 
 .map-canvas {
@@ -694,4 +765,73 @@ aside {
   background: #1d3a2a;
   border-color: #2c6e45;
   color: #d0ffe0;
+}
+
+/* ------------------------------------------------ integrations dialog */
+
+.modal-body.wide {
+  max-width: 760px;
+  width: 92vw;
+}
+
+.int-section {
+  border-top: 1px solid var(--border);
+  padding: 10px 0;
+}
+
+.int-section h4 {
+  margin: 0 0 6px;
+}
+
+pre.snippet {
+  background: #11151a;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+.int-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 4px 0;
+}
+
+.int-row input[type='text'] {
+  flex: 1;
+  min-width: 220px;
+}
+
+.int-list {
+  margin: 6px 0;
+}
+
+.int-list .item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.int-list .item span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
 }

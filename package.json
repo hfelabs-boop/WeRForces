@@ -5,7 +5,8 @@
   "private": true,
   "type": "module",
   "bin": {
-    "werforces": "dist/server/cli.js"
+    "werforces": "dist/server/cli.js",
+    "werforces-mcp": "dist/mcp/stdio.js"
   },
   "scripts": {
     "build": "npm run build:server && npm run build:web",
@@ -16,16 +17,21 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "scenarios": "tsx scripts/make-scenarios.ts",
-    "check": "npm run typecheck && npm test && npm run build"
+    "check": "npm run typecheck && npm test && npm run build",
+    "mcp": "node dist/mcp/stdio.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "ws": "^8.22.0"
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "three": "^0.186.1",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "@types/three": "^0.186.0",
     "@types/ws": "^8.18.2",
     "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
