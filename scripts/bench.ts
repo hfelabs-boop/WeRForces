@@ -29,7 +29,7 @@ const callersOf = args.includes('--callers') ? args[args.indexOf('--callers') + 
 
 /** Subsystem of a profile frame, or null to charge the time to its caller. */
 function subsystem(fn: string, url: string): string | null {
-  const file = url.slice(url.lastIndexOf('/') + 1).replace(/\?.*$/, '');
+  const file = url.slice(url.lastIndexOf('/') + 1).replace(/\?.*$/, '').replace(/\.js$/, '.ts');
   if (fn === '(garbage collector)') return 'gc';
   if (file === 'terrain.ts') {
     if (/lineOfSight|clearAbove|obstacleTops/.test(fn)) return 'line of sight';

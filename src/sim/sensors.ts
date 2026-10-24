@@ -8,6 +8,7 @@ import { LAND_COVER } from '../shared/terrainGrid.js';
 import type { Vec3 } from '../shared/types.js';
 import { sensorRange } from './environment.js';
 import { spotFactor } from './morale.js';
+import { sensorSight } from './sightcache.js';
 
 export const SENSOR_INTERVAL = 1;
 const CONTACT_TIMEOUT = 15;
@@ -70,8 +71,8 @@ export function updateSensors(engine: Engine, observer: Entity): void {
           if (off > s.fov / 2) continue;
         }
         aim ??= { x: target.x, y: target.y, z: target.z + Math.min(2, target.type.sensorHeight || 2) };
-        if (s.radar) radarSight ??= engine.lineOfSight(eye, aim, true);
-        else sight ??= engine.lineOfSight(eye, aim, false);
+        if (s.radar) radarSight ??= sensorSight(engine, observer, target, eye, aim, true, range);
+        else sight ??= sensorSight(engine, observer, target, eye, aim, false, range);
         if (!(s.radar ? radarSight : sight)) continue;
         if (!engine.rng.chance(detectionProbability(engine, observer, target, range, maxRange, !!s.radar))) continue;
         recordContact(engine, observer, target, now);
