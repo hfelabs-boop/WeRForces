@@ -7,6 +7,7 @@
 //   npx tsx scripts/bench.ts 5000 --seconds 120     one size, longer run (default 60 s after 30 s warm-up)
 //   npx tsx scripts/bench.ts 5000 --no-profile      timing only (no CPU profiler)
 //   npx tsx scripts/bench.ts 5000 --sim-only        no recorder and no snapshots
+//   npx tsx scripts/bench.ts 2000 --min 1           exit with an error below 1x real time (CI)
 
 import { Session } from 'node:inspector/promises';
 import { Recorder } from '../src/sim/recorder.js';
@@ -18,12 +19,15 @@ const option = (name: string, def: number) => {
   const i = args.indexOf(name);
   return i >= 0 ? Number(args[i + 1]) : def;
 };
-const sizes = args.filter((a, i) => /^\d+$/.test(a) && !args[i - 1]?.startsWith('--')).map(Number);
+const valued = ['--seconds', '--warmup', '--callers', '--min'];
+const sizes = args.filter((a, i) => /^\d+$/.test(a) && !valued.includes(args[i - 1])).map(Number);
 const seconds = option('--seconds', 60);
 /** Simulated seconds before measuring: the first routes, civilians setting off, first contacts. */
 const warmup = option('--warmup', 30);
 const profile = !flag('--no-profile');
 const simOnly = flag('--sim-only');
+/** Fail (exit code 1) when a size runs slower than this many times real time. */
+const minSpeed = option('--min', 0);
 /** `--callers <subsystem>`: also list the call chains that spend that subsystem's time. */
 const callersOf = args.includes('--callers') ? args[args.indexOf('--callers') + 1] : undefined;
 
@@ -153,7 +157,11 @@ for (const n of sizes.length ? sizes : [1000, 2000, 5000]) {
       `${(seconds / wall).toFixed(2)}x real time, ${((wall * 1000) / seconds).toFixed(1)} ms per simulated second` +
       `${simOnly ? ' (simulation only)' : `, state ${(snapshotBytes / 1e6).toFixed(2)} MB at ${(states / seconds).toFixed(1)} Hz`}`,
   );
-  console.log(`       setup ${(setupMs / 1000).toFixed(1)} s; after ${seconds + warmup + 1} s: ${alive.length} alive, losses blue ${lost(1)} red ${lost(2)}, ${Math.round(contacts / Math.max(1, alive.length))} contacts per entity`);
+  if (seconds / wall < minSpeed) {
+    console.log(`       slower than the required ${minSpeed}x real time`);
+    process.exitCode = 1;
+  }
+  console.log(`       setup ${(setupMs / 1000).toFixed(1)} s; after ${seconds + warmup + 1} s: ${alive.length} alive, losses blue ${lost(1)} red ${lost(2)}, ${Math.round(contacts / Math.max(1, alive.length))} contacts per entity, ${Math.round(process.memoryUsage().rss / 1e6)} MB resident`);
   if (prof) {
     const rows = breakdown(prof);
     const total = rows.reduce((s, [, us]) => s + us, 0);

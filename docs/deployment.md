@@ -153,15 +153,20 @@ thread of its own. The simulation steps in slices of at most 15 ms, so the serve
 answering requests and the WebSocket keeps streaming even when a big scenario
 cannot keep up with its time scale. Then the clock simply runs slower than
 asked: `GET /api/v1/simulation` reports `load` (the share of wall time spent
-simulating; near 1 means flat out). `npm run bench -- 500 1000 2000` shows what a
-machine can do; on a typical laptop core:
+simulating; near 1 means flat out). `npm run bench` shows what a machine can do
+with a mixed battle (formations advancing and fighting, aircraft, civilians),
+the recorder on and a GUI connected; on one core of a typical server:
 
-| Entities | Real-time factor |
-| --- | --- |
-| 100 | ~300× |
-| 500 | ~50× |
-| 1000 | ~20× |
-| 2000 | ~6× |
+| Entities | Real-time factor | Simulation only | State to the GUI | Resident memory |
+| --- | --- | --- | --- | --- |
+| 1,000 | ~10× | ~25× | 0.6 MB at 10 Hz | ~230 MB |
+| 2,000 | ~4× | ~7× | 1.2 MB at 5 Hz | ~290 MB |
+| 5,000 | ~1.3× | ~1.5× | 3 MB at 2 Hz | ~460 MB |
+
+Big scenarios get fewer state updates rather than a slower clock: a broadcast
+may take at most a tenth of the server's time. Plan one core per session of
+5,000 entities, plus about 25 Mbit/s per connected GUI. The first half minute
+of a scenario is slower while routes are planned and civilians set off.
 
 Memory is dominated by the recording: about 32 bytes per entity per recorded
 second, capped at 256 MB (the frame rate halves when the cap is reached).
