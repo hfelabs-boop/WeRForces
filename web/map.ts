@@ -537,6 +537,7 @@ export class MapView {
     this.drawNight();
     this.drawViewshed();
     this.drawJammers();
+    this.drawDfContacts();
     this.drawSmoke();
     this.drawGraphics();
     this.drawSelectionOverlays();
@@ -794,6 +795,51 @@ export class MapView {
       ctx.fill();
       ctx.stroke();
       ctx.setLineDash([]);
+    }
+  }
+
+  /**
+   * Emitters located by direction finding: the uncertainty ellipse, dashed in the colour of
+   * the force that found them, and a small diamond at the best estimate with what it radiates.
+   */
+  private drawDfContacts(): void {
+    const list = this.state?.dfContacts;
+    if (!list?.length) return;
+    const ctx = this.ctx;
+    const now = this.state!.time;
+    for (const c of list) {
+      const p = this.toScreen(c);
+      const col = FORCE_COLORS[c.force].fill;
+      const fade = Math.max(0.35, 1 - (now - c.lastSeen) / 30);
+      ctx.globalAlpha = fade;
+      ctx.beginPath();
+      // Screen y points south: a bearing θ (clockwise from north) is the screen angle θ - 90°.
+      ctx.ellipse(p.x, p.y, Math.max(3, c.major * this.scale), Math.max(2, c.minor * this.scale), c.orientation - Math.PI / 2, 0, Math.PI * 2);
+      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = col;
+      ctx.fillStyle = 'rgba(255,200,60,0.08)';
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const r = 6;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y - r);
+      ctx.lineTo(p.x + r, p.y);
+      ctx.lineTo(p.x, p.y + r);
+      ctx.lineTo(p.x - r, p.y);
+      ctx.closePath();
+      ctx.fillStyle = '#ffc83c';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+      ctx.fill();
+      ctx.stroke();
+      if (this.layers.labels) {
+        const what = c.bands.length ? c.bands.join('+') : 'emitter';
+        const pm = c.major >= 1000 ? `${(c.major / 1000).toFixed(1)} km` : `${Math.round(c.major)} m`;
+        label(ctx, `DF ${what} ±${pm}${c.stations > 1 ? ` (${c.stations} stations)` : ''}`, p.x + r + 4, p.y, '#ffd877', '10px system-ui');
+      }
+      ctx.globalAlpha = 1;
     }
   }
 
