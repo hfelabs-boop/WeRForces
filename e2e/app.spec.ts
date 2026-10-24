@@ -69,6 +69,38 @@ test('place an entity from the palette and order it to move', async ({ page }) =
   expect((page as unknown as { errors: string[] }).errors).toEqual([]);
 });
 
+test('undo and redo an edit, select several things and measure', async ({ page }) => {
+  await ready(page, OPEN);
+  const before = (await api('/api/v1/entities')).length;
+  await page.click('.palette-item[data-key="type:us-m1a2"]');
+  const spot = await dryLand(page, 8000, 6000);
+  const at = await mapPoint(page, spot.x, spot.y);
+  await page.mouse.click(at.x, at.y);
+  await expect.poll(async () => (await api('/api/v1/entities')).length).toBe(before + 1);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+z');
+  await expect.poll(async () => (await api('/api/v1/entities')).length).toBe(before);
+  await page.keyboard.press('Control+y');
+  await expect.poll(async () => (await api('/api/v1/entities')).length).toBe(before + 1);
+  // Shift+click two units: a group inspector.
+  const units = (await api('/api/v1/units?force=blue')).slice(0, 2);
+  await page.evaluate(([a, b]) => {
+    const w = (window as unknown as Win).werforces;
+    w.select(a);
+    w.toggleSelect(b);
+  }, [units[0].id, units[1].id]);
+  await expect(page.locator('#inspector h3')).toHaveText('2 selected');
+  // Measure: two points give a distance and a line-of-sight answer.
+  await page.click('#btn-measure');
+  const p1 = await mapPoint(page, spot.x, spot.y);
+  const p2 = await mapPoint(page, spot.x + 1500, spot.y);
+  await page.mouse.click(p1.x, p1.y);
+  await page.mouse.click(p2.x, p2.y);
+  await expect.poll(() => page.evaluate(() => (window as unknown as Win).werforces.map.mode.los)).not.toBeUndefined();
+  await page.keyboard.press('Escape');
+  expect((page as unknown as { errors: string[] }).errors).toEqual([]);
+});
+
 test('run, then review the recording in the AAR', async ({ page }) => {
   await api('/api/v1/simulation/step', 'POST', { seconds: 240 });
   await ready(page, OPEN);

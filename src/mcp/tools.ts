@@ -536,10 +536,11 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'manage_scenario',
-    'List, load or save scenarios stored on the server, or start an empty one.',
-    { action: z.enum(['list', 'load', 'save', 'new']), name: z.string().optional() },
+    'List, load or save scenarios stored on the server, start an empty one, or undo/redo the last edit (up to 30 steps).',
+    { action: z.enum(['list', 'load', 'save', 'new', 'undo', 'redo']), name: z.string().optional() },
     async ({ action, name }) => {
       if (action === 'list') return api('GET', '/api/v1/scenarios');
+      if (action === 'undo' || action === 'redo') return api('POST', `/api/v1/scenario/${action}`);
       if (action === 'new') return api('POST', '/api/v1/scenario/new', { name: name ?? 'Untitled' });
       if (!name) throw new Error(`${action} needs a name`);
       if (action === 'load') return api('POST', `/api/v1/scenarios/${encodeURIComponent(name)}/load`);

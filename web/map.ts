@@ -10,10 +10,16 @@ export type MapMode =
   | { kind: 'place'; label: string; onPlace: (p: Vec2) => void }
   | { kind: 'draw'; graphic: GraphicKind; points: Vec2[]; onDone: (pts: Vec2[]) => void }
   | { kind: 'pickPoint'; label: string; onPick: (p: Vec2) => void }
-  | { kind: 'pickEntity'; label: string; onPick: (id: string) => void };
+  | { kind: 'pickEntity'; label: string; onPick: (id: string) => void }
+  /** Distance and bearing along clicked points; with two points, line of sight between them. */
+  | { kind: 'measure'; points: Vec2[]; los?: boolean | null };
 
 export interface MapCallbacks {
   select(id: string | null): void;
+  /** Shift-click: add to or remove from the selection. */
+  toggleSelect(id: string): void;
+  /** Shift-drag box: select these (added to the selection). */
+  selectMany(ids: string[]): void;
   contextMenu(world: Vec2, client: { x: number; y: number }, hitId: string | null): void;
   hover(world: Vec2 | null): void;
   dragEntity(id: string, world: Vec2): void;
@@ -52,6 +58,8 @@ export class MapView {
   private entityById = new Map<string, EntitySnapshot>();
   private unitById = new Map<string, UnitSnapshot>();
   selectedId: string | null = null;
+  /** Everything selected (multi-selection), including selectedId. */
+  selectedIds = new Set<string>();
   selectedPath: Vec2[] = [];
   mode: MapMode = { kind: 'select' };
   layers: MapLayers = { labels: true, grid: true, contacts: true, ranges: false, paths: true, aggregate: 'auto' };
@@ -68,7 +76,7 @@ export class MapView {
   private effects: Effect[] = [];
   private dirty = true;
   private mouse: { x: number; y: number } | null = null;
-  private drag: { startX: number; startY: number; cx: number; cy: number; entityId?: string; moved: boolean; button: number } | null = null;
+  private drag: { startX: number; startY: number; cx: number; cy: number; entityId?: string; moved: boolean; button: number; box?: boolean } | null = null;
 
   constructor(
     readonly container: HTMLElement,
@@ -97,6 +105,12 @@ export class MapView {
     this.buildingBuckets = bucketBuildings(data.buildings ?? []);
     this.fit();
   }
+
+  /** Line of sight between two ground points, eyes 2 m up (set by the app). */
+  losCheck: (a: Vec2, b: Vec2) => Promise<boolean | null> = async () => null;
+
+  /** The entity type's 2525 SIDC pattern (set by the app from the catalog). */
+  sidcOf: (typeId: string) => string | undefined = () => undefined;
 
   /** Buildings grouped into square buckets, for drawing only those in view. */
   private buildingBuckets = new Map<string, Building[]>();
@@ -318,6 +332,21 @@ export class MapView {
         }
         return;
       }
+      if (m.kind === 'measure') {
+        m.points.push(world);
+        m.los = undefined;
+        if (m.points.length === 2) {
+          const [a, b] = m.points;
+          void this.losCheck(a, b).then((v) => {
+            if (this.mode === m && m.points.length === 2) {
+              m.los = v;
+              this.dirty = true;
+            }
+          });
+        }
+        this.dirty = true;
+        return;
+      }
       if (m.kind === 'draw') {
         if (m.graphic === 'point') {
           this.setMode({ kind: 'select' });
@@ -329,6 +358,12 @@ export class MapView {
         return;
       }
       const hit = this.hitTest(sx, sy);
+      if (e.shiftKey) {
+        // Shift: toggle what was clicked, or drag a box to select everything inside it.
+        if (hit) this.cb.toggleSelect(hit);
+        else this.drag = { startX: sx, startY: sy, cx: this.cx, cy: this.cy, moved: false, button: 0, box: true };
+        return;
+      }
       this.cb.select(hit);
       const ent = hit ? this.entityById.get(hit) : undefined;
       this.drag = {
@@ -351,7 +386,7 @@ export class MapView {
       const d = this.drag;
       if (d) {
         if (Math.hypot(sx - d.startX, sy - d.startY) > 3) d.moved = true;
-        if (d.moved && !d.entityId) {
+        if (d.moved && !d.entityId && !d.box) {
           this.cx = d.cx - (sx - d.startX) / this.scale;
           this.cy = d.cy + (sy - d.startY) / this.scale;
         }
@@ -365,6 +400,17 @@ export class MapView {
       if (d?.entityId && d.moved) {
         const r = c.getBoundingClientRect();
         this.cb.dragEntity(d.entityId, this.toWorld(e.clientX - r.left, e.clientY - r.top));
+      }
+      if (d?.box && d.moved) {
+        const r = c.getBoundingClientRect();
+        const a = this.toWorld(Math.min(d.startX, e.clientX - r.left), Math.max(d.startY, e.clientY - r.top));
+        const b = this.toWorld(Math.max(d.startX, e.clientX - r.left), Math.min(d.startY, e.clientY - r.top));
+        const ids = this.visibleSymbols()
+          .filter((s) => s.pos.x >= a.x && s.pos.x <= b.x && s.pos.y >= a.y && s.pos.y <= b.y)
+          .filter((s) => !s.entity || (s.entity.damage !== 'destroyed' && s.entity.contactAge === undefined))
+          .map((s) => s.id);
+        if (ids.length) this.cb.selectMany(ids);
+        this.dirty = true;
       }
     });
 
@@ -382,8 +428,9 @@ export class MapView {
       if ((e.target as HTMLElement)?.closest('input, textarea, select')) return;
       if (e.key === 'Escape') this.setMode({ kind: 'select' });
       if (e.key === 'Enter' && this.mode.kind === 'draw') this.finishDraw();
-      if (e.key === 'Backspace' && this.mode.kind === 'draw') {
+      if (e.key === 'Backspace' && (this.mode.kind === 'draw' || this.mode.kind === 'measure')) {
         this.mode.points.pop();
+        if (this.mode.kind === 'measure') this.mode.los = undefined;
         this.dirty = true;
       }
     });
@@ -689,10 +736,11 @@ export class MapView {
           ctx.stroke();
         }
         drawSymbol(ctx, p.x, p.y, symSize, e.force, e.domain, e.symbol, {
-          selected: e.id === this.selectedId,
+          selected: e.id === this.selectedId || this.selectedIds.has(e.id) || (this.selectedIds.size > 1 && !!e.unitId && this.selectedIds.has(e.unitId)),
           destroyed: e.damage === 'destroyed',
           damaged: e.damage === 'mobility' || e.damage === 'firepower',
           remote: e.remote,
+          sidc: this.sidcOf(e.typeId),
           // Fog of war: contacts fade as they go stale.
           alpha: e.contactAge !== undefined ? (e.contactAge > 5 ? 0.45 : 0.8) : inSelUnit || !selUnit ? 1 : 0.9,
         });
@@ -712,9 +760,10 @@ export class MapView {
         const leader = u.leaderId ? this.entityById.get(u.leaderId) : undefined;
         const alive = u.memberIds.filter((id) => this.entityById.get(id)?.damage !== 'destroyed').length;
         drawSymbol(ctx, p.x, p.y, symSize * 1.25, u.force, leader?.domain ?? 'ground', leader?.symbol ?? 'generic', {
-          selected: u.id === this.selectedId,
+          selected: u.id === this.selectedId || this.selectedIds.has(u.id),
           destroyed: alive === 0,
           echelon: u.echelon,
+          sidc: leader ? this.sidcOf(leader.typeId) : undefined,
         });
         if (leader && leader.speed > 0.5) {
           const len = symSize * 2 + Math.min(40, leader.speed * 0.6);
@@ -768,9 +817,59 @@ export class MapView {
     }
   }
 
+  private drawMeasure(m: Extract<MapMode, { kind: 'measure' }>): void {
+    const ctx = this.ctx;
+    const pts = [...m.points];
+    if (this.mouse) pts.push(this.toWorld(this.mouse.x, this.mouse.y));
+    if (!pts.length) return;
+    ctx.strokeStyle = m.los === false ? '#ff6060' : m.los === true ? '#70ff90' : '#ffe070';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 5]);
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const s = this.toScreen(p);
+      if (i === 0) ctx.moveTo(s.x, s.y);
+      else ctx.lineTo(s.x, s.y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+    let total = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      const d = Math.hypot(b.x - a.x, b.y - a.y);
+      total += d;
+      const brg = ((Math.atan2(b.x - a.x, b.y - a.y) * 180) / Math.PI + 360) % 360;
+      const sa = this.toScreen(a);
+      const sb = this.toScreen(b);
+      label(ctx, `${d >= 1000 ? `${(d / 1000).toFixed(2)} km` : `${Math.round(d)} m`}  ${String(Math.round(brg) % 360).padStart(3, '0')}°`, (sa.x + sb.x) / 2 + 6, (sa.y + sb.y) / 2 - 6, '#fff', 'bold 11px system-ui');
+    }
+    for (const p of m.points) {
+      const s = this.toScreen(p);
+      ctx.fillStyle = '#ffe070';
+      ctx.fillRect(s.x - 3, s.y - 3, 6, 6);
+    }
+    const end = this.toScreen(pts[pts.length - 1]);
+    const lines = [pts.length > 2 ? `total ${(total / 1000).toFixed(2)} km` : ''];
+    if (this.grid) lines.push(`elev ${Math.round(Math.max(0, this.grid.elevation(pts[pts.length - 1].x, pts[pts.length - 1].y)))} m`);
+    if (m.points.length === 2) lines.push(m.los === undefined ? 'line of sight…' : m.los === null ? '' : m.los ? 'line of sight: clear' : 'line of sight: blocked');
+    lines.filter(Boolean).forEach((t, i) => label(ctx, t, end.x + 10, end.y + 16 + i * 13, '#ffe070', '11px system-ui'));
+  }
+
   private drawModeOverlay(): void {
     const ctx = this.ctx;
     const m = this.mode;
+    if (m.kind === 'measure') this.drawMeasure(m);
+    const d = this.drag;
+    if (d?.box && d.moved && this.mouse) {
+      ctx.strokeStyle = '#fff';
+      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = 1;
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(d.startX, d.startY, this.mouse.x - d.startX, this.mouse.y - d.startY);
+      ctx.strokeRect(d.startX, d.startY, this.mouse.x - d.startX, this.mouse.y - d.startY);
+      ctx.setLineDash([]);
+    }
     if (m.kind === 'draw' && m.points.length) {
       ctx.beginPath();
       m.points.forEach((p, i) => {
@@ -797,7 +896,9 @@ export class MapView {
           ? `Drawing ${m.graphic}: click to add points, double-click/Enter/right-click to finish, Backspace to undo, Esc to cancel`
           : m.kind === 'place'
             ? `Click to place ${m.label} (Shift+click to keep placing, Esc to cancel)`
-            : `${m.label} (Esc to cancel)`;
+            : m.kind === 'measure'
+              ? 'Measuring: click points for distance and bearing (two points: line of sight), Backspace to undo, Esc to finish'
+              : `${m.label} (Esc to cancel)`;
       ctx.font = '12px system-ui';
       const w = ctx.measureText(text).width + 16;
       ctx.fillStyle = 'rgba(10,14,20,0.8)';

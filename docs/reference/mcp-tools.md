@@ -273,11 +273,11 @@ Simulate the given number of seconds immediately (as fast as possible) and summa
 
 ## `manage_scenario`
 
-List, load or save scenarios stored on the server, or start an empty one.
+List, load or save scenarios stored on the server, start an empty one, or undo/redo the last edit (up to 30 steps).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `action` | `"list"` \| `"load"` \| `"save"` \| `"new"` | yes |  |
+| `action` | `"list"` \| `"load"` \| `"save"` \| `"new"` \| `"undo"` \| `"redo"` | yes |  |
 | `name` | string |  |  |
 
 ## Resources

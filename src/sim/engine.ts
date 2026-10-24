@@ -1370,6 +1370,19 @@ export class Engine {
     this.rng = new Rng(seed);
   }
 
+  /**
+   * Go back to a checkpoint taken earlier in this session (undo/redo): unlike loading a
+   * scenario, the event log and the rewind point are kept.
+   */
+  restoreCheckpoint(s: ScenarioFile, note: string): void {
+    const rewindPoint = this.initialScenario;
+    const events = this.events;
+    this.loadScenario(s);
+    this.initialScenario = rewindPoint;
+    this.events = events;
+    this.log('info', note);
+  }
+
   /** Make the current state the point that rewind() returns to (done when a scenario is saved). */
   markRewindPoint(): void {
     this.initialScenario = JSON.parse(JSON.stringify(this.toScenario()));
@@ -1534,7 +1547,27 @@ export class Engine {
       orders: this.pendingOrders.length
         ? this.pendingOrders.map((o) => ({ targetId: o.targetId, text: this.describeOrder(o), due: o.due }))
         : undefined,
+      schedule: this.schedule(),
     };
+  }
+
+  /** Plan steps that wait for a simulation time still to come, with what follows them. */
+  private schedule(): SimState['schedule'] {
+    const out: NonNullable<SimState['schedule']> = [];
+    const owners: (Unit | Entity)[] = [...this.units.values(), ...[...this.entities.values()].filter((e) => !e.unit)];
+    for (const o of owners) {
+      const p = o.plan;
+      if (!p || p.finished) continue;
+      const sts = p.plan.statements;
+      for (let i = p.index; i < sts.length; i++) {
+        const st = sts[i];
+        if (st.kind !== 'waitUntil' || st.condition.type !== 'simTime' || st.condition.time <= this.time) continue;
+        const next = sts[i + 1];
+        out.push({ targetId: o.id, time: st.condition.time, text: `${this.nameOf(o.id)}: ${next ? describeStatement(next, this) : 'plan continues'}` });
+      }
+    }
+    out.sort((a, b) => a.time - b.time);
+    return out.length ? out.slice(0, 200) : undefined;
   }
 
   /** Planned path for an entity's current move, for display. */

@@ -143,6 +143,10 @@ export class ApiV1 {
     return u;
   }
 
+  private history() {
+    return { undo: this.ctx.runner.undoStack.length, redo: this.ctx.runner.redoStack.length, time: this.engine.time };
+  }
+
   simulationSummary() {
     const s = this.state();
     const strength = ([1, 2, 3, 0] as ForceId[])
@@ -218,6 +222,8 @@ export class ApiV1 {
       this.run({ cmd: 'newScenario', name: typeof b.name === 'string' ? b.name : 'Untitled', terrain: b.terrain as never });
       return { status: 201, json: this.simulationSummary() };
     });
+    r.post(`${P}/scenario/undo`, () => (this.run({ cmd: 'undo' }), { json: this.history() }));
+    r.post(`${P}/scenario/redo`, () => (this.run({ cmd: 'redo' }), { json: this.history() }));
     r.get(`${P}/scenarios`, () => ({ json: this.listScenarios() }));
     r.get(`${P}/scenarios/{name}`, (req) => ({ json: this.readScenario(req.params.name) }));
     r.post(`${P}/scenarios/{name}/load`, (req) => {

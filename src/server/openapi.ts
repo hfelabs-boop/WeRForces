@@ -67,6 +67,8 @@ export function buildOpenApi(baseUrl: string): Schema {
       '/api/v1/scenario/new': {
         post: op('Scenario', 'Start an empty scenario', body({ type: 'object', properties: { name: { type: 'string' }, terrain: { type: 'object', description: 'generation settings (seed, size, cellSize, relief, waterFraction, forestFraction, towns, origin) or {"dataset": name} for imported terrain' } } })),
       },
+      '/api/v1/scenario/undo': { post: op('Scenario', 'Take back the last edit (anything but run, pause, step and time scale); up to 30 steps') },
+      '/api/v1/scenario/redo': { post: op('Scenario', 'Redo an edit taken back with undo') },
       '/api/v1/scenarios': { get: op('Scenario', 'List scenarios stored on the server') },
       '/api/v1/scenarios/{name}': {
         get: op('Scenario', 'Read a stored scenario', { parameters: [idParam('name')] }, ok(ref('Scenario'))),

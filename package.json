@@ -36,6 +36,7 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "geotiff": "^3.0.5",
     "marked": "^18.1.1",
+    "milsymbol": "^3.0.4",
     "proj4": "^2.22.0",
     "three": "^0.186.1",
     "ws": "^8.22.0",

@@ -30,9 +30,10 @@ import { FORCE_NAMES } from '../src/shared/types.js';
 import { Api } from './api.js';
 import { $, clear, fmtDeg, fmtGrid, fmtLatLon, fmtTime, h } from './dom.js';
 import { MapView } from './map.js';
-import { symbolCanvas } from './symbols.js';
+import { setSymbolStyle, type SymbolStyle, symbolCanvas } from './symbols.js';
 import type { View3D } from './view3d.js';
 import { AarPlayer } from './aar.js';
+import { Timeline } from './timeline.js';
 import type { CotStatus as CotView } from '../src/integrations/cot.js';
 import type { Webhook as WebhookView } from '../src/integrations/webhooks.js';
 
@@ -108,6 +109,10 @@ class App {
   view3d: View3D | null = null;
   view: '2d' | '3d' | 'split' = '2d';
   selectedId: string | null = null;
+  private timeline!: Timeline;
+  private timelineDrawn = 0;
+  /** Everything selected; more than one for group orders. */
+  selection = new Set<string>();
   force: ForceId = 1;
   /** Exercise control, or a player limited to one force. */
   role: Role = { kind: 'controller' };
@@ -137,12 +142,21 @@ class App {
     });
     this.map = new MapView($('#map'), {
       select: (id) => this.select(id),
+      toggleSelect: (id) => this.toggleSelect(id),
+      selectMany: (ids) => this.selectMany(ids),
       contextMenu: (w, c, hit) => this.contextMenu(w, c, hit),
       hover: (w) => this.hover(w),
       dragEntity: (id, w) => (this.aar.active ? undefined : this.cmd({ cmd: 'moveEntity', id, x: w.x, y: w.y })),
       modeChanged: (m) => {
         if (m.kind !== 'place') this.disarm();
       },
+    });
+    this.timeline = new Timeline($('#timeline-strip'), {
+      review: async (t) => {
+        if (!this.aar.active) await this.enterReplay();
+        if (this.aar.active) this.aar.seek(t);
+      },
+      select: (id) => this.exists(id) && this.select(id),
     });
     this.aar = new AarPlayer(
       {
@@ -182,6 +196,15 @@ class App {
     }
     this.catalog = catalog;
     this.types = new Map(catalog.entityTypes.map((t) => [t.id, t]));
+    this.map.sidcOf = (id) => this.types.get(id)?.sidc;
+    this.map.losCheck = async (a, b) => {
+      try {
+        const r = await this.api.v1<{ visible: boolean }>('POST', '/terrain/line-of-sight', { from: { x: a.x, y: a.y }, to: { x: b.x, y: b.y } });
+        return r.visible;
+      } catch {
+        return null;
+      }
+    };
     this.renderPalette();
     if (terrainVersion !== this.terrainVersion) this.loadTerrain(terrainVersion);
   }
@@ -200,6 +223,11 @@ class App {
     this.liveState = s;
     if (this.aar.active) return;
     this.state = s;
+    const wall = performance.now();
+    if (wall - this.timelineDrawn > 500) {
+      this.timelineDrawn = wall;
+      this.timeline.update(s, this.events);
+    }
     this.map.setState(s);
     this.view3d?.setState(s);
     $('#sim-time').textContent = fmtTime(s.time);
@@ -228,7 +256,8 @@ class App {
       .filter(Boolean)
       .join(' · ');
     $('#score').textContent = score;
-    if (this.selectedId && !this.exists(this.selectedId)) this.select(null);
+    for (const id of [...this.selection]) if (!this.exists(id)) this.selection.delete(id);
+    if (this.selectedId && !this.exists(this.selectedId)) this.select(this.selection.size ? [...this.selection][0] : null);
     this.updateInspector();
     const now = performance.now();
     if (now - this.lastTree > 500) {
@@ -296,6 +325,11 @@ class App {
 
   areas(): Graphic[] {
     return (this.state?.graphics ?? []).filter((g) => g.kind === 'area');
+  }
+
+  /** An entity type's 2525 SIDC pattern, if the catalog gives one. */
+  sidc(typeId: string | undefined): string | undefined {
+    return typeId ? this.types.get(typeId)?.sidc : undefined;
   }
 
   /** True if the entity, or any member of the unit, has an indirect-fire weapon. */
@@ -378,6 +412,7 @@ class App {
       if (action === 'save-server') this.saveOnServer();
       if (action === 'review-recording') void this.reviewRecordingDialog();
       if (action === 'settings') void this.settingsDialog();
+      if (action === 'undo' || action === 'redo') void this.undoRedo(action);
     });
     ($('#file-input') as HTMLInputElement).addEventListener('change', async (e) => {
       const input = e.target as HTMLInputElement;
@@ -399,9 +434,10 @@ class App {
       if (confirm('Rewind to the scenario as it was last loaded or saved? Changes since then will be lost.')) this.cmd({ cmd: 'rewind' });
     });
     ($('#sel-speed') as HTMLSelectElement).addEventListener('change', (e) => this.cmd({ cmd: 'setTimeScale', scale: Number((e.target as HTMLSelectElement).value) }));
-    document.querySelectorAll<HTMLButtonElement>('#draw-tools button').forEach((b) =>
+    document.querySelectorAll<HTMLButtonElement>('#draw-tools button[data-draw]').forEach((b) =>
       b.addEventListener('click', () => this.startDraw(b.dataset.draw as GraphicKind)),
     );
+    $('#btn-measure').addEventListener('click', () => this.map.setMode({ kind: 'measure', points: [] }));
     document.querySelectorAll<HTMLInputElement>('[data-layer]').forEach((cb) =>
       cb.addEventListener('change', () => {
         (this.map.layers as unknown as Record<string, boolean>)[cb.dataset.layer!] = cb.checked;
@@ -409,6 +445,26 @@ class App {
         this.map.invalidate();
       }),
     );
+    const symSel = $('#sel-symbols') as HTMLSelectElement;
+    try {
+      symSel.value = localStorage.getItem('werforces.symbols') === 'simple' ? 'simple' : '2525';
+    } catch {
+      // storage unavailable
+    }
+    setSymbolStyle(symSel.value as SymbolStyle);
+    symSel.addEventListener('change', () => {
+      setSymbolStyle(symSel.value as SymbolStyle);
+      try {
+        localStorage.setItem('werforces.symbols', symSel.value);
+      } catch {
+        // storage unavailable
+      }
+      this.map.invalidate();
+      this.renderPalette();
+      this.renderTree(true);
+      this.inspectorFor = null;
+      this.updateInspector();
+    });
     ($('#sel-aggregate') as HTMLSelectElement).addEventListener('change', (e) => {
       this.map.layers.aggregate = (e.target as HTMLSelectElement).value as 'auto';
       this.map.invalidate();
@@ -420,7 +476,12 @@ class App {
         this.cmd({ cmd: this.state?.running ? 'pause' : 'run' });
       }
       if (e.key === 'Delete' && this.selectedId) this.deleteSelected();
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z' || e.key === 'y')) {
+        e.preventDefault();
+        void this.undoRedo(e.key === 'y' || e.shiftKey ? 'redo' : 'undo');
+      }
       if (e.key === 'f' && this.selectedId) this.centerOn(this.selectedId);
+      if (e.key === 'm' && !e.ctrlKey && !e.metaKey) this.map.setMode({ kind: 'measure', points: [] });
     });
   }
 
@@ -461,7 +522,8 @@ class App {
       this.events = log.length ? log.slice(-LOG_LIMIT) : this.events;
       this.renderLog();
     }
-    if (this.selectedId && !this.exists(this.selectedId)) this.select(null);
+    for (const id of [...this.selection]) if (!this.exists(id)) this.selection.delete(id);
+    if (this.selectedId && !this.exists(this.selectedId)) this.select(this.selection.size ? [...this.selection][0] : null);
     this.updateInspector();
     this.renderTree();
   }
@@ -596,7 +658,7 @@ class App {
     const u = this.unit(id);
     if (e) {
       el.append(
-        h('h3', {}, symbolCanvas(e.force, e.domain, e.symbol, 24), ` ${e.name}`),
+        h('h3', {}, symbolCanvas(e.force, e.domain, e.symbol, 24, undefined, this.sidc(e.typeId)), ` ${e.name}`),
         h('div', { class: 'sub', text: `${this.types.get(e.typeId)?.name ?? e.typeId} · ${FORCE_NAMES[e.force]} · ${e.id} · ${this.aar.active ? 'replay' : 'contact'}` }),
         h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Altitude', this.bind('alt'), 'Heading', this.bind('heading'), 'Speed', this.bind('speed'), 'Damage', this.bind('damage')),
         h('div', { class: 'section' }, h('h4', { text: 'Status' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
@@ -953,7 +1015,7 @@ class App {
             const counts = new Map<string, number>();
             for (const m of u.members) counts.set(m, (counts.get(m) ?? 0) + 1);
             const desc = [...counts].map(([t, n]) => `${n}× ${this.types.get(t)?.name ?? t}`).join(', ');
-            return this.paletteItem(`unit:${u.id}`, symbolCanvas(this.force, lead.domain, lead.symbol, 26, u.echelon), u.name, desc);
+            return this.paletteItem(`unit:${u.id}`, symbolCanvas(this.force, lead.domain, lead.symbol, 26, u.echelon, this.sidc(u.members[0])), u.name, desc);
           }),
         ),
       );
@@ -966,7 +1028,7 @@ class App {
           'div',
           { class: 'palette-group' },
           h('h4', { text: DOMAIN_LABELS[domain] }),
-          types.map((t) => this.paletteItem(`type:${t.id}`, symbolCanvas(this.force, t.domain, t.symbol, 26), t.name, t.description)),
+          types.map((t) => this.paletteItem(`type:${t.id}`, symbolCanvas(this.force, t.domain, t.symbol, 26, undefined, t.sidc), t.name, t.description)),
         ),
       );
     }
@@ -1046,16 +1108,16 @@ class App {
         if (!matches(u)) return;
         const members = membersOf(u);
         const lead = members[0];
-        into.append(item(u.id, `${u.name}`, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon) : null));
+        into.append(item(u.id, `${u.name}`, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon, this.sidc(lead.typeId)) : null));
         const kids = h('div', { class: 'tree-children' });
         for (const sub of subsOf(u)) renderUnit(sub, kids);
-        kids.append(...members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolCanvas(f, m.domain, m.symbol, 16), m.damage === 'destroyed')));
+        kids.append(...members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolCanvas(f, m.domain, m.symbol, 16, undefined, this.sidc(m.typeId)), m.damage === 'destroyed')));
         into.append(kids);
       };
       for (const u of units) if (!u.parentId || !byId.has(u.parentId)) renderUnit(u, el);
       for (const e of loose) {
         if (!match(e.name)) continue;
-        el.append(item(e.id, `${e.name}${e.remote ? ' (remote)' : ''}`, symbolCanvas(f, e.domain, e.symbol, 16), e.damage === 'destroyed'));
+        el.append(item(e.id, `${e.name}${e.remote ? ' (remote)' : ''}`, symbolCanvas(f, e.domain, e.symbol, 16, undefined, this.sidc(e.typeId)), e.damage === 'destroyed'));
       }
     }
     const graphics = st.graphics.filter((g) => match(g.name));
@@ -1068,6 +1130,24 @@ class App {
   // ------------------------------------------------------------ selection
 
   select(id: string | null): void {
+    this.selection = new Set(id ? [id] : []);
+    this.selectionChanged(id);
+  }
+
+  /** Add to or remove from a multi-selection. */
+  toggleSelect(id: string): void {
+    if (this.selection.has(id)) this.selection.delete(id);
+    else this.selection.add(id);
+    this.selectionChanged(this.selection.has(id) ? id : ([...this.selection][0] ?? null));
+  }
+
+  selectMany(ids: string[]): void {
+    for (const id of ids) this.selection.add(id);
+    this.selectionChanged(this.selectedId && this.selection.has(this.selectedId) ? this.selectedId : (ids[0] ?? null));
+  }
+
+  private selectionChanged(id: string | null): void {
+    this.map.selectedIds = this.selection;
     this.selectedId = id;
     this.map.selectedId = id;
     this.view3d?.setSelected(id);
@@ -1160,7 +1240,25 @@ class App {
     const hitEntity = this.entity(hit) ?? this.entity(this.unit(hit)?.leaderId);
     const hitGraphic = this.graphic(hit);
 
-    if (selTaskable && hit !== sel) {
+    const group = this.selection.size > 1 && !(hit && this.selection.has(hit)) ? this.orderable() : [];
+    if (group.length > 1) {
+      items.push(h('div', { class: 'title', text: `${group.length} selected` }));
+      const selForces = new Set(group.map((id) => this.entity(id)?.force ?? this.unit(id)?.force));
+      if (hitEntity && hit && !selForces.has(hitEntity.force) && hitEntity.damage !== 'destroyed') {
+        add(`All attack ${hitEntity.name}`, () => this.groupOrder((id) => this.task(id, { type: 'attack', targetId: hitEntity.id })));
+      } else if (this.unit(hit) && selForces.has(this.unit(hit)!.force) && group.every((id) => this.unit(id))) {
+        add(`Put under ${this.unit(hit)!.name}`, () => this.groupOrder((id) => this.cmd({ cmd: 'setSuperior', unitId: id, superiorId: hit! })));
+      } else {
+        add('Move here (keep formation)', () => this.groupTaskAt(world, (t) => ({ type: 'moveTo', target: t }), false));
+        add('Move here by a covered route', () => this.groupTaskAt(world, (t) => ({ type: 'moveTo', target: t, covered: true }), false));
+        add('Defend here (in line)', () => this.groupTaskAt(world, (t, f) => ({ type: 'defend', position: t, facing: f }), true));
+        add('Overwatch here (in line)', () => this.groupTaskAt(world, (t, f) => ({ type: 'overwatch', position: t, facing: f }), true));
+        const guns = group.filter((id) => this.hasIndirect(id));
+        if (guns.length) add(`Fire mission here (${guns.length} firing)`, () => void Promise.all(guns.map((id) => this.task(id, { type: 'fireMission', target: world, rounds: 3, radius: this.unit(id) ? 50 : 0 }))));
+      }
+      add('Stop all', () => this.groupOrder((id) => this.cmd({ cmd: 'stop', targetId: id })));
+      sep();
+    } else if (selTaskable && hit !== sel) {
       items.push(h('div', { class: 'title', text: selName ?? '' }));
       if (hitEntity && hit) {
         const selForce = this.entity(sel)?.force ?? this.unit(sel)?.force;
@@ -1234,6 +1332,15 @@ class App {
 
   private updateInspector(): void {
     const el = $('#inspector');
+    if (this.selection.size > 1) {
+      const key = `multi:${[...this.selection].sort().join(',')}`;
+      if (key !== this.inspectorFor) {
+        this.inspectorFor = key;
+        clear(el);
+        this.buildMultiInspector(el);
+      }
+      return;
+    }
     const id = this.selectedId;
     // An object can be selected before the state that contains it arrives; build its panel then.
     if (id && id !== this.inspectorFor && !this.exists(id)) return;
@@ -1283,7 +1390,7 @@ class App {
   private buildEntityInspector(el: HTMLElement, e: EntitySnapshot): void {
     const t = this.types.get(e.typeId);
     el.append(
-      this.nameEditor(e.id, e.name, symbolCanvas(e.force, e.domain, e.symbol, 24)),
+      this.nameEditor(e.id, e.name, symbolCanvas(e.force, e.domain, e.symbol, 24, undefined, this.sidc(e.typeId))),
       h('div', { class: 'sub', text: `${t?.name ?? e.typeId} · ${FORCE_NAMES[e.force]} · ${e.id}${e.remote ? ' · remote (DIS)' : ''}` }),
       h(
         'div',
@@ -1355,7 +1462,7 @@ class App {
     const lead = this.entity(u.leaderId) ?? this.entity(u.memberIds[0]);
     const formation = h('select', { onchange: (ev: Event) => this.cmd({ cmd: 'setFormation', unitId: u.id, formation: (ev.target as HTMLSelectElement).value as Formation }) }, FORMATIONS.map((f) => h('option', { value: f, text: f, selected: f === u.formation })));
     el.append(
-      this.nameEditor(u.id, u.name, lead ? symbolCanvas(u.force, lead.domain, lead.symbol, 24, u.echelon) : null),
+      this.nameEditor(u.id, u.name, lead ? symbolCanvas(u.force, lead.domain, lead.symbol, 24, u.echelon, this.sidc(lead.typeId)) : null),
       h('div', { class: 'sub', text: `${u.echelon} · ${FORCE_NAMES[u.force]} · ${u.id}` }),
       h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Strength', this.bind('strength'), 'Morale', this.bind('morale'), 'Leader', this.bind('leader'), 'Formation', formation, 'Superior', this.superiorSelect(u)),
       ...(u.childIds?.length
@@ -1376,6 +1483,110 @@ class App {
       h('div', { class: 'section' }, h('h4', { text: 'Members' }), h('div', { 'data-bind': 'members' })),
       h('div', { class: 'section row' }, h('button', { text: 'Center', onclick: () => this.centerOn(u.id) }), h('button', { class: 'danger', text: 'Delete unit', onclick: () => this.deleteSelected() })),
     );
+  }
+
+  private async undoRedo(which: 'undo' | 'redo'): Promise<void> {
+    if (this.aar.active) return this.toast('Replaying: exit the AAR to edit', true);
+    const r = await this.cmd({ cmd: which });
+    if (r.ok) this.toast(which === 'undo' ? 'Undone' : 'Redone', true);
+  }
+
+  /** Several things selected: list them; right-click the map to order them all. */
+  private buildMultiInspector(el: HTMLElement): void {
+    const ids = [...this.selection];
+    const loose = ids.filter((id) => this.entity(id) && !this.entity(id)!.unitId && !this.entity(id)!.remote);
+    const forces = new Set(loose.map((id) => this.entity(id)!.force));
+    el.append(
+      h('h3', { text: `${ids.length} selected` }),
+      h('p', { class: 'hint', text: 'Right-click the map to give them all an order: they keep their positions relative to each other. Shift+click adds or removes; Shift+drag selects a box.' }),
+      h(
+        'div',
+        { class: 'section' },
+        ids.map((id) => {
+          const e = this.entity(id);
+          const u = this.unit(id);
+          const lead = e ?? this.entity(u?.leaderId);
+          const name = e?.name ?? u?.name ?? this.graphic(id)?.name ?? id;
+          return h(
+            'div',
+            { class: 'tree-item', onclick: () => this.select(id) },
+            lead ? symbolCanvas(lead.force, lead.domain, lead.symbol, 16, u?.echelon, this.sidc(lead.typeId)) : null,
+            name,
+          );
+        }),
+      ),
+      h(
+        'div',
+        { class: 'section row' },
+        loose.length >= 2 && forces.size === 1 ? h('button', { text: 'Group into a unit', onclick: () => this.cmd({ cmd: 'groupUnit', entityIds: loose }).then((r) => r.ok && r.id && this.select(r.id)) }) : null,
+        h('button', { text: 'Stop all', onclick: () => this.groupOrder((id) => this.cmd({ cmd: 'stop', targetId: id })) }),
+        h('button', { text: 'Clear selection', onclick: () => this.select(null) }),
+        h('button', {
+          class: 'danger',
+          text: 'Delete all',
+          onclick: async () => {
+            if (!confirm(`Delete ${ids.length} objects?`)) return;
+            for (const id of ids) if (this.exists(id)) await this.cmd({ cmd: 'deleteObject', id });
+            this.select(null);
+          },
+        }),
+      ),
+    );
+  }
+
+  /** The selected things that take orders: units, and entities not in a selected unit. */
+  private orderable(): string[] {
+    const ids = [...this.selection];
+    return ids.filter((id) => {
+      const e = this.entity(id);
+      if (e) return !e.remote && e.damage !== 'destroyed' && !(e.unitId && this.selection.has(e.unitId));
+      return !!this.unit(id);
+    });
+  }
+
+  private async groupOrder(fn: (id: string) => Promise<unknown>): Promise<void> {
+    for (const id of this.orderable()) await fn(id);
+    this.refreshPath();
+  }
+
+  /** Where a selected thing is: entity position or unit centre. */
+  private positionOf(id: string): Vec2 | undefined {
+    const e = this.entity(id);
+    if (e) return { x: e.x, y: e.y };
+    const u = this.unit(id);
+    return u ? { x: u.x, y: u.y } : undefined;
+  }
+
+  /**
+   * Order the whole selection to a point: moves keep their offsets from the group's
+   * centre; positional tasks spread them in a line across the direction of the move.
+   */
+  private groupTaskAt(world: Vec2, make: (target: Vec2, facing: number) => TaskSpec, line: boolean): void {
+    const ids = this.orderable();
+    const pos = ids.map((id) => this.positionOf(id)!).filter(Boolean);
+    if (!pos.length) return;
+    const c = { x: pos.reduce((s, p) => s + p.x, 0) / pos.length, y: pos.reduce((s, p) => s + p.y, 0) / pos.length };
+    const facing = ((Math.atan2(world.x - c.x, world.y - c.y) * 180) / Math.PI + 360) % 360;
+    const h = (facing * Math.PI) / 180;
+    const size = this.terrainData?.spec.size ?? Infinity;
+    const clamp = (p: Vec2) => ({ x: Math.round(Math.max(0, Math.min(size, p.x))), y: Math.round(Math.max(0, Math.min(size, p.y))) });
+    let targets: Vec2[];
+    if (line) {
+      const side = (p: Vec2) => (p.x - c.x) * Math.cos(h) - (p.y - c.y) * Math.sin(h);
+      const order = ids.map((id, i) => ({ id, i, s: side(pos[i]) })).sort((a, b) => a.s - b.s);
+      const gap = ids.some((id) => this.unit(id)) ? 300 : 60;
+      targets = new Array(ids.length);
+      order.forEach((o, k) => {
+        const off = (k - (order.length - 1) / 2) * gap;
+        targets[o.i] = clamp({ x: world.x + Math.cos(h) * off, y: world.y - Math.sin(h) * off });
+      });
+    } else {
+      targets = pos.map((p) => clamp({ x: world.x + p.x - c.x, y: world.y + p.y - c.y }));
+    }
+    void (async () => {
+      for (let i = 0; i < ids.length; i++) await this.cmd({ cmd: 'assignTask', targetId: ids[i], task: make(targets[i], Math.round(facing)) });
+      this.refreshPath();
+    })();
   }
 
   private buildGraphicInspector(el: HTMLElement, g: Graphic): void {
@@ -1895,7 +2106,7 @@ class App {
               {},
               e.contacts.map((cid) => {
                 const c = this.entity(cid);
-                return h('div', { class: 'tree-item', onclick: () => this.select(cid) }, c ? symbolCanvas(c.force, c.domain, c.symbol, 14) : null, `${c?.name ?? cid}${cid === e.engagingId ? '  ◎ engaging' : ''}${c ? ` · ${(Math.hypot(c.x - e.x, c.y - e.y) / 1000).toFixed(1)} km` : ''}`);
+                return h('div', { class: 'tree-item', onclick: () => this.select(cid) }, c ? symbolCanvas(c.force, c.domain, c.symbol, 14, undefined, this.sidc(c.typeId)) : null, `${c?.name ?? cid}${cid === e.engagingId ? '  ◎ engaging' : ''}${c ? ` · ${(Math.hypot(c.x - e.x, c.y - e.y) / 1000).toFixed(1)} km` : ''}`);
               }),
             )
           : h('span', { class: 'hint', text: 'none' }),
@@ -1937,7 +2148,7 @@ class App {
             h(
               'div',
               { class: `tree-item${m.damage === 'destroyed' ? ' dead' : ''}`, onclick: () => this.select(m.id) },
-              symbolCanvas(m.force, m.domain, m.symbol, 14),
+              symbolCanvas(m.force, m.domain, m.symbol, 14, undefined, this.sidc(m.typeId)),
               `${m.name}${m.id === u.leaderId ? ' ★' : ''} · ${m.damage === 'none' ? 'ok' : m.damage}${m.engagingId ? ' · engaging' : ''}`,
             ),
           ),

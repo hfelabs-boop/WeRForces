@@ -122,6 +122,8 @@ export interface EntityTypeDef {
   description: string;
   domain: Domain;
   symbol: SymbolKind;
+  /** MIL-STD-2525C letter SIDC pattern (dimension and function ID used), e.g. "S-G-UCFM--"; default from `symbol`. */
+  sidc?: string;
   armor: ArmorClass;
   dis: DisEntityType;
   /** Maximum speed in m/s. */
@@ -634,6 +636,10 @@ export interface SimState {
   environment?: EnvironmentState;
   /** Orders on their way down the chain of command. */
   orders?: { targetId: string; text: string; due: number }[];
+  /** Edits that can be undone and redone. */
+  history?: { undo: number; redo: number };
+  /** Plan steps waiting for a set time, soonest first (for the timeline). */
+  schedule?: { targetId: string; time: number; text: string }[];
   dis?: DisStatus;
 }
 
@@ -699,6 +705,9 @@ export type Command =
   | { cmd: 'setEnvironment'; environment: Environment }
   /** Put a unit under a superior unit (null: make it independent). */
   | { cmd: 'setSuperior'; unitId: string; superiorId: string | null }
+  /** Take back the last edit (any command but run/pause/step/time scale), or redo it. */
+  | { cmd: 'undo' }
+  | { cmd: 'redo' }
   | { cmd: 'setFormation'; unitId: string; formation: Formation }
   | { cmd: 'rename'; id: string; name: string }
   | { cmd: 'createGraphic'; kind: GraphicKind; name?: string; points: Vec2[]; force?: ForceId; density?: number }

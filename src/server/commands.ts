@@ -196,8 +196,14 @@ export function validatePlan(v: unknown): Plan {
   return { name: typeof p.name === 'string' ? p.name.slice(0, 80) : undefined, statements, loop: p.loop === true };
 }
 
+/** Commands that do not change the scenario, so are not undone. */
+const NOT_EDITS = new Set(['run', 'pause', 'step', 'setTimeScale', 'undo', 'redo']);
+
 export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
+  const cmd = raw && typeof raw === 'object' ? (raw as { cmd?: unknown }).cmd : undefined;
+  const before = typeof cmd === 'string' && !NOT_EDITS.has(cmd) && runner.undoLimit > 0 ? runner.engine.toScenario() : null;
   const result = runCommand(runner, raw);
+  if (result.ok && before) runner.pushUndo(before);
   // Keep the recording's current frame in step with edits made while paused.
   if (result.ok) runner.recorder?.touch();
   return result;
@@ -220,6 +226,12 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         return;
       case 'setTimeScale':
         runner.setTimeScale(num(c.scale, 'scale'));
+        return;
+      case 'undo':
+        if (!runner.undo()) throw new ValidationError('nothing to undo');
+        return;
+      case 'redo':
+        if (!runner.redo()) throw new ValidationError('nothing to redo');
         return;
       case 'rewind':
         runner.setRunning(false);

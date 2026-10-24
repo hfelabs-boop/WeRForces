@@ -12,6 +12,8 @@
       <div class="menu" data-controller-only>
         <button id="btn-file">File ▾</button>
         <div class="menu-items" id="menu-file">
+          <button data-action="undo" data-controller-only>Undo <kbd>Ctrl+Z</kbd></button>
+          <button data-action="redo" data-controller-only>Redo <kbd>Ctrl+Y</kbd></button>
           <button data-action="new">New scenario</button>
           <button data-action="open-sample">Open scenario…</button>
           <button data-action="import">Import from file…</button>
@@ -47,6 +49,7 @@
         <button data-draw="point" title="Place point">Point</button>
         <button data-draw="minefield" title="Draw minefield">Minefield</button>
         <button data-draw="obstacle" title="Draw obstacle line (ditch, wire)">Obstacle</button>
+        <button id="btn-measure" title="Measure distance and bearing; with two points, check line of sight (M)">Measure</button>
       </div>
       <div class="sep"></div>
       <div class="menu" id="layers-menu">
@@ -61,6 +64,10 @@
             <option value="auto">Units: auto</option>
             <option value="units">Units: aggregate</option>
             <option value="entities">Units: entities</option>
+          </select>
+          <select id="sel-symbols" title="Symbol style">
+            <option value="2525">Symbols: MIL-STD-2525</option>
+            <option value="simple">Symbols: simple</option>
           </select>
         </div>
       </div>
@@ -128,6 +135,7 @@
         <span class="spacer"></span>
         <span id="score"></span>
       </div>
+      <div id="timeline-strip" class="timeline-strip" title="Timeline: kills (red), detections (blue), completed plans (green); scheduled plan steps (yellow) and orders on their way (purple). Click a past mark to review it."></div>
       <div id="log"></div>
     </footer>
 

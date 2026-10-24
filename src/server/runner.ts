@@ -3,7 +3,7 @@
 import type { DisGateway } from '../dis/gateway.js';
 import { DEFAULT_DT, type Engine } from '../sim/engine.js';
 import { Recorder } from '../sim/recorder.js';
-import type { SimState } from '../shared/types.js';
+import type { ScenarioFile, SimState } from '../shared/types.js';
 
 export class SimRunner {
   running = false;
@@ -15,6 +15,11 @@ export class SimRunner {
   private last = 0;
   private accumulator = 0;
   private frameListeners: (() => void)[] = [];
+  /** Checkpoints before each edit, for undo, and of undone states, for redo. */
+  readonly undoStack: ScenarioFile[] = [];
+  readonly redoStack: ScenarioFile[] = [];
+  /** How many edits can be undone (0: no undo history). */
+  undoLimit = 30;
 
   constructor(
     readonly engine: Engine,
@@ -74,8 +79,33 @@ export class SimRunner {
     for (const fn of this.frameListeners) fn();
   }
 
+  /** Remember the state before an edit. */
+  pushUndo(before: ScenarioFile): void {
+    if (this.undoLimit <= 0) return;
+    this.undoStack.push(before);
+    if (this.undoStack.length > this.undoLimit) this.undoStack.shift();
+    this.redoStack.length = 0;
+  }
+
+  undo(): boolean {
+    const prev = this.undoStack.pop();
+    if (!prev) return false;
+    this.redoStack.push(this.engine.toScenario());
+    this.engine.restoreCheckpoint(prev, 'Undo');
+    return true;
+  }
+
+  redo(): boolean {
+    const next = this.redoStack.pop();
+    if (!next) return false;
+    this.undoStack.push(this.engine.toScenario());
+    this.engine.restoreCheckpoint(next, 'Redo');
+    return true;
+  }
+
   state(): SimState {
     const s = this.engine.snapshot();
+    if (this.undoLimit > 0) s.history = { undo: this.undoStack.length, redo: this.redoStack.length };
     s.running = this.running;
     s.timeScale = this.timeScale;
     if (this.gateway) s.dis = this.gateway.status();
