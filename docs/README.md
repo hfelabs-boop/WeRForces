@@ -62,7 +62,8 @@ These pages are also served by a running server at **`/docs`** (toolbar → **He
 - [MCP tools](reference/mcp-tools.md) *(generated)*
 - [Catalog: entity types, weapons, sensors, unit templates](reference/catalog.md) *(generated)*
 - [Scenario file format](reference/scenario-format.md)
-- [DIS](reference/dis.md): entity state, fire, detonation, radio and simulation management
+- [DIS](reference/dis.md): entity state, fire, detonation, radio, emissions and simulation management
+- [DIS conformance matrix](reference/dis-conformance.md): every DIS 7 PDU type, fields, deviations and the tests that cross-check it against an independent implementation
 - [Integrations: CoT, webhooks, GIS](reference/integrations.md)
 
 ## Examples

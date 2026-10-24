@@ -7,9 +7,48 @@ import type { DisStatus, ForceId, Vec3 } from '../shared/types.js';
 import type { Detonation, Shot } from '../sim/combat.js';
 import type { Engine } from '../sim/engine.js';
 import type { Entity } from '../sim/entity.js';
-import { ecefToEnuVector, ecefToGeodetic, enuToEcefVector, eulerToHeadingPitchRoll, headingPitchRollToEuler, LocalFrame } from './geodesy.js';
+import { datumsFor, DEFAULT_ENTITY_QUERY, type EntitySnapshot } from './datums.js';
+import { emitterSystems } from './emissions.js';
+import { ecefToEnuVector, ecefToGeodetic, enuToEcefVector, type EulerAngles, eulerToHeadingPitchRoll, headingPitchRollToEuler, LocalFrame } from './geodesy.js';
 import {
+  ACK_CREATE_ENTITY,
+  ACK_REMOVE_ENTITY,
   ACK_START_RESUME,
+  ACTION_REQUEST_REJECTED,
+  decodeActionRequest,
+  decodeActionResponse,
+  decodeCollision,
+  decodeCreateEntity,
+  decodeData,
+  decodeDataQuery,
+  decodeDesignator,
+  decodeElectromagneticEmission,
+  decodeEntityStateUpdate,
+  decodeIff,
+  EE_CHANGED_DATA_UPDATE,
+  EE_HEARTBEAT_UPDATE,
+  type EmitterSystem,
+  encodeActionResponse,
+  encodeData,
+  encodeElectromagneticEmission,
+  LVC_CONSTRUCTIVE,
+  PDU_ACTION_REQUEST,
+  PDU_ACTION_RESPONSE,
+  PDU_COLLISION,
+  PDU_CREATE_ENTITY,
+  PDU_DATA,
+  PDU_DATA_QUERY,
+  PDU_DESIGNATOR,
+  PDU_ELECTROMAGNETIC_EMISSION,
+  PDU_ENTITY_STATE_UPDATE,
+  PDU_IFF,
+  PDU_REMOVE_ENTITY,
+  PDU_SET_DATA,
+  RAI_ATTACHED,
+  RESPONSE_ABLE_TO_COMPLY,
+  RESPONSE_UNABLE_TO_COMPLY,
+  STATUS_LVC_SHIFT,
+  STATUS_RAI_SHIFT,
   ACK_STOP_FREEZE,
   ALL_ENTITIES,
   clockTime,
@@ -95,6 +134,10 @@ export interface DisConfig {
   obeySimulationManager: boolean;
   /** Send Start/Resume and Stop/Freeze PDUs when this simulation is run or paused (act as simulation manager). */
   announceRunState: boolean;
+  /** Send Electromagnetic Emission PDUs for local radars and jammers. */
+  emissions: boolean;
+  /** Seconds between Electromagnetic Emission heartbeats for unchanged emitters (DIS 7 default 10 s). */
+  emissionHeartbeat: number;
 }
 
 export const DEFAULT_DIS_CONFIG: DisConfig = {
@@ -112,7 +155,14 @@ export const DEFAULT_DIS_CONFIG: DisConfig = {
   radioNets: { 0: 36_000_000, 1: 30_000_000, 2: 32_000_000, 3: 34_000_000 },
   obeySimulationManager: true,
   announceRunState: false,
+  emissions: true,
+  emissionHeartbeat: 10,
 };
+
+/** PDU status: every PDU WeRForces sends is from a constructive simulation. */
+const STATUS_CONSTRUCTIVE = LVC_CONSTRUCTIVE << STATUS_LVC_SHIFT;
+/** Radio PDUs also say the radio is attached to an entity. */
+const STATUS_RADIO = STATUS_CONSTRUCTIVE | (RAI_ATTACHED << STATUS_RAI_SHIFT);
 
 /** What the gateway can do to the simulation it is attached to. */
 export interface SimulationControl {
@@ -189,6 +239,11 @@ export class DisGateway {
   private radios = new Map<string, number>();
   /** Remote radios heard: key -> last Transmitter PDU wall time. */
   private remoteRadios = new Map<string, number>();
+  /** Local emitters: what was last sent in an Electromagnetic Emission PDU, and when. */
+  private emitting = new Map<string, { wall: number; entityId: EntityId; key: string; systems: EmitterSystem[] }>();
+  private emissionEvent = 0;
+  /** Remote laser designators: who they are lasing (entity id, '' for a spot) and when last heard. */
+  private designations = new Map<string, { target: string; wall: number }>();
   private requestId = 0;
   /** Run/pause hook for simulation management PDUs. */
   control: SimulationControl | null = null;
@@ -220,6 +275,8 @@ export class DisGateway {
         this.published.clear();
         this.remotes.clear();
         this.radios.clear();
+        this.emitting.clear();
+        this.designations.clear();
       }),
     );
   }
@@ -250,7 +307,8 @@ export class DisGateway {
     };
   }
 
-  private header(): PduHeader {
+  /** A header for an outgoing PDU; `status` is the DIS 7 PDU status (ignored for older versions). */
+  private header(status = STATUS_CONSTRUCTIVE): PduHeader {
     return {
       protocolVersion: this.config.protocolVersion,
       exerciseId: this.config.exerciseId,
@@ -258,6 +316,7 @@ export class DisGateway {
       protocolFamily: 0,
       timestamp: disTimestamp(),
       length: 0,
+      status,
     };
   }
 
@@ -346,6 +405,8 @@ export class DisGateway {
     }
 
     this.updateRadios(wall);
+    this.updateEmissions(wall);
+    for (const [key, d] of this.designations) if (wall - d.wall > this.config.timeout) this.designations.delete(key);
 
     for (const [id, track] of this.remotes) {
       const e = this.engine.entities.get(id);
@@ -371,6 +432,7 @@ export class DisGateway {
       this.radios.delete(e.id);
       this.sendTransmitter(e, TRANSMIT_OFF);
     }
+    this.stopEmitting(e.id);
     if (e.remote) {
       this.remotes.delete(e.id);
       return;
@@ -390,13 +452,13 @@ export class DisGateway {
   }
 
   private radioType(e: Entity) {
-    return { kind: 7, domain: e.type.dis.domain, country: e.type.dis.country, category: 0, nomenclatureVersion: 0, nomenclature: 0 };
+    return { kind: 7, domain: e.type.dis.domain, country: e.type.dis.country, category: 0, subcategory: 0, specific: 0, extra: 0 };
   }
 
   private sendTransmitter(e: Entity, state: number): void {
     this.send(
       encodeTransmitter({
-        header: this.header(),
+        header: this.header(STATUS_RADIO),
         radioReferenceId: this.localId(e),
         radioNumber: 1,
         radioType: this.radioType(e),
@@ -422,7 +484,7 @@ export class DisGateway {
       if (last !== undefined && wall - last < this.config.heartbeat) continue;
       this.radios.set(e.id, wall);
       this.sendTransmitter(e, TRANSMIT_ON_IDLE);
-      this.send(encodeReceiver({ header: this.header(), radioReferenceId: this.localId(e), radioNumber: 1, receiverState: RECEIVER_ON_IDLE, receivedPower: 0, transmitterEntityId: NO_ENTITY, transmitterRadioId: 0 }));
+      this.send(encodeReceiver({ header: this.header(STATUS_RADIO), radioReferenceId: this.localId(e), radioNumber: 1, receiverState: RECEIVER_ON_IDLE, receivedPower: 0, transmitterEntityId: NO_ENTITY, transmitterRadioId: 0 }));
     }
     for (const id of [...this.radios.keys()]) {
       const e = this.engine.entities.get(id);
@@ -439,7 +501,7 @@ export class DisGateway {
     this.sendTransmitter(e, TRANSMIT_ON_TRANSMITTING);
     this.send(
       encodeSignal({
-        header: this.header(),
+        header: this.header(STATUS_RADIO),
         radioReferenceId: this.localId(e),
         radioNumber: 1,
         encodingScheme: (ENCODING_RAW_BINARY << 14) | 1, // one message
@@ -451,6 +513,57 @@ export class DisGateway {
     );
     this.sendTransmitter(e, TRANSMIT_ON_IDLE);
     this.radios.set(e.id, this.now());
+  }
+
+  // ------------------------------------------------------------ electromagnetic emissions
+
+  /**
+   * Send an Electromagnetic Emission PDU for each local radar or jammer: when what it radiates
+   * changes (changed data update), every `emissionHeartbeat` seconds (heartbeat), and once
+   * with no beams when it stops.
+   */
+  private updateEmissions(wall: number): void {
+    if (!this.config.emissions) return;
+    for (const e of this.engine.entities.values()) {
+      if (e.remote) continue;
+      const systems = emitterSystems(this.engine, e);
+      const last = this.emitting.get(e.id);
+      if (!systems.length) {
+        if (last) this.stopEmitting(e.id);
+        continue;
+      }
+      const key = JSON.stringify(systems);
+      const changed = !last || last.key !== key;
+      if (!changed && wall - last.wall < this.config.emissionHeartbeat) continue;
+      const entityId = this.localId(e);
+      this.sendEmission(entityId, systems, changed ? EE_CHANGED_DATA_UPDATE : EE_HEARTBEAT_UPDATE);
+      this.emitting.set(e.id, { wall, entityId, key, systems });
+    }
+  }
+
+  /** An emitter that went quiet (switched off, destroyed, mounted, deleted): its systems once more, with no beams. */
+  private stopEmitting(id: string): void {
+    const last = this.emitting.get(id);
+    if (!last) return;
+    this.emitting.delete(id);
+    this.sendEmission(
+      last.entityId,
+      last.systems.map((s) => ({ ...s, beams: [] })),
+      EE_CHANGED_DATA_UPDATE,
+    );
+  }
+
+  private sendEmission(entityId: EntityId, systems: EmitterSystem[], stateUpdateIndicator: number): void {
+    this.emissionEvent = (this.emissionEvent % 0xffff) + 1;
+    this.send(
+      encodeElectromagneticEmission({
+        header: this.header(),
+        emittingEntityId: entityId,
+        eventId: { site: this.config.site, application: this.config.application, entity: this.emissionEvent },
+        stateUpdateIndicator,
+        systems,
+      }),
+    );
   }
 
   // ------------------------------------------------------------ simulation management
@@ -554,6 +667,16 @@ export class DisGateway {
       else if (h.pduType === PDU_TRANSMITTER) this.receiveTransmitter(buf);
       else if (h.pduType === PDU_SIGNAL) this.receiveSignal(buf);
       else if (h.pduType === PDU_RECEIVER || h.pduType === PDU_ACKNOWLEDGE) this.pdusReceived++;
+      else if (h.pduType === PDU_ENTITY_STATE_UPDATE) this.receiveEntityStateUpdate(buf);
+      else if (h.pduType === PDU_COLLISION) this.receiveCollision(buf);
+      else if (h.pduType === PDU_DESIGNATOR) this.receiveDesignator(buf);
+      else if (h.pduType === PDU_CREATE_ENTITY || h.pduType === PDU_REMOVE_ENTITY) this.receiveCreateRemove(buf, h.pduType === PDU_REMOVE_ENTITY);
+      else if (h.pduType === PDU_DATA_QUERY) this.receiveDataQuery(buf);
+      else if (h.pduType === PDU_SET_DATA) this.receiveSetData(buf);
+      else if (h.pduType === PDU_ACTION_REQUEST) this.receiveActionRequest(buf);
+      else if (h.pduType === PDU_DATA || h.pduType === PDU_ACTION_RESPONSE) this.receiveReply(buf, h.pduType === PDU_DATA);
+      else if (h.pduType === PDU_ELECTROMAGNETIC_EMISSION) this.receiveDecodedOnly(decodeElectromagneticEmission(buf).emittingEntityId);
+      else if (h.pduType === PDU_IFF) this.receiveDecodedOnly(decodeIff(buf).emittingEntityId);
       else return;
     } catch {
       return; // malformed PDU
@@ -577,36 +700,201 @@ export class DisGateway {
     const pdu = decodeEntityState(buf);
     if (this.isOwn(pdu.entityId)) return;
     this.pdusReceived++;
+    const type = this.engine.catalog.matchDisType(pdu.entityType);
+    const force = (pdu.forceId <= 3 ? pdu.forceId : 0) as ForceId;
+    const name = pdu.marking || `${type.name} (${pdu.entityId.site}:${pdu.entityId.application}:${pdu.entityId.entity})`;
+    this.reflect(pdu.entityId, { typeId: type.id, name, force }, pdu.location, pdu.linearVelocity, pdu.orientation, pdu.appearance, pdu.deadReckoning.algorithm, pdu.deadReckoning.linearAcceleration);
+  }
+
+  /** Entity State Update: new kinematics and appearance for a remote entity already known from its Entity State. */
+  private receiveEntityStateUpdate(buf: Uint8Array): void {
+    const pdu = decodeEntityStateUpdate(buf);
+    if (this.isOwn(pdu.entityId)) return;
+    this.pdusReceived++;
     const id = remoteKey(pdu.entityId);
-    if (pdu.appearance & APPEARANCE_DEACTIVATED) {
+    const e = this.engine.entities.get(id);
+    const track = this.remotes.get(id);
+    if (!e || !track) return; // type, force and marking only come with an Entity State
+    this.reflect(pdu.entityId, { typeId: e.type.id, name: e.name, force: e.force }, pdu.location, pdu.linearVelocity, pdu.orientation, pdu.appearance, track.algorithm, null);
+  }
+
+  /** Create, move or remove the remote entity for a received state. `acceleration` is ECEF; null keeps the last one. */
+  private reflect(entityId: EntityId, identity: { typeId: string; name: string; force: ForceId }, location: Vec3, linearVelocity: Vec3, orientation: EulerAngles, appearance: number, algorithm: number, acceleration: Vec3 | null): void {
+    const id = remoteKey(entityId);
+    if (appearance & APPEARANCE_DEACTIVATED) {
       this.remotes.delete(id);
       if (this.engine.entities.has(id)) this.engine.deleteObject(id);
       return;
     }
-    const geo = ecefToGeodetic(pdu.location);
+    const geo = ecefToGeodetic(location);
     const position = this.frame.fromGeodetic(geo);
-    const velocity = ecefToEnuVector(geo.lat, geo.lon, pdu.linearVelocity);
-    const acceleration = ecefToEnuVector(geo.lat, geo.lon, pdu.deadReckoning.linearAcceleration);
-    const hpr = eulerToHeadingPitchRoll(geo.lat, geo.lon, pdu.orientation);
-    const type = this.engine.catalog.matchDisType(pdu.entityType);
-    const force = (pdu.forceId <= 3 ? pdu.forceId : 0) as ForceId;
-    const damage = (pdu.appearance & APPEARANCE_DAMAGE_MASK) >> APPEARANCE_DAMAGE_SHIFT;
+    const velocity = ecefToEnuVector(geo.lat, geo.lon, linearVelocity);
+    const accel = acceleration ? ecefToEnuVector(geo.lat, geo.lon, acceleration) : (this.remotes.get(id)?.acceleration ?? ZERO3);
+    const hpr = eulerToHeadingPitchRoll(geo.lat, geo.lon, orientation);
+    const damage = (appearance & APPEARANCE_DAMAGE_MASK) >> APPEARANCE_DAMAGE_SHIFT;
     const e = this.engine.upsertRemote({
       id,
-      typeId: type.id,
-      name: pdu.marking || `${type.name} (${pdu.entityId.site}:${pdu.entityId.application}:${pdu.entityId.entity})`,
-      force,
+      typeId: identity.typeId,
+      name: identity.name,
+      force: identity.force,
       position,
       velocity,
       heading: hpr.heading,
       pitch: hpr.pitch,
       roll: hpr.roll,
       destroyed: damage === 3,
-      dis: pdu.entityId,
+      dis: entityId,
     });
-    e.mobilityKill = (pdu.appearance & APPEARANCE_MOBILITY_KILL) !== 0;
-    e.firepowerKill = (pdu.appearance & APPEARANCE_FIREPOWER_KILL) !== 0;
-    this.remotes.set(id, { wall: this.now(), position, velocity, acceleration, algorithm: pdu.deadReckoning.algorithm });
+    e.mobilityKill = (appearance & APPEARANCE_MOBILITY_KILL) !== 0;
+    e.firepowerKill = (appearance & APPEARANCE_FIREPOWER_KILL) !== 0;
+    this.remotes.set(id, { wall: this.now(), position, velocity, acceleration: accel, algorithm });
+  }
+
+  /** The name to log for an entity id: a known entity's name, else site:application:entity. */
+  private nameOf(id: EntityId): string {
+    const key = this.resolveEntity(id);
+    return key ? this.engine.entities.get(key)!.name : `${id.site}:${id.application}:${id.entity}`;
+  }
+
+  /** WeRForces does not model collisions; another simulation's collision with a local entity is logged. */
+  private receiveCollision(buf: Uint8Array): void {
+    const pdu = decodeCollision(buf);
+    if (this.isOwn(pdu.issuingEntityId)) return;
+    this.pdusReceived++;
+    const victim = this.resolveEntity(pdu.collidingEntityId);
+    if (!victim || this.engine.entities.get(victim)!.remote) return;
+    this.engine.log('info', `${this.nameOf(pdu.issuingEntityId)} collided with ${this.nameOf(pdu.collidingEntityId)} (DIS)`, this.resolveEntity(pdu.issuingEntityId), victim);
+  }
+
+  /** Remote laser designators: logged when one starts lasing an entity (or a spot) or switches target. */
+  private receiveDesignator(buf: Uint8Array): void {
+    const pdu = decodeDesignator(buf);
+    if (this.isOwn(pdu.designatingEntityId)) return;
+    this.pdusReceived++;
+    const key = remoteKey(pdu.designatingEntityId);
+    if (pdu.power <= 0) {
+      this.designations.delete(key);
+      return;
+    }
+    const target = this.resolveEntity(pdu.designatedEntityId) ?? '';
+    const last = this.designations.get(key);
+    this.designations.set(key, { target, wall: this.now() });
+    if (last?.target === target) return;
+    const what = target ? this.engine.entities.get(target)!.name : 'a spot';
+    this.engine.log('info', `${this.nameOf(pdu.designatingEntityId)} is lasing ${what} (DIS designator, code ${pdu.designatorCode})`, this.resolveEntity(pdu.designatingEntityId), target || undefined);
+  }
+
+  /** EE and IFF PDUs: decoded (so malformed ones are dropped) and counted; they do not change the simulation. */
+  private receiveDecodedOnly(sender: EntityId): void {
+    if (!this.isOwn(sender)) this.pdusReceived++;
+  }
+
+  /** This application's own simulation address, as a siman originating id. */
+  private ownAddress(): EntityId {
+    return { site: this.config.site, application: this.config.application, entity: 0 };
+  }
+
+  /** The local entity a siman PDU names (this site and application, a specific entity number). */
+  private addressedEntity(id: EntityId): Entity | undefined {
+    if (!this.isOwn(id) || id.entity === 0 || id.entity === 0xffff) return undefined;
+    const key = this.resolveEntity(id);
+    return key ? this.engine.entities.get(key) : undefined;
+  }
+
+  /**
+   * Create Entity: not supported (a request carries no entity type), acknowledged as unable to
+   * comply. Remove Entity naming one of our entities: deleted, unless simulation management is ignored.
+   */
+  private receiveCreateRemove(buf: Uint8Array, remove: boolean): void {
+    const pdu = decodeCreateEntity(buf);
+    if (this.isOwn(pdu.originatingId) || !this.addressedToUs(pdu.receivingId)) return;
+    this.pdusReceived++;
+    const from = `${pdu.originatingId.site}:${pdu.originatingId.application}`;
+    const target = remove ? this.addressedEntity(pdu.receivingId) : undefined;
+    const comply = !!target && this.config.obeySimulationManager;
+    if (remove) this.engine.log('info', `DIS simulation manager ${from}: remove entity ${target?.name ?? `${pdu.receivingId.site}:${pdu.receivingId.application}:${pdu.receivingId.entity}`}${comply ? '' : ' (ignored)'}`, target?.id);
+    else this.engine.log('info', `DIS simulation manager ${from}: create entity (not supported)`);
+    if (comply) this.engine.deleteObject(target!.id);
+    this.send(
+      encodeAcknowledge({
+        header: this.header(),
+        originatingId: this.ownAddress(),
+        receivingId: pdu.originatingId,
+        acknowledgeFlag: remove ? ACK_REMOVE_ENTITY : ACK_CREATE_ENTITY,
+        responseFlag: comply ? RESPONSE_ABLE_TO_COMPLY : RESPONSE_UNABLE_TO_COMPLY,
+        requestId: pdu.requestId,
+      }),
+    );
+  }
+
+  /** The state of a local entity as datums. */
+  private snapshot(e: Entity): EntitySnapshot {
+    const geo = this.frame.toGeodetic(e.position);
+    const v = e.velocity;
+    const scale = this.running ? this.timeScale : 0;
+    const apparent = { x: v.x * scale, y: v.y * scale, z: v.z * scale };
+    return {
+      id: this.localId(e),
+      type: e.type.dis,
+      force: e.force,
+      marking: e.name.slice(0, 11),
+      location: this.frame.toEcef(e.position),
+      geodetic: geo,
+      orientation: headingPitchRollToEuler(geo.lat, geo.lon, e.heading, e.pitch, e.roll),
+      heading: e.heading,
+      pitch: e.pitch,
+      roll: e.roll,
+      appearance: DisGateway.appearanceOf(e),
+      mobilityKill: e.mobilityKill,
+      firepowerKill: e.firepowerKill,
+      velocity: enuToEcefVector(geo.lat, geo.lon, apparent),
+      speed: Math.hypot(apparent.x, apparent.y, apparent.z),
+    };
+  }
+
+  /** Send a Data PDU answering `requestId` with the datums `ids` about `receivingId` (one of our entities, or this application). */
+  private sendData(to: EntityId, about: EntityId, requestId: number, ids: number[]): void {
+    const e = this.addressedEntity(about);
+    const local = [...this.engine.entities.values()].filter((x) => !x.remote).length;
+    const datums = e ? datumsFor(this.snapshot(e), ids.length ? ids : DEFAULT_ENTITY_QUERY, local) : datumsFor(null, ids, local);
+    this.send(encodeData({ header: this.header(), originatingId: e ? this.localId(e) : this.ownAddress(), receivingId: to, requestId, ...datums }));
+  }
+
+  /** Data Query: answered once with a Data PDU (a time interval asking for repeats is not honoured). */
+  private receiveDataQuery(buf: Uint8Array): void {
+    const q = decodeDataQuery(buf);
+    if (this.isOwn(q.originatingId) || !this.addressedToUs(q.receivingId)) return;
+    this.pdusReceived++;
+    this.sendData(q.originatingId, q.receivingId, q.requestId, [...q.fixedIds, ...q.variableIds]);
+  }
+
+  /** Set Data: nothing is changed; logged, and answered with a Data PDU holding the current values. */
+  private receiveSetData(buf: Uint8Array): void {
+    const pdu = decodeData(buf);
+    if (this.isOwn(pdu.originatingId) || !this.addressedToUs(pdu.receivingId)) return;
+    this.pdusReceived++;
+    const ids = [...pdu.fixed, ...pdu.variable].map((d) => d.id);
+    this.engine.log('info', `DIS set data from ${pdu.originatingId.site}:${pdu.originatingId.application} for ${this.nameOf(pdu.receivingId)} ignored (${ids.length} datums)`, this.addressedEntity(pdu.receivingId)?.id);
+    this.sendData(pdu.originatingId, pdu.receivingId, pdu.requestId, ids);
+  }
+
+  /** Action Request: logged and rejected with an Action Response. */
+  private receiveActionRequest(buf: Uint8Array): void {
+    const pdu = decodeActionRequest(buf);
+    if (this.isOwn(pdu.originatingId) || !this.addressedToUs(pdu.receivingId)) return;
+    this.pdusReceived++;
+    const e = this.addressedEntity(pdu.receivingId);
+    this.engine.log('info', `DIS action request ${pdu.actionId} from ${pdu.originatingId.site}:${pdu.originatingId.application} rejected`, e?.id);
+    this.send(encodeActionResponse({ header: this.header(), originatingId: e ? this.localId(e) : this.ownAddress(), receivingId: pdu.originatingId, requestId: pdu.requestId, requestStatus: ACTION_REQUEST_REJECTED, fixed: [], variable: [] }));
+  }
+
+  /** Data and Action Response PDUs sent to this application specifically: logged. */
+  private receiveReply(buf: Uint8Array, data: boolean): void {
+    const pdu = data ? decodeData(buf) : decodeActionResponse(buf);
+    if (this.isOwn(pdu.originatingId) || !this.isOwn(pdu.receivingId)) return;
+    this.pdusReceived++;
+    const what = 'requestStatus' in pdu ? `action response (status ${pdu.requestStatus})` : 'data';
+    this.engine.log('info', `DIS ${what} from ${pdu.originatingId.site}:${pdu.originatingId.application}: ${pdu.fixed.length + pdu.variable.length} datums`);
   }
 
   private receiveRunState(buf: Uint8Array, start: boolean): void {

@@ -16,7 +16,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # Independent DIS implementation for the cross-check (test-only, into vendor-test/).
+      - run: npm run interop:fetch
       - run: npm test
+        env:
+          WERFORCES_INTEROP: '1'
       - run: npm run build
 
   e2e:

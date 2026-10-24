@@ -34,7 +34,10 @@ It also connects to other systems:
 - an **MCP server**, so AI agents such as Claude can inspect and command the
   simulation;
 - **DIS radio and simulation management**: Transmitter, Signal and Receiver
-  PDUs, and Start/Resume and Stop/Freeze;
+  PDUs; Start/Resume, Stop/Freeze, Data Query and the other simulation management
+  requests; Electromagnetic Emission for radars and jammers. Every PDU is
+  cross-checked against an independent implementation
+  ([conformance matrix](docs/reference/dis-conformance.md));
 - an **HLA bridge** (RPR FOM 2.0 subset, tested with the OHLA RTI);
 - **TAK / Cursor-on-Target** output for ATAK, WinTAK and TAK Server;
 - **webhooks** for Slack, Discord or any HTTP endpoint;

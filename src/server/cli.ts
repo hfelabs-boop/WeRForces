@@ -31,7 +31,8 @@ Options:
       --dis                   Enable DIS networking over UDP
       --dis-port <n>          DIS UDP port (default 3000)
       --dis-announce          send Start/Resume and Stop/Freeze PDUs on run/pause (act as simulation manager)
-      --dis-ignore-siman      do not run/pause on other simulation managers' Start/Resume and Stop/Freeze PDUs
+      --dis-ignore-siman      do not run/pause or remove entities on other simulation managers' PDUs
+      --dis-no-emissions      do not send Electromagnetic Emission PDUs for radars and jammers
       --dis-address <addr>    DIS destination: broadcast/multicast/unicast (default 255.255.255.255)
       --exercise <n>          DIS exercise id (default 1)
       --site <n>              DIS site id (default 1)
@@ -110,6 +111,7 @@ async function main(): Promise<void> {
       'dis-address': { type: 'string', default: '255.255.255.255' },
       'dis-announce': { type: 'boolean', default: false },
       'dis-ignore-siman': { type: 'boolean', default: false },
+      'dis-no-emissions': { type: 'boolean', default: false },
       exercise: { type: 'string', default: '1' },
       site: { type: 'string', default: '1' },
       application: { type: 'string', default: '3001' },
@@ -182,6 +184,7 @@ async function main(): Promise<void> {
       application: Number(values.application),
       announceRunState: values['dis-announce'],
       obeySimulationManager: !values['dis-ignore-siman'],
+      emissions: !values['dis-no-emissions'],
     });
     runner.gateway.control = { setRunning: (run) => runner.setRunning(run) };
     console.log(`DIS enabled: exercise ${values.exercise}, site ${values.site}, app ${values.application}, udp ${values['dis-address']}:${port}`);

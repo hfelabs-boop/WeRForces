@@ -209,6 +209,32 @@ the event count (UnsignedInteger16) followed by the firing entity's
   and simulation-management interactions are not bridged; only Entity State,
   Fire and Detonation are.
 
+### Gaps against the full RPR FOM 2.0
+
+The [DIS gateway](reference/dis.md) speaks more PDUs than the bridge carries (see the
+[DIS conformance matrix](reference/dis-conformance.md)). The bridge carries only Entity
+State, Fire and Detonation. Everything else WeRForces sends over DIS is dropped at the
+bridge, and the matching RPR FOM 2.0 classes are missing from the FOM module:
+
+| RPR FOM 2.0 module | In the bridge | Missing |
+| --- | --- | --- |
+| Base / Physical (entities) | `BaseEntity`, `PhysicalEntity`, `Platform` (and subclasses), `Lifeform`, `Munition`, with the attributes above | The `Spatial` variant record (see above), the `Collision` interaction, `AccelerationVector`/`AngularVelocityVector` inside it, `AlternateEntityType`, `ArticulatedParametersArray`, `IsPartOf`, `RelativeSpatial`, `CamouflageType`, `TrailingEffectsCode`, `HatchState`, `PowerPlantOn`, `IsConcealed` and the other `PhysicalEntity` attributes; `CulturalFeature`, `Expendables`, `Sensor`, `Supplies`, `Radio` and `Platform` subclasses beyond the five above |
+| Warfare | `WeaponFire`, `MunitionDetonation` (without `ArticulatedPartData`) | Munition objects for tracked rounds; `Designator` (an `EmbeddedSystem`) |
+| Distributed emission (DER) | – | `EmbeddedSystem.EmitterSystem` with `EmitterBeam` (`RadarBeam`, `JammerBeam`), `IFF` (WeRForces now sends Electromagnetic Emission PDUs for its radars and jammers; the bridge drops them) |
+| Radio communications | – | `EmbeddedSystem.RadioTransmitter`, `RadioReceiver`, and the `RadioSignal` interactions (`EncodedAudioRadioSignal`, `RawBinaryRadioSignal`, `ApplicationSpecificRadioSignal`). WeRForces' Transmitter, Receiver and Signal PDUs are dropped |
+| Simulation management | – | `CreateEntity`, `RemoveEntity`, `StartResume`, `StopFreeze`, `Acknowledge`, `ActionRequest`, `ActionResponse`, `DataQuery`, `SetData`, `Data`, `EventReport`, `Comment` (and the reliable variants). Run/pause and data queries do not cross the bridge |
+| Aggregate | – | `AggregateEntity` and its attributes |
+| Logistics, Minefield, Synthetic Environment | – | All |
+
+Other differences:
+
+- PDUs the bridge sends to WeRForces have PDU status 0 (*no statement*), where the gateway
+  now sends *constructive*. The bridge ignores the status of received PDUs, and the
+  variable parameter records that follow an Entity State.
+- Closing these gaps needs FOM and bridge changes tested against a real RTI
+  (`npm run hla:build`, `test/hla.test.ts`). The [roadmap](roadmap.md) plans it for
+  v0.8, together with testing against commercial RTIs.
+
 ## Limitations
 
 - The bridge only uses receive-order messaging. It neither regulates nor is

@@ -327,7 +327,7 @@ describe('DIS radio and simulation management', () => {
         header,
         radioReferenceId: { site: 1, application: 2, entity: 3 },
         radioNumber: 1,
-        radioType: { kind: 7, domain: 1, country: 225, category: 0, nomenclatureVersion: 0, nomenclature: 0 },
+        radioType: { kind: 7, domain: 1, country: 225, category: 0, subcategory: 0, specific: 0, extra: 0 },
         transmitState: 2,
         inputSource: 1,
         antennaLocation: { x: 4e6, y: 7e5, z: 4.9e6 },
