@@ -136,14 +136,25 @@ export function createMcpServer(call: ApiCaller): McpServer {
     async () => {
       const [sim, units, graphics, alerts] = await Promise.all([
         api<Record<string, unknown>>('GET', '/api/v1/simulation'),
-        api<{ id: string; name: string; force: number; echelon: string; formation: string; leaderId?: string; memberIds: string[]; x: number; y: number; task?: string; plan?: string }[]>('GET', '/api/v1/units'),
+        api<{ id: string; name: string; force: number; echelon: string; formation: string; leaderId?: string; memberIds: string[]; x: number; y: number; task?: string; plan?: string; aggregate?: { alive: number; total: number; posture: string } }[]>('GET', '/api/v1/units'),
         api<{ id: string; name: string; kind: string; force: number; points: unknown[] }[]>('GET', '/api/v1/graphics'),
         api<{ severity: string; text: string }[]>('GET', '/api/v1/alerts'),
       ]);
       return {
         ...sim,
         time: `${fmtTime(sim.time as number)} (${Math.round(sim.time as number)} s)`,
-        units: units.map((u) => ({ id: u.id, name: u.name, force: u.force, echelon: u.echelon, members: u.memberIds.length, leader: u.leaderId, x: Math.round(u.x), y: Math.round(u.y), activity: u.plan ?? u.task ?? 'idle' })),
+        units: units.map((u) => ({
+          id: u.id,
+          name: u.name,
+          force: u.force,
+          echelon: u.echelon,
+          members: u.memberIds.length,
+          leader: u.leaderId,
+          x: Math.round(u.x),
+          y: Math.round(u.y),
+          activity: u.plan ?? u.task ?? 'idle',
+          ...(u.aggregate ? { aggregated: `${u.aggregate.alive}/${u.aggregate.total} fit, ${u.aggregate.posture}` } : {}),
+        })),
         graphics: graphics.map((g) => ({ id: g.id, name: g.name, kind: g.kind, force: g.force, points: g.points.length })),
         alerts: alerts.length ? `${alerts.length} open (get_alerts): ${alerts.slice(0, 3).map((a) => a.text).join('; ')}` : 'none',
       };
@@ -501,6 +512,27 @@ export function createMcpServer(call: ApiCaller): McpServer {
     'Put a unit under a superior unit in the chain of command (or make it independent with superiorId null). An order given to the superior passes down to its subordinate units: moves keep their positions relative to each other, defend/overwatch/screen/ambush spread them in a line, other tasks go to all. With the orderDelay simulation rule on, each level adds a delay.',
     { unitId: z.string(), superiorId: z.string().nullable() },
     async ({ unitId, superiorId }) => api('PATCH', `/api/v1/units/${encodeURIComponent(unitId)}`, { superiorId }),
+    { idempotentHint: true },
+  );
+
+  tool(
+    'aggregate_unit',
+    'Switch a unit (and the units under it) between entity level and aggregate level. Aggregated, it is one object: its members leave the entity simulation, it moves at the speed of its slowest member type (move, follow route, wait, defend, overwatch and attack; other orders split it up first) and fights other aggregates with Lanchester attrition, losing specific members. It splits into its members by itself when enemy entities come close (see set_aggregation_policy). Use it for forces far from the action, to keep large scenarios fast. Returns the unit with its aggregate strength.',
+    { unitId: z.string(), aggregate: z.boolean().describe('true: aggregate; false: split back into entities (in formation, with their own damage, ammunition and fuel)') },
+    async ({ unitId, aggregate }) => api('POST', `/api/v1/units/${encodeURIComponent(unitId)}/${aggregate ? 'aggregate' : 'disaggregate'}`),
+  );
+
+  tool(
+    'set_aggregation_policy',
+    'When aggregated units split up and join up again. Defaults: an aggregate disaggregates when an enemy entity comes within 3000 m; a unit that split up by itself aggregates again once no enemy entity has been within 5000 m for 120 s. Fields left out keep their values; returns the policy.',
+    {
+      autoDisaggregate: z.boolean().optional(),
+      disaggregateRange: z.number().min(100).max(50000).optional().describe('metres'),
+      autoReaggregate: z.boolean().optional(),
+      reaggregateRange: z.number().min(100).max(100000).optional().describe('metres, at least disaggregateRange'),
+      reaggregateDelay: z.number().min(0).max(86400).optional().describe('seconds'),
+    },
+    async (policy) => api('PUT', '/api/v1/simulation/aggregation', policy),
     { idempotentHint: true },
   );
 

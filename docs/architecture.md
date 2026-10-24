@@ -22,6 +22,7 @@ src/sim           The simulation engine; no I/O, usable as a library
                     ambush, screen, search, manual (direct control))
   plans.ts          PlanExecutor (if/while compiled to steps with jumps), conditions, codewords
   units.ts          Unit: formations, leader succession, deployment, the chain of command
+  aggregate.ts      aggregate level: units as one object, Lanchester attrition, (dis)aggregation
   sensors.ts        detection
   combat.ts         target and weapon selection, fly-out, damage, indirect fire and blast
   models.ts         swappable hit/kill (armour by aspect), ballistic and radar models
@@ -78,7 +79,9 @@ docs              this documentation (served at /docs)
    (`rules.orderDelay`), and suppression wears off.
 2. **Units:** replace a lost or immobilised leader, and hand the unit task on.
 3. **Withdrawals:** units and entities whose withdraw reaction triggers drop
-   their plan and fall back.
+   their plan and fall back. Then the **aggregate level**: aggregated units
+   move; once a second they look for each other, and split up or join up
+   again by the policy; then Lanchester attrition between them.
 4. **Plans:** unit plans, then entity plans. Instant statements run straight
    away; a `task` statement starts the task, and later ticks check whether it
    has finished.
@@ -239,6 +242,7 @@ npm run docs:gen      # regenerate docs/reference/catalog.md and mcp-tools.md
 | `sessions.test.ts` | several sessions side by side under `/s/{id}` |
 | `oidc.test.ts` | OpenID Connect sign-in against an in-test identity provider, token checks |
 | `hla.test.ts` | WeRForces and the HLA bridge through a real OHLA RTI (skipped unless `npm run hla:build` has been run) |
+| `aggregate.test.ts` | aggregate level: attrition against the closed-form Lanchester square law, round trips, automatic disaggregation and re-aggregation, save/load, fog of war, REST and MCP |
 | `explain.test.ts` | "Why?" explanations: blockers, line of sight, fixes, what players are told |
 | `alerts.test.ts` | the attention queue: idle, fuel, losses, acknowledging |
 | `eta.test.ts` | travel estimates |

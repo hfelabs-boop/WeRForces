@@ -465,7 +465,79 @@ export interface UnitRecord {
   task?: TaskSpec;
   reactions?: Reactions;
   /** Runtime state, present in checkpoints. */
-  state?: { planIndex?: number; taskState?: TaskSpec; leaderId?: string; withdrawn?: boolean; taskDone?: boolean; morale?: number; moraleState?: MoraleState; lossesSeen?: number };
+  state?: { planIndex?: number; taskState?: TaskSpec; leaderId?: string; withdrawn?: boolean; taskDone?: boolean; morale?: number; moraleState?: MoraleState; lossesSeen?: number; reaggregate?: { quietSince?: number } };
+  /** Simulated as one object (aggregate level): its members are out of the entity-level simulation. */
+  aggregate?: AggregateRecord;
+}
+
+/** An aggregated unit's own state, saved with the scenario. */
+export interface AggregateRecord {
+  x: number;
+  y: number;
+  heading: number;
+  /** Checkpoint only. */
+  speed?: number;
+  posture?: AggregatePosture;
+  postureSince?: number;
+  /** Fractional losses still to be taken, per entity type (Lanchester attrition). */
+  pendingLosses?: Record<string, number>;
+  /** Fractional rounds still to be taken from the members, per weapon. */
+  pendingRounds?: Record<string, number>;
+  /** Enemy aggregates it has detected: unit id, last seen time and place. */
+  contacts?: { id: string; lastSeen: number; x: number; y: number }[];
+  /** Forces that have detected it: last seen time and place. */
+  seenBy?: { force: ForceId; lastSeen: number; x: number; y: number }[];
+  /** Aggregates that fired on it: unit id -> time. */
+  attackers?: Record<string, number>;
+  lastFiredAt?: number;
+}
+
+/** Posture of an aggregated unit, which sets how hard it is to hit. */
+export type AggregatePosture = 'moving' | 'halted' | 'defending' | 'dugIn';
+
+/** When aggregated units split into entities near the enemy, and when they join up again. Missing fields keep their defaults. */
+export interface AggregationPolicy {
+  /** Disaggregate when an enemy entity (not aggregated) comes within `disaggregateRange` m. Default on. */
+  autoDisaggregate?: boolean;
+  /** Default 3000 m. */
+  disaggregateRange?: number;
+  /** Units that disaggregated automatically aggregate again once no enemy entity is within `reaggregateRange` m for `reaggregateDelay` s. Default on. */
+  autoReaggregate?: boolean;
+  /** Default 5000 m (larger than disaggregateRange, so units do not flip back and forth). */
+  reaggregateRange?: number;
+  /** Default 120 s. */
+  reaggregateDelay?: number;
+}
+
+/** An aggregated unit as clients see it. */
+export interface AggregateSnapshot {
+  /** Members fit to fight, and all members. */
+  alive: number;
+  total: number;
+  /** Strength per entity type: alive (whole members), effective (less losses still being taken), total. */
+  strength: { typeId: string; name: string; alive: number; effective?: number; total: number }[];
+  /** Potential kills per minute against its best targets at short range (sum over members). */
+  combatPower?: number;
+  heading: number;
+  speed: number;
+  posture: AggregatePosture;
+  /** Speed of its slowest member type on the ground it is on (m/s). */
+  unitSpeed?: number;
+  /** Best sensor range of its members (m). */
+  sensorRange?: number;
+  /** Pooled ammunition and fuel, 0..1. */
+  ammo?: number;
+  fuel?: number;
+  /** Enemy unit it is firing on. */
+  engagingId?: string;
+  /** Enemy units it has detected. */
+  contacts?: string[];
+  /** Symbol of its lead vehicle type. */
+  typeId: string;
+  domain: Domain;
+  symbol: SymbolKind;
+  /** Fog of war: seconds since this enemy aggregate was last seen. */
+  contactAge?: number;
 }
 
 /** A munition in flight, saved in checkpoints. */
@@ -514,6 +586,8 @@ export interface ScenarioFile {
   catalog?: Partial<Catalog>;
   /** Global plans: one synchronization matrix per force (with, in checkpoints, which phases started). */
   syncMatrices?: (SyncMatrix & { started?: Record<string, number> })[];
+  /** When aggregated units disaggregate and re-aggregate (defaults when missing). */
+  aggregation?: AggregationPolicy;
 }
 
 /** Background civilians: cars on the roads and people in the towns (neutral, force 3). */
@@ -781,6 +855,8 @@ export interface UnitSnapshot {
   moraleState?: MoraleState;
   /** The unit's move (its leader's): distance left and time of arrival. */
   travel?: Travel;
+  /** Present while the unit is aggregated (simulated as one object; its members are not in `entities`). */
+  aggregate?: AggregateSnapshot;
 }
 
 export type SimEventKind =
@@ -924,6 +1000,11 @@ export type Command =
   | { cmd: 'setEnvironment'; environment: Environment }
   /** Put a unit under a superior unit (null: make it independent). */
   | { cmd: 'setSuperior'; unitId: string; superiorId: string | null }
+  /** Simulate a unit (and its subordinates) as one aggregate object, or split it back into entities. */
+  | { cmd: 'aggregate'; unitId: string }
+  | { cmd: 'disaggregate'; unitId: string }
+  /** When aggregates disaggregate and re-aggregate on their own. */
+  | { cmd: 'setAggregation'; policy: AggregationPolicy }
   /** Take back the last edit (any command but run/pause/step/time scale), or redo it. */
   | { cmd: 'undo' }
   | { cmd: 'redo' }

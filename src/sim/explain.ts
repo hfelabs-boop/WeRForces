@@ -267,8 +267,60 @@ export function explainEntity(engine: Engine, e: Entity, opts: ExplainOptions): 
   return { id: e.id, name: e.name, kind: 'entity', activity, summary: summarize(activity, [m, f]), movement: m, fire: f, sensing: s };
 }
 
+/** An aggregated unit: it is one object, so its own state stands for its members'. */
+function explainAggregate(engine: Engine, u: Unit, opts: ExplainOptions): Explanation {
+  const a = u.aggregate!;
+  const ag = engine.aggregates;
+  const snap = ag.snapshot(u)!;
+  const comp = snap.strength.filter((g) => g.alive).map((g) => `${g.alive} × ${g.name}`).join(', ') || 'no one left';
+  const own: Finding[] = [];
+  const pol = ag.policy;
+  own.push({
+    code: 'aggregated',
+    severity: 'info',
+    text: `Aggregated: simulated as one object, ${snap.alive} of ${snap.total} members fit to fight (${comp}); combat power ${snap.combatPower} kills a minute at short range.`,
+    fix: 'Disaggregate it to fight it entity by entity.',
+  });
+  own.push({
+    code: 'aggregationPolicy',
+    severity: 'info',
+    text: pol.autoDisaggregate ? `It splits into its members when an enemy entity (not aggregated) comes within ${km(pol.disaggregateRange)}.` : 'Automatic disaggregation is off: enemy entities neither see nor fight it until it is disaggregated.',
+  });
+  if (engine.rules.morale && u.moraleState !== 'steady') own.push({ code: `morale-${u.moraleState}`, severity: u.moraleState === 'broken' ? 'block' : 'warn', text: u.moraleState === 'broken' ? 'Broken: falling back, obeying no orders until it rallies.' : 'Shaken: shooting less accurately.' });
+  const order = engine.pendingOrders.find((o) => o.targetId === u.id);
+  if (order) own.push({ code: 'orderPending', severity: 'info', text: `A new order is on its way: it arrives in ${Math.max(0, Math.ceil(order.due - engine.time))} s.` });
+  const movement: Finding[] = [];
+  const task = ag.describeTask(u);
+  if (engine.rules.fuel && a.alive().some((m) => m.type.endurance?.km && m.fuel <= 0)) movement.push({ code: 'outOfFuel', severity: 'block', text: 'A vehicle is out of fuel, so the unit cannot move on.', fix: 'Disaggregate it and resupply.' });
+  else if (snap.fuel !== undefined && snap.fuel < 0.2) movement.push({ code: 'lowFuel', severity: 'warn', text: `Fuel low: ${pct(snap.fuel)} left (pooled).` });
+  if (a.posture === 'moving') movement.push({ code: 'moving', severity: 'info', text: `Moving at ${Math.round(snap.speed * 3.6)} km/h, the speed of its slowest member type on this ground.` });
+  else if (a.posture === 'defending' || a.posture === 'dugIn') movement.push({ code: 'holding', severity: 'info', text: `Holding its position${a.posture === 'dugIn' ? ', dug in' : ''}.` });
+  else if (!task && !(u.plan && !u.plan.finished)) movement.push({ code: 'idle', severity: 'warn', text: 'No task: it waits where it is.', fix: 'Right-click the map to give it a task.' });
+  const fire: Finding[] = [];
+  if (snap.ammo !== undefined && snap.ammo <= 0) fire.push({ code: 'noAmmo', severity: 'block', text: 'Out of ammunition.', fix: 'Disaggregate it and resupply.' });
+  else if (snap.ammo !== undefined && snap.ammo < 0.25) fire.push({ code: 'lowAmmo', severity: 'warn', text: `Ammunition low: ${pct(snap.ammo)} left (pooled).` });
+  const roe = u.leader?.roe ?? 'fireAtWill';
+  if (roe === 'holdFire') fire.push({ code: 'holdFire', severity: 'block', text: 'Rules of engagement: hold fire. It only shoots at the target it is ordered to attack.', fix: 'Set ROE to "fire at will".' });
+  else if (roe === 'returnFire') fire.push({ code: 'returnFire', severity: 'warn', text: 'Rules of engagement: return fire. It only shoots at aggregates that fired at it in the last minute.', fix: 'Set ROE to "fire at will".' });
+  const target = a.engagingId ? engine.units.get(a.engagingId) : undefined;
+  if (target?.aggregate) fire.push({ code: 'engaging', severity: 'info', text: `Engaging ${target.name} at ${km(dist2d(a, target.aggregate))} (Lanchester attrition).`, aboutId: target.id });
+  else if (!a.contacts.size) fire.push({ code: 'noContacts', severity: 'info', text: 'No enemy aggregate detected: it fires on enemy aggregates it sees, within its weapons\' reach.' });
+  const sensing: Finding[] = [{ code: 'sensors', severity: 'info', text: `Sees enemy aggregates within ${km(snap.sensorRange ?? 0)} (its best sensor) where there is line of sight.` }];
+  const known = a.contacts.size;
+  sensing.push({ code: 'contacts', severity: 'info', text: known ? `It has ${known} enemy aggregate${known === 1 ? '' : 's'} in sight.` : 'No enemy contacts.' });
+  if (opts.omniscient) {
+    let nearest = Infinity;
+    for (const e of engine.entities.values()) if (e.alive && !e.embarkedIn && engine.isHostile(u.force, e.force)) nearest = Math.min(nearest, dist2d(a, e));
+    if (Number.isFinite(nearest)) sensing.push({ code: 'nearestEnemyEntity', severity: 'info', text: `The nearest enemy entity is ${km(nearest)} away.` });
+  }
+  const activity = u.plan && !u.plan.finished ? u.plan.describe(engine) : task ?? (snap.alive ? 'No task' : 'Destroyed');
+  const worst = summarize(activity, [own.filter((f) => f.severity !== 'info'), movement, fire]);
+  return { id: u.id, name: u.name, kind: 'unit', activity, summary: `Aggregated: ${worst}`, movement, fire, sensing, unit: own };
+}
+
 /** A unit: its own state, then its leader's explanation, with what is wrong with the rest of its members. */
 export function explainUnit(engine: Engine, u: Unit, opts: ExplainOptions): Explanation {
+  if (u.aggregate) return explainAggregate(engine, u, opts);
   const alive = u.alive();
   const members = u.members();
   const own: Finding[] = [];

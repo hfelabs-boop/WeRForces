@@ -331,7 +331,8 @@ export class AttackTask extends Task {
   }
 
   protected tick({ engine, entity, dt }: TaskContext): TaskStatus {
-    const target = engine.entities.get(this.targetId);
+    // A target inside an aggregated unit is closed on where the aggregate is.
+    const target = engine.findEntity(this.targetId);
     if (!target || target.destroyed) {
       this.cancel(entity);
       return 'done';
@@ -372,7 +373,7 @@ export class AttackTask extends Task {
   }
 
   describe(engine: Engine): string {
-    return `Attack ${engine.entities.get(this.targetId)?.name ?? this.targetId}`;
+    return `Attack ${engine.findEntity(this.targetId)?.name ?? this.targetId}`;
   }
 }
 

@@ -60,6 +60,7 @@ import { TravelCache } from './eta.js';
 import { SyncPlans } from './sync.js';
 import { Life } from './life.js';
 import { Ew, JAMMED_ORDER_DELAY } from './ew.js';
+import { Aggregation } from './aggregate.js';
 
 export const DEFAULT_DT = 0.1;
 export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
@@ -167,6 +168,8 @@ export class Engine {
   readonly ew = new Ew(this);
   /** Hit/kill, ballistic and radar models in use (see models.ts). */
   models: Models = { ...DEFAULT_MODELS };
+  /** Aggregate-level units: units simulated as one object, and the policy for splitting them up. */
+  readonly aggregates = new Aggregation(this);
 
   private hostilities = new Set<string>(['1-2']);
   private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
@@ -222,7 +225,37 @@ export class Engine {
   }
 
   nameOf(id: string): string {
-    return this.entities.get(id)?.name ?? this.units.get(id)?.name ?? this.graphics.get(id)?.name ?? id;
+    return this.findEntity(id)?.name ?? this.units.get(id)?.name ?? this.graphics.get(id)?.name ?? id;
+  }
+
+  /** An entity, including a member hidden inside an aggregated unit. */
+  findEntity(id: string): Entity | undefined {
+    return this.entities.get(id) ?? this.aggregates.member(id);
+  }
+
+  /** Take an entity out of the entity-level simulation (its unit is being aggregated). It keeps its state. */
+  detachEntity(e: Entity): void {
+    this.setEntityTask(e, null);
+    e.plan = null;
+    e.steer = null;
+    e.halted = false;
+    e.pinned = false;
+    e.engagingId = undefined;
+    e.attackTargetId = undefined;
+    e.contacts.clear();
+    e.speed = 0;
+    this.entities.delete(e.id);
+    this.sensorDue.delete(e.id);
+    for (const other of this.entities.values()) other.contacts.delete(e.id);
+    this.spatial.invalidate();
+    for (const fn of this.listeners.removed) fn(e);
+  }
+
+  /** Put an entity taken out by detachEntity back; `k` staggers its sensor scans. */
+  attachEntity(e: Entity, k: number): void {
+    this.entities.set(e.id, e);
+    this.sensorDue.set(e.id, this.time + ((k * 0.37) % 1));
+    this.spatial.invalidate();
   }
 
   nextEventNumber(): number {
@@ -621,6 +654,7 @@ export class Engine {
     }
     const u = this.units.get(id);
     if (u) {
+      this.aggregates.release(u);
       for (const m of [...u.memberList]) this.deleteObject(m.id);
       this.dropUnit(id);
       return;
@@ -893,8 +927,11 @@ export class Engine {
         break;
       }
       case 'follow':
-      case 'attack':
         if (!this.entities.has(spec.targetId)) throw new Error(`unknown entity ${spec.targetId}`);
+        break;
+      case 'attack':
+        // The target may be inside an aggregated unit: attacking it attacks the aggregate.
+        if (!this.findEntity(spec.targetId)) throw new Error(`unknown entity ${spec.targetId}`);
         break;
       case 'mount':
         if (!this.entities.has(spec.carrierId) && !this.units.has(spec.carrierId)) throw new Error(`unknown carrier ${spec.carrierId}`);
@@ -1188,6 +1225,7 @@ export class Engine {
     for (const u of this.units.values()) u.plan?.update(this, u);
 
     this.checkWithdrawals();
+    this.aggregates.update(dt);
 
     for (const e of this.entities.values()) {
       if (e.remote || e.destroyed || e.embarkedIn) continue;
@@ -1286,6 +1324,7 @@ export class Engine {
     this.sync.clear();
     this.life.clear();
     this.ew.clear();
+    this.aggregates.clear();
     this.sensorDue.clear();
     this.losMemo.clear();
     this.smoke.clear();
@@ -1373,14 +1412,22 @@ export class Engine {
       }
     }
     for (const u of s.units ?? []) if (u.parentId && this.units.has(u.parentId) && this.units.has(u.id)) this.units.get(u.id)!.parentId = u.parentId;
+    // Aggregated units take their members out of the entity-level simulation before any orders are given.
+    if (s.aggregation) this.aggregates.setPolicy(s.aggregation);
+    for (const u of s.units ?? []) {
+      const unit = this.units.get(u.id)!;
+      if (u.aggregate) this.aggregates.restore(unit, u.aggregate);
+      if (u.state?.reaggregate && !unit.aggregate) unit.reaggregate = { quietSince: u.state.reaggregate.quietSince };
+    }
     this.pendingOrders = (s.orders ?? []).filter((o) => this.entities.has(o.targetId) || this.units.has(o.targetId)).map((o) => ({ ...o }));
     for (const c of s.codewords ?? []) this.codewords.set(`${c.force}|${c.codeword.toUpperCase()}`, c.time);
     for (const m of s.syncMatrices ?? []) this.sync.set({ force: m.force, phases: m.phases }, m.started);
     this.life.set(s.patternOfLife ?? {});
     // Tasks and plans last, since they can reference any object. Checkpoints resume them part-way.
     for (const r of s.entities ?? []) {
-      const e = this.entities.get(r.id)!;
-      if (e.destroyed || e.embarkedIn) continue;
+      const e = this.entities.get(r.id);
+      // Members of aggregated units are not in the entity-level simulation.
+      if (!e || e.destroyed || e.embarkedIn) continue;
       if (r.plan) {
         this.assignPlan(r.id, r.plan);
         if (r.state?.planIndex !== undefined) e.plan!.resume(r.state.planIndex, r.state.taskState);
@@ -1401,7 +1448,7 @@ export class Engine {
       } else if (u.task && !u.state?.taskDone) {
         this.assignTask(u.id, u.state?.taskState ?? u.task, false);
         unit.assignedTask = u.task;
-        if (u.state && perMemberTask(u.task)) {
+        if (u.state && perMemberTask(u.task) && !unit.aggregate) {
           // Each member resumes its own part (e.g. rounds left to fire); finished members stay idle.
           for (const m of unit.alive()) {
             const st = records.get(m.id)?.state?.taskState;
@@ -1549,7 +1596,7 @@ export class Engine {
    */
   toScenario(): ScenarioFile {
     // Background civilians are made afresh from the settings, except in checkpoints.
-    const local = [...this.entities.values()].filter((e) => !e.remote && !(e.ambient && this.time === 0));
+    const local = [...this.entities.values(), ...this.aggregates.hiddenMembers()].filter((e) => !e.remote && !(e.ambient && this.time === 0));
     return {
       format: 'werforces-scenario',
       version: 1,
@@ -1571,15 +1618,17 @@ export class Engine {
         plan: u.assignedPlan,
         task: u.assignedTask,
         reactions: Object.keys(u.reactions).length ? u.reactions : undefined,
+        aggregate: this.aggregates.record(u, this.time !== 0),
         state: this.time === 0 ? undefined : {
           planIndex: u.plan ? u.plan.index : undefined,
-          taskState: u.taskSpec && u.leaderTask?.status === 'running' ? u.leaderTask.resumeSpec() : undefined,
+          taskState: u.aggregate ? this.aggregates.resumeSpec(u) : u.taskSpec && u.leaderTask?.status === 'running' ? u.leaderTask.resumeSpec() : undefined,
           leaderId: u.leader?.id,
           withdrawn: u.withdrawn || undefined,
           taskDone: (!!u.assignedTask && u.taskStatus() !== 'running') || undefined,
           morale: u.morale < 1 ? u.morale : undefined,
           moraleState: u.moraleState !== 'steady' ? u.moraleState : undefined,
           lossesSeen: u.lossesSeen || undefined,
+          reaggregate: u.reaggregate ? { ...u.reaggregate } : undefined,
         },
       })),
       graphics: [...this.graphics.values()].map((g) => JSON.parse(JSON.stringify(g)) as Graphic),
@@ -1603,6 +1652,7 @@ export class Engine {
       codewords: this.codewords.size ? [...this.codewords].map(([k, time]) => ({ force: Number(k.split('|')[0]) as ForceId, codeword: k.slice(k.indexOf('|') + 1), time })) : undefined,
       environment: JSON.stringify(this.environment) === JSON.stringify(DEFAULT_ENVIRONMENT) ? undefined : { ...this.environment },
       smoke: this.smoke.clouds.length ? this.smoke.clouds.map((c) => ({ ...c })) : undefined,
+      aggregation: this.aggregates.policyRecord(),
     };
   }
 
@@ -1684,13 +1734,14 @@ export class Engine {
         memberIds: u.memberList.map((m) => m.id),
         x: c.x,
         y: c.y,
-        task: u.taskSpec && leaderTask && leaderTask.status === 'running' ? leaderTask.describe(this) : undefined,
+        task: u.aggregate ? this.aggregates.describeTask(u) : u.taskSpec && leaderTask && leaderTask.status === 'running' ? leaderTask.describe(this) : undefined,
         plan: u.plan?.describe(this),
         reactions: Object.keys(u.reactions).length ? u.reactions : undefined,
         withdrawn: u.withdrawn || undefined,
         morale: this.rules.morale ? Math.round(u.morale * 100) / 100 : undefined,
         moraleState: this.rules.morale ? u.moraleState : undefined,
-        travel: u.leader ? this.travel.get(u.leader) : undefined,
+        travel: u.aggregate ? this.aggregates.travel(u) : u.leader ? this.travel.get(u.leader) : undefined,
+        aggregate: u.aggregate ? this.aggregates.snapshot(u) : undefined,
       };
     });
     return {

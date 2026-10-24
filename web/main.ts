@@ -3,6 +3,8 @@
 import { LocalFrame } from '../src/dis/geodesy.js';
 import { TerrainGrid } from '../src/shared/terrainGrid.js';
 import type {
+  AggregateSnapshot,
+  AggregationPolicy,
   Catalog,
   Command,
   CommandResult,
@@ -354,9 +356,11 @@ class App {
     const score = [1, 2, 3]
       .map((f) => {
         const list = s.entities.filter((e) => e.force === f);
-        if (!list.length) return '';
-        const alive = list.filter((e) => e.damage !== 'destroyed').length;
-        return `${FORCE_NAMES[f as ForceId]} ${alive}/${list.length}`;
+        // Members inside aggregates are not in the entity list.
+        const inside = s.units.reduce((n, u) => n + (u.force === f && u.aggregate ? u.aggregate.alive : 0), 0);
+        if (!list.length && !inside) return '';
+        const alive = list.filter((e) => e.damage !== 'destroyed').length + inside;
+        return `${FORCE_NAMES[f as ForceId]} ${alive}/${list.length + inside}`;
       })
       .filter(Boolean)
       .join(' · ');
@@ -450,6 +454,8 @@ class App {
   /** Entity types of the entity, or of every member of the unit. */
   private memberTypes(id: string): EntityTypeDef[] {
     const u = this.unit(id);
+    // An aggregate's members are hidden: its strength lists their types.
+    if (u?.aggregate) return u.aggregate.strength.filter((g) => g.alive > 0).map((g) => this.types.get(g.typeId)).filter((t): t is EntityTypeDef => !!t);
     return (u ? u.memberIds : [id]).map((m) => this.types.get(this.entity(m)?.typeId ?? '')).filter((t): t is EntityTypeDef => !!t);
   }
 
@@ -484,7 +490,9 @@ class App {
 
   /** Domain of the thing being tasked (unit uses its leader). */
   domainOf(id: string): string | undefined {
-    const e = this.entity(id) ?? this.entity(this.unit(id)?.leaderId);
+    const u = this.unit(id);
+    if (u?.aggregate) return u.aggregate.domain;
+    const e = this.entity(id) ?? this.entity(u?.leaderId);
     return e?.domain;
   }
 
@@ -791,6 +799,12 @@ class App {
     const cars = h('input', { type: 'number', min: '0', max: '300', step: '1', value: String(life.vehicles) }) as HTMLInputElement;
     const people = h('input', { type: 'number', min: '0', max: '300', step: '1', value: String(life.pedestrians) }) as HTMLInputElement;
     const env = await this.api.v1<EnvironmentState>('GET', '/simulation/environment');
+    const pol = await this.api.v1<Required<AggregationPolicy>>('GET', '/simulation/aggregation').catch(() => ({ autoDisaggregate: true, disaggregateRange: 3000, autoReaggregate: true, reaggregateRange: 5000, reaggregateDelay: 120 }));
+    const autoSplit = h('input', { type: 'checkbox', checked: pol.autoDisaggregate }) as HTMLInputElement;
+    const splitAt = h('input', { type: 'number', min: '100', max: '50000', step: '100', value: String(pol.disaggregateRange) }) as HTMLInputElement;
+    const autoJoin = h('input', { type: 'checkbox', checked: pol.autoReaggregate }) as HTMLInputElement;
+    const joinAt = h('input', { type: 'number', min: '100', max: '100000', step: '100', value: String(pol.reaggregateRange) }) as HTMLInputElement;
+    const joinAfter = h('input', { type: 'number', min: '0', max: '86400', step: '10', value: String(pol.reaggregateDelay) }) as HTMLInputElement;
     const hh = Math.floor(env.time);
     const mm = Math.round((env.time - hh) * 60);
     const field = (label: string, input: HTMLElement) => [h('label', { text: label }), input];
@@ -824,6 +838,17 @@ class App {
         ...field('Wind from (°)', windFrom),
       ),
       h('small', { class: 'hint', text: `Now ${env.localTime} on ${env.localDate}. Night cuts eyes and binoculars to under 10% of their range; night-vision goggles keep 60%; thermal sights are unaffected by darkness. Fog cuts every optical sensor (thermals see about 3× further); rain and snow slow vehicles off roads; wind drifts smoke.` }),
+      h('h4', { text: 'Aggregate level' }),
+      h(
+        'div',
+        { class: 'env-grid' },
+        ...field('Split near enemy entities', autoSplit),
+        ...field('… within (m)', splitAt),
+        ...field('Join up again', autoJoin),
+        ...field('… no enemy within (m)', joinAt),
+        ...field('… for (s)', joinAfter),
+      ),
+      h('small', { class: 'hint', text: 'Aggregated units (inspector → Aggregate) are one object each, fighting other aggregates with Lanchester attrition. They split into their entities when an enemy entity comes close, and those that split by themselves join up again once the enemy has been further away for a while.' }),
       h('h4', { text: 'Civilians (pattern of life)' }),
       h('div', { class: 'env-grid' }, ...field('Cars', cars), ...field('People', people)),
       h('small', { class: 'hint', text: 'Neutral background traffic: cars drive between the towns along the roads, people walk about the towns. They run from shots and blasts nearby, and any killed are logged.' }),
@@ -843,6 +868,10 @@ class App {
               commands: [
                 { cmd: 'setRules', rules: next },
                 { cmd: 'setPatternOfLife', vehicles: Number(cars.value) || 0, pedestrians: Number(people.value) || 0 },
+                {
+                  cmd: 'setAggregation',
+                  policy: { autoDisaggregate: autoSplit.checked, disaggregateRange: Number(splitAt.value) || pol.disaggregateRange, autoReaggregate: autoJoin.checked, reaggregateRange: Number(joinAt.value) || pol.reaggregateRange, reaggregateDelay: Number(joinAfter.value) || 0 },
+                },
                 {
               cmd: 'setEnvironment',
               environment: {
@@ -924,7 +953,7 @@ class App {
     } else if (u) {
       el.append(
         h('h3', { text: u.name }),
-        h('div', { class: 'sub', text: `${u.echelon} · ${FORCE_NAMES[u.force]} · ${u.id} · replay` }),
+        h('div', { class: 'sub', text: `${u.echelon} · ${FORCE_NAMES[u.force]} · ${u.id} · ${this.aar.active ? 'replay' : 'contact'}` }),
         h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Strength', this.bind('strength'), 'Leader', this.bind('leader')),
         h('div', { class: 'section' }, h('h4', { text: 'Status' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
         h('div', { class: 'section' }, h('h4', { text: 'Members' }), h('div', { 'data-bind': 'members' })),
@@ -935,7 +964,7 @@ class App {
         class: 'hint',
         text: this.aar.active
           ? 'After-action review: positions and damage as recorded. Exit the AAR to give orders.'
-          : `Enemy contact, last seen ${e?.contactAge ?? 0} s ago. Position is where your force last saw it.`,
+          : `Enemy contact, last seen ${e?.contactAge ?? u?.aggregate?.contactAge ?? 0} s ago. Position is where your force last saw it.`,
       }),
     );
   }
@@ -1369,7 +1398,7 @@ class App {
       '|' +
       this.selectedId +
       '|' +
-      st.units.map((u) => u.id + u.name + u.memberIds.join() + (u.parentId ?? '')).join() +
+      st.units.map((u) => u.id + u.name + u.memberIds.join() + (u.parentId ?? '') + (u.aggregate ? `A${u.aggregate.alive}` : '')).join() +
       '|' +
       st.entities.map((e) => e.id + e.name + e.damage).join() +
       '|' +
@@ -1400,8 +1429,10 @@ class App {
       const renderUnit = (u: UnitSnapshot, into: HTMLElement, parent?: string) => {
         if (!matches(u)) return;
         const members = membersOf(u);
-        const lead = members[0];
-        into.append(item(u.id, `${u.name}`, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon, this.sidc(lead.typeId)) : null, false, parent));
+        // An aggregate's members are hidden: it is one object with its strength.
+        const lead = u.aggregate ?? members[0];
+        const label = u.aggregate ? `${u.name} [${u.aggregate.alive}/${u.aggregate.total}]` : u.name;
+        into.append(item(u.id, label, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon, this.sidc(lead.typeId)) : null, !!u.aggregate && u.aggregate.alive === 0, parent));
         const kids = h('div', { class: 'tree-children' });
         for (const sub of subsOf(u)) renderUnit(sub, kids, u.name);
         kids.append(...members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolCanvas(f, m.domain, m.symbol, 16, undefined, this.sidc(m.typeId)), m.damage === 'destroyed', u.name)));
@@ -1533,6 +1564,8 @@ class App {
     const selName = sel ? (this.entity(sel)?.name ?? this.unit(sel)?.name) : undefined;
     const hitEntity = this.entity(hit) ?? this.entity(this.unit(hit)?.leaderId);
     const hitGraphic = this.graphic(hit);
+    // An aggregated unit: attacking it means attacking its leader inside it.
+    const hitAgg = !hitEntity && this.unit(hit)?.aggregate && this.unit(hit)?.leaderId ? this.unit(hit) : undefined;
 
     const group = this.selection.size > 1 && !(hit && this.selection.has(hit)) ? this.orderable() : [];
     if (group.length > 1) {
@@ -1540,6 +1573,8 @@ class App {
       const selForces = new Set(group.map((id) => this.entity(id)?.force ?? this.unit(id)?.force));
       if (hitEntity && hit && !selForces.has(hitEntity.force) && hitEntity.damage !== 'destroyed') {
         add(`All attack ${hitEntity.name}`, () => this.groupOrder((targetId) => ({ cmd: 'assignTask', targetId, task: { type: 'attack', targetId: hitEntity.id } })));
+      } else if (hitAgg && !selForces.has(hitAgg.force)) {
+        add(`All attack ${hitAgg.name}`, () => this.groupOrder((targetId) => ({ cmd: 'assignTask', targetId, task: { type: 'attack', targetId: hitAgg.leaderId! } })));
       } else if (this.unit(hit) && selForces.has(this.unit(hit)!.force) && group.every((id) => this.unit(id))) {
         add(`Put under ${this.unit(hit)!.name}`, () => this.groupOrder((unitId) => ({ cmd: 'setSuperior', unitId, superiorId: hit! })));
       } else {
@@ -1554,7 +1589,10 @@ class App {
       sep();
     } else if (selTaskable && hit !== sel) {
       items.push(h('div', { class: 'title', text: selName ?? '' }));
-      if (hitEntity && hit) {
+      if (hitAgg && hitAgg.force !== (this.entity(sel)?.force ?? this.unit(sel)?.force)) {
+        add(`Attack ${hitAgg.name}`, () => this.task(sel, { type: 'attack', targetId: hitAgg.leaderId! }));
+        add('Move here', () => this.task(sel, { type: 'moveTo', target: world }));
+      } else if (hitEntity && hit) {
         const selForce = this.entity(sel)?.force ?? this.unit(sel)?.force;
         if (hitEntity.force !== selForce && hitEntity.damage !== 'destroyed') add(`Attack ${hitEntity.name}`, () => this.task(sel, { type: 'attack', targetId: hitEntity.id }));
         if (hitEntity.force !== selForce && this.hasIndirect(sel)) add(`Fire mission on ${hitEntity.name}`, () => this.task(sel, { type: 'fireMission', target: { x: Math.round(hitEntity.x), y: Math.round(hitEntity.y) }, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
@@ -1665,7 +1703,7 @@ class App {
       const e = this.entity(id);
       const u = this.unit(id);
       const g = this.graphic(id);
-      if ((this.aar.active || e?.contactAge !== undefined) && (e || u)) this.buildReplayInspector(el, id);
+      if ((this.aar.active || e?.contactAge !== undefined || u?.aggregate?.contactAge !== undefined) && (e || u)) this.buildReplayInspector(el, id);
       else if (e) this.buildEntityInspector(el, e);
       else if (u) this.buildUnitInspector(el, u);
       else if (g) this.buildGraphicInspector(el, g);
@@ -1862,7 +1900,7 @@ class App {
   }
 
   private buildUnitInspector(el: HTMLElement, u: UnitSnapshot): void {
-    const lead = this.entity(u.leaderId) ?? this.entity(u.memberIds[0]);
+    const lead = u.aggregate ?? this.entity(u.leaderId) ?? this.entity(u.memberIds[0]);
     const formation = h('select', { onchange: (ev: Event) => this.cmd({ cmd: 'setFormation', unitId: u.id, formation: (ev.target as HTMLSelectElement).value as Formation }) }, FORMATIONS.map((f) => h('option', { value: f, text: f, selected: f === u.formation })));
     el.append(
       this.nameEditor(u.id, u.name, lead ? symbolCanvas(u.force, lead.domain, lead.symbol, 24, u.echelon, this.sidc(lead.typeId)) : null),
@@ -1885,7 +1923,50 @@ class App {
       this.taskSection(u.id, lead?.domain ?? 'ground'),
       this.planSection(u.id, true),
       h('div', { class: 'section' }, h('h4', { text: 'Members' }), h('div', { 'data-bind': 'members' })),
-      h('div', { class: 'section row' }, h('button', { text: 'Center', onclick: () => this.centerOn(u.id) }), h('button', { class: 'danger', text: 'Delete unit', onclick: () => this.deleteSelected() })),
+      h(
+        'div',
+        { class: 'section row' },
+        h('button', { text: 'Center', onclick: () => this.centerOn(u.id) }),
+        // Aggregate: simulate the unit as one object; Disaggregate: back to its entities.
+        h('button', {
+          'data-bind-aggregate': u.id,
+          title: 'Aggregate: simulate the unit (and units under it) as one object with a strength, Lanchester attrition and unit speed; it splits into its entities near the enemy. Disaggregate: back to entities.',
+          text: u.aggregate ? 'Disaggregate' : 'Aggregate',
+          onclick: () => void this.cmd({ cmd: this.unit(u.id)?.aggregate ? 'disaggregate' : 'aggregate', unitId: u.id }),
+        }),
+        h('button', { class: 'danger', text: 'Delete unit', onclick: () => this.deleteSelected() }),
+      ),
+    );
+  }
+
+  /** An aggregate's strength by type, with bars, then its posture and pooled supplies. */
+  private aggregateMembers(a: AggregateSnapshot): HTMLElement {
+    const posture = { moving: 'moving', halted: 'halted', defending: 'defending (hasty)', dugIn: 'dug in' }[a.posture];
+    return h(
+      'div',
+      {},
+      a.strength.map((g) =>
+        h(
+          'div',
+          { style: 'margin-bottom:6px' },
+          h('div', { text: `${g.name} — ${g.alive}/${g.total}${g.effective !== undefined && g.effective < g.alive - 0.05 ? ` (${g.effective.toFixed(1)} effective)` : ''}` }),
+          h('div', { class: 'ammo-bar' }, h('div', { style: `width:${(g.alive / Math.max(1, g.total)) * 100}%` })),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'hint' },
+        [
+          `Aggregated · ${posture}`,
+          a.speed > 0.5 ? `${Math.round(a.speed * 3.6)} km/h` : '',
+          a.combatPower !== undefined ? `combat power ${a.combatPower}` : '',
+          a.sensorRange ? `sees ${(a.sensorRange / 1000).toFixed(1)} km` : '',
+          a.ammo !== undefined ? `ammo ${Math.round(a.ammo * 100)}%` : '',
+          a.fuel !== undefined ? `fuel ${Math.round(a.fuel * 100)}%` : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      ),
     );
   }
 
@@ -2386,6 +2467,22 @@ class App {
             )
           : h('span', { class: 'hint', text: 'none' }),
       );
+    } else if (u?.aggregate) {
+      const a = u.aggregate;
+      set('grid', fmtGrid(u.x, u.y));
+      set('strength', `${a.alive}/${a.total} (aggregated)`);
+      set('leader', '—');
+      set(
+        'activity',
+        [a.contactAge !== undefined ? '' : 'AGGREGATED', u.moraleState === 'broken' ? 'BROKEN' : '', u.withdrawn ? 'WITHDRAWING' : '', this.pendingOrderText(u.id), a.engagingId ? `ENGAGING ${this.unit(a.engagingId)?.name ?? a.engagingId}` : '', u.plan, u.plan && u.task && u.plan.endsWith(u.task) ? '' : u.task, this.travelText(u.travel)]
+          .filter(Boolean)
+          .join(' — ') || (a.alive ? a.posture : 'destroyed'),
+      );
+      set('morale', moraleText(u.morale, u.moraleState));
+      syncReactions(u.reactions);
+      set('members', this.aggregateMembers(a));
+      const btn = el.querySelector<HTMLButtonElement>(`[data-bind-aggregate="${u.id}"]`);
+      if (btn) btn.textContent = 'Disaggregate';
     } else if (u) {
       const lead = this.entity(u.leaderId);
       set('grid', fmtGrid(u.x, u.y));
@@ -2393,6 +2490,8 @@ class App {
       const alive = members.filter((m) => m.damage !== 'destroyed');
       set('strength', `${alive.length}/${members.length}`);
       set('leader', lead?.name ?? '—');
+      const btn = el.querySelector<HTMLButtonElement>(`[data-bind-aggregate="${u.id}"]`);
+      if (btn) btn.textContent = 'Aggregate';
       const mounted = alive.filter((m) => m.embarkedIn).length;
       set(
         'activity',

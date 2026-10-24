@@ -117,6 +117,10 @@ export function buildOpenApi(baseUrl: string): Schema {
           }),
         }),
       },
+      '/api/v1/simulation/aggregation': {
+        get: op('Simulation', 'When aggregated units split up near the enemy and join up again', {}, ok(ref('AggregationPolicy'))),
+        put: op('Simulation', 'Change the aggregation policy (fields left out keep their values)', body(ref('AggregationPolicy')), ok(ref('AggregationPolicy'))),
+      },
       '/api/v1/simulation/environment': {
         get: op('Simulation', 'Time of day and weather: the settings, plus the current local time, sun altitude and light level'),
         put: op('Simulation', 'Change the time of day and weather (fields left out keep their values)', {
@@ -267,6 +271,16 @@ export function buildOpenApi(baseUrl: string): Schema {
         delete: { tags: ['Units'], summary: 'Delete a unit and its members', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } },
       },
       ...taskable('units', 'Units'),
+      '/api/v1/units/{id}/aggregate': {
+        post: op(
+          'Units',
+          'Simulate the unit (and the units under it) as one aggregate object: its members leave the entity-level simulation, it moves at the speed of its slowest member type and fights other aggregates with Lanchester attrition. Refused for air units, mounted or immobilised members, and units on tasks an aggregate cannot do. The unit then has an `aggregate` field and its members are hidden',
+          { parameters: [idParam()] },
+        ),
+      },
+      '/api/v1/units/{id}/disaggregate': {
+        post: op('Units', 'Split an aggregated unit (and the units under it) back into its members, in formation around its position, each with its own damage, ammunition and fuel; its order carries on. It stays disaggregated until told otherwise', { parameters: [idParam()] }),
+      },
       '/api/v1/graphics': {
         get: op('Graphics', 'List tactical graphics'),
         post: {
@@ -474,6 +488,16 @@ export function buildOpenApi(baseUrl: string): Schema {
           type: 'object',
           required: ['typeId', 'force', 'position'],
           properties: { typeId: { type: 'string' }, force: ref('Force'), position: ref('Position'), heading: { type: 'number', description: 'radians' }, name: { type: 'string' }, altitude: { type: 'number', description: 'm above ground (aircraft)' } },
+        },
+        AggregationPolicy: {
+          type: 'object',
+          properties: {
+            autoDisaggregate: { type: 'boolean', description: 'split an aggregate into its members when an enemy entity (not aggregated) comes within disaggregateRange (default true)' },
+            disaggregateRange: { type: 'number', minimum: 100, maximum: 50000, description: 'metres (default 3000)' },
+            autoReaggregate: { type: 'boolean', description: 'units that split up automatically aggregate again once no enemy entity has been within reaggregateRange for reaggregateDelay (default true)' },
+            reaggregateRange: { type: 'number', minimum: 100, maximum: 100000, description: 'metres, at least disaggregateRange (default 5000)' },
+            reaggregateDelay: { type: 'number', minimum: 0, maximum: 86400, description: 'seconds (default 120)' },
+          },
         },
         CreateUnit: {
           oneOf: [

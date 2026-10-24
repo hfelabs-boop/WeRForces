@@ -294,12 +294,16 @@ export class MapView {
       if (agg && e.unitId && this.unitById.has(e.unitId) && !this.entityById.get(this.unitById.get(e.unitId)!.leaderId ?? '')?.embarkedIn) continue;
       out.push({ id: e.id, pos: e, entity: e });
     }
-    if (agg) {
-      for (const u of st.units) {
-        const leader = u.leaderId ? this.entityById.get(u.leaderId) : undefined;
-        if (leader?.embarkedIn) continue;
-        out.push({ id: u.id, pos: leader ?? u, unit: u });
+    for (const u of st.units) {
+      // Aggregated units are one object at any zoom: their members are not in the state.
+      if (u.aggregate) {
+        if (u.aggregate.alive > 0) out.push({ id: u.id, pos: u, unit: u });
+        continue;
       }
+      if (!agg) continue;
+      const leader = u.leaderId ? this.entityById.get(u.leaderId) : undefined;
+      if (leader?.embarkedIn) continue;
+      out.push({ id: u.id, pos: leader ?? u, unit: u });
     }
     return out;
   }
@@ -880,6 +884,8 @@ export class MapView {
           label(ctx, e.passengers ? `${e.name} +${e.passengers.length}` : e.name, p.x + symSize * 1.5, p.y + 4, FORCE_COLORS[e.force].text, '11px system-ui');
           if (e.domain === 'air') label(ctx, `${Math.round(e.agl)}m`, p.x + symSize * 1.5, p.y + 16, '#ddd', '10px system-ui');
         }
+      } else if (sym.unit?.aggregate) {
+        this.drawAggregate(sym.unit, sym.unit.aggregate, p, symSize);
       } else if (sym.unit) {
         const u = sym.unit;
         const leader = u.leaderId ? this.entityById.get(u.leaderId) : undefined;
@@ -902,6 +908,52 @@ export class MapView {
         if (this.layers.labels) label(ctx, `${u.name} (${alive}/${u.memberIds.length})`, p.x + symSize * 2, p.y + 4, FORCE_COLORS[u.force].text, 'bold 11px system-ui');
       }
     }
+  }
+
+  /** An aggregated unit: its unit symbol, a heading arrow when moving, and a strength bar. */
+  private drawAggregate(u: UnitSnapshot, a: NonNullable<UnitSnapshot['aggregate']>, p: { x: number; y: number }, symSize: number): void {
+    const ctx = this.ctx;
+    const size = symSize * 1.4;
+    const stale = a.contactAge !== undefined && a.contactAge > 5;
+    drawSymbol(ctx, p.x, p.y, size, u.force, a.domain, a.symbol, {
+      selected: u.id === this.selectedId || this.selectedIds.has(u.id),
+      destroyed: a.alive === 0,
+      echelon: u.echelon,
+      sidc: this.sidcOf(a.typeId),
+      alpha: a.contactAge !== undefined ? (stale ? 0.45 : 0.8) : 1,
+    });
+    if (a.speed > 0.5) {
+      const len = symSize * 2 + Math.min(40, a.speed * 0.6);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y + size * 0.9);
+      ctx.lineTo(p.x + Math.sin(a.heading) * len, p.y + size * 0.9 - Math.cos(a.heading) * len);
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    // Strength bar under the symbol: green to red as it loses members.
+    const frac = a.total ? a.alive / a.total : 0;
+    const w = size * 2.2;
+    const y = p.y + size * 1.15;
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(p.x - w / 2 - 1, y - 1, w + 2, 6);
+    ctx.fillStyle = frac > 0.66 ? '#4caf50' : frac > 0.33 ? '#ffb300' : '#e53935';
+    ctx.fillRect(p.x - w / 2, y, w * frac, 4);
+    if (a.engagingId) {
+      const t = this.unitById.get(a.engagingId);
+      if (t) {
+        const q = this.toScreen(t);
+        ctx.beginPath();
+        ctx.setLineDash([6, 4]);
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(q.x, q.y);
+        ctx.strokeStyle = 'rgba(255,90,60,0.8)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+    if (this.layers.labels) label(ctx, `${u.name} (${a.alive}/${a.total})`, p.x + size * 1.6, p.y + 4, FORCE_COLORS[u.force].text, 'bold 11px system-ui');
   }
 
   private drawEffects(): void {

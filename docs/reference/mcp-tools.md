@@ -254,6 +254,27 @@ Put a unit under a superior unit in the chain of command (or make it independent
 | `unitId` | string | yes |  |
 | `superiorId` | string/null | yes |  |
 
+## `aggregate_unit`
+
+Switch a unit (and the units under it) between entity level and aggregate level. Aggregated, it is one object: its members leave the entity simulation, it moves at the speed of its slowest member type (move, follow route, wait, defend, overwatch and attack; other orders split it up first) and fights other aggregates with Lanchester attrition, losing specific members. It splits into its members by itself when enemy entities come close (see set_aggregation_policy). Use it for forces far from the action, to keep large scenarios fast. Returns the unit with its aggregate strength.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `unitId` | string | yes |  |
+| `aggregate` | boolean | yes | true: aggregate; false: split back into entities (in formation, with their own damage, ammunition and fuel) |
+
+## `set_aggregation_policy` _(idempotent)_
+
+When aggregated units split up and join up again. Defaults: an aggregate disaggregates when an enemy entity comes within 3000 m; a unit that split up by itself aggregates again once no enemy entity has been within 5000 m for 120 s. Fields left out keep their values; returns the policy.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `autoDisaggregate` | boolean |  |  |
+| `disaggregateRange` | number (100–50000) |  | metres |
+| `autoReaggregate` | boolean |  |  |
+| `reaggregateRange` | number (100–100000) |  | metres, at least disaggregateRange |
+| `reaggregateDelay` | number (0–86400) |  | seconds |
+
 ## `set_simulation_rules` _(idempotent)_
 
 Turn optional parts of the model on or off for this scenario. Suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel) are on by default; orderDelay (orders take 5-60 s to pass down the chain of command, by echelon) is off by default. Useful for comparison runs.
