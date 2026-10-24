@@ -37,6 +37,7 @@ function subsystem(fn: string, url: string): string | null {
     return null;
   }
   if (file === 'pathfinding.ts') return 'route planning';
+  if (file === 'sightcache.ts') return 'line of sight';
   if (file === 'spatial.ts') return 'spatial index';
   if (file === 'sensors.ts') return 'sensors';
   if (file === 'combat.ts' || file === 'fires.ts') return 'combat';

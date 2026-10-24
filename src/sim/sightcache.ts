@@ -15,58 +15,102 @@ export const SIGHT_REUSE_SHARE = 0.02;
 /** ...and never more than this many metres. */
 export const SIGHT_REUSE_MAX = 25;
 
-interface Sight {
-  ax: number;
-  ay: number;
-  az: number;
-  bx: number;
-  by: number;
-  bz: number;
-  time: number;
+/** Per line: both ends (x, y, z), when it was traced, and whether it was clear. */
+const STRIDE = 8;
+
+/**
+ * One observer's traced lines: an open-addressing table keyed by the target's `seq`
+ * (0 = empty slot), in typed arrays so a scan's lookups stay in a few cache lines.
+ */
+interface Lines {
+  keys: Int32Array;
+  data: Float64Array;
+  count: number;
   terrainVersion: number;
-  clear: boolean;
 }
 
-/** Per observer: the lines it traced, by target. */
-const traced = new WeakMap<Entity, Map<Entity, Sight>>();
+const traced = new WeakMap<Entity, Lines>();
+/** The last observer and its lines (a scan asks about many targets in a row). */
+let lastObserver: Entity | null = null;
+let lastLines: Lines | null = null;
+
+function table(capacity: number, terrainVersion: number): Lines {
+  return { keys: new Int32Array(capacity), data: new Float64Array(capacity * STRIDE), count: 0, terrainVersion };
+}
+
+function slot(lines: Lines, key: number): number {
+  const mask = lines.keys.length - 1;
+  let i = Math.imul(key, 0x9e3779b1) & mask;
+  while (lines.keys[i] !== 0 && lines.keys[i] !== key) i = (i + 1) & mask;
+  return i;
+}
+
+function usable(time: number, now: number): boolean {
+  return now >= time && now - time <= SIGHT_REUSE_TIME;
+}
+
+/** A table without the lines too old to reuse, with room to grow. */
+function rebuilt(old: Lines, now: number): Lines {
+  let live = 0;
+  for (let i = 0; i < old.keys.length; i++) if (old.keys[i] !== 0 && usable(old.data[i * STRIDE + 6], now)) live++;
+  let capacity = 16;
+  while (capacity < live * 3) capacity *= 2;
+  const t = table(capacity, old.terrainVersion);
+  for (let i = 0; i < old.keys.length; i++) {
+    const o = i * STRIDE;
+    if (old.keys[i] === 0 || !usable(old.data[o + 6], now)) continue;
+    const j = slot(t, old.keys[i]);
+    t.keys[j] = old.keys[i];
+    t.data.set(old.data.subarray(o, o + STRIDE), j * STRIDE);
+    t.count++;
+  }
+  return t;
+}
 
 /** Line of sight from an observer's eye to a point on a target `range` metres away (as Engine.lineOfSight). */
 export function sensorSight(engine: Engine, observer: Entity, target: Entity, eye: Vec3, aim: Vec3, radar: boolean, range: number): boolean {
-  let lines = traced.get(observer);
-  if (!lines) traced.set(observer, (lines = new Map()));
+  let lines = lastObserver === observer ? lastLines : (traced.get(observer) ?? null);
+  // A new terrain makes every line stale.
+  if (!lines || lines.terrainVersion !== engine.terrainVersion) {
+    lines = table(16, engine.terrainVersion);
+    traced.set(observer, lines);
+  }
+  lastObserver = observer;
+  lastLines = lines;
   const now = engine.time;
   const tol = Math.min(SIGHT_REUSE_MAX, range * SIGHT_REUSE_SHARE);
   const tol2 = tol * tol;
-  let s = lines.get(target);
-  const reuse =
-    s !== undefined &&
-    now - s.time <= SIGHT_REUSE_TIME &&
-    now >= s.time &&
-    s.terrainVersion === engine.terrainVersion &&
-    (eye.x - s.ax) ** 2 + (eye.y - s.ay) ** 2 + (eye.z - s.az) ** 2 <= tol2 &&
-    (aim.x - s.bx) ** 2 + (aim.y - s.by) ** 2 + (aim.z - s.bz) ** 2 <= tol2;
-  if (!reuse) {
-    const clear = engine.terrain.lineOfSight(eye, aim);
-    if (s) {
-      s.ax = eye.x;
-      s.ay = eye.y;
-      s.az = eye.z;
-      s.bx = aim.x;
-      s.by = aim.y;
-      s.bz = aim.z;
-      s.time = now;
-      s.terrainVersion = engine.terrainVersion;
-      s.clear = clear;
-    } else {
-      if (lines.size >= 512) prune(lines, now);
-      s = { ax: eye.x, ay: eye.y, az: eye.z, bx: aim.x, by: aim.y, bz: aim.z, time: now, terrainVersion: engine.terrainVersion, clear };
-      lines.set(target, s);
-    }
+  let i = slot(lines, target.seq);
+  let o = i * STRIDE;
+  const d = lines.data;
+  if (
+    lines.keys[i] === target.seq &&
+    usable(d[o + 6], now) &&
+    (eye.x - d[o]) ** 2 + (eye.y - d[o + 1]) ** 2 + (eye.z - d[o + 2]) ** 2 <= tol2 &&
+    (aim.x - d[o + 3]) ** 2 + (aim.y - d[o + 4]) ** 2 + (aim.z - d[o + 5]) ** 2 <= tol2
+  ) {
+    return d[o + 7] === 1 && (radar || !engine.smoke.blocks(eye, aim));
   }
-  return s!.clear && (radar || !engine.smoke.blocks(eye, aim));
-}
-
-/** Forget lines too old to be reused. */
-function prune(lines: Map<Entity, Sight>, now: number): void {
-  for (const [t, s] of lines) if (now - s.time > SIGHT_REUSE_TIME || now < s.time) lines.delete(t);
+  const clear = engine.terrain.lineOfSight(eye, aim);
+  if (lines.keys[i] !== target.seq) {
+    if ((lines.count + 1) * 3 > lines.keys.length * 2) {
+      lines = rebuilt(lines, now);
+      traced.set(observer, lines);
+      lastLines = lines;
+      i = slot(lines, target.seq);
+      o = i * STRIDE;
+    }
+    lines.keys[i] = target.seq;
+    lines.count++;
+  }
+  const t = lines.data;
+  t[o] = eye.x;
+  t[o + 1] = eye.y;
+  t[o + 2] = eye.z;
+  t[o + 3] = aim.x;
+  t[o + 4] = aim.y;
+  t[o + 5] = aim.z;
+  t[o + 6] = now;
+  t[o + 7] = clear ? 1 : 0;
+  return clear && (radar || !engine.smoke.blocks(eye, aim));
 }
