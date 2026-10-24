@@ -143,6 +143,7 @@ const PLAYER_COMMANDS = new Set<Command['cmd']>([
   'startPhase',
   'setJamming',
   'drive',
+  'batch',
 ]);
 
 /**
@@ -191,6 +192,9 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
     if (st?.kind === 'while') (st.body ?? []).forEach(statement);
   };
   switch (c.cmd) {
+    case 'batch':
+      for (const sub of Array.isArray(c.commands) ? c.commands : []) checkCommand(engine, role, sub);
+      return;
     case 'assignTask':
       ownObject(c.targetId, 'object');
       task(c.task);

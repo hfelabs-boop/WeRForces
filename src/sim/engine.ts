@@ -737,6 +737,7 @@ export class Engine {
     }
     e.task = task;
     e.steer = null;
+    if (task && e.alive && !e.remote) task.begin(this, e);
   }
 
   private resolveTarget(id: string): Entity | Unit {

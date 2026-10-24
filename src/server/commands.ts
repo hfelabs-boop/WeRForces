@@ -331,6 +331,27 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         runner.setRunning(false);
         engine.newScenario(typeof c.name === 'string' ? c.name : 'Untitled', c.terrain ?? {});
         return;
+      case 'batch': {
+        const list = c.commands;
+        if (!Array.isArray(list) || list.length > 500) throw new ValidationError('commands must be a list of at most 500');
+        const backup = engine.toScenario();
+        for (const [i, sub] of list.entries()) {
+          const name = sub && typeof sub === 'object' ? (sub as { cmd?: unknown }).cmd : undefined;
+          if (name === 'batch' || name === 'undo' || name === 'redo') throw new ValidationError(`commands[${i}]: ${String(name)} cannot be batched`);
+          // Deleting a unit takes its members with it: a later delete of one of them is no error.
+          if (name === 'deleteObject') {
+            const id = String((sub as { id?: unknown }).id);
+            if (!engine.entities.has(id) && !engine.units.has(id) && !engine.graphics.has(id)) continue;
+          }
+          const r = runCommand(runner, sub);
+          if (!r.ok) {
+            // All or nothing: put back what the earlier commands did.
+            engine.loadScenario(backup);
+            throw new ValidationError(`commands[${i}]: ${r.error}`);
+          }
+        }
+        return;
+      }
       case 'quickBattle': {
         runner.setRunning(false);
         if (!c.options || typeof c.options !== 'object') throw new ValidationError('options must be an object');

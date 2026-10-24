@@ -175,11 +175,7 @@ class App {
     this.quick = new QuickBar($('#quickbar'), {
       targets: () => (this.aar.active ? [] : this.orderable().filter((id) => this.role.kind === 'controller' || (this.entity(id)?.force ?? this.unit(id)?.force) === this.role.force)),
       orderAt: (w, make, line) => this.groupTaskAt(w, make, line),
-      orderEach: (make) =>
-        void this.groupOrder(async (id) => {
-          const c = make(id);
-          if (c) await this.cmd(c);
-        }),
+      orderEach: (make) => void this.groupOrder(make),
       pickPoint: (label, onPick) => this.map.setMode({ kind: 'pickPoint', label, onPick }),
       pickEntity: (label, onPick) => this.map.setMode({ kind: 'pickEntity', label, onPick }),
       can: (id, what) =>
@@ -1377,8 +1373,14 @@ class App {
     const el = $('#objects');
     clear(el);
     const match = (s: string) => !filter || s.toLowerCase().includes(filter);
-    const item = (id: string, name: string, icon: HTMLElement | null, dead = false) =>
-      h('div', { class: `tree-item${id === this.selectedId ? ' selected' : ''}${dead ? ' dead' : ''}`, onclick: () => this.select(id), ondblclick: () => this.centerOn(id) }, icon, name);
+    // Under its parent, a name that repeats the parent's ("A Coy 1st Platoon" under "A Coy") shows only the rest; the full name is the tooltip.
+    const item = (id: string, name: string, icon: HTMLElement | null, dead = false, parent?: string) =>
+      h(
+        'div',
+        { class: `tree-item${id === this.selectedId ? ' selected' : ''}${dead ? ' dead' : ''}`, title: name, onclick: () => this.select(id), ondblclick: () => this.centerOn(id) },
+        icon,
+        h('span', { class: 'tree-name', text: parent && name.startsWith(`${parent} `) && name.length > parent.length + 1 ? `… ${name.slice(parent.length + 1)}` : name }),
+      );
     for (const f of [1, 2, 3, 0] as ForceId[]) {
       const units = st.units.filter((u) => u.force === f);
       const loose = st.entities.filter((e) => e.force === f && !e.unitId);
@@ -1389,14 +1391,14 @@ class App {
       const membersOf = (u: UnitSnapshot) => u.memberIds.map((id) => this.entity(id)).filter((e): e is EntitySnapshot => !!e);
       const matches = (u: UnitSnapshot): boolean => match(u.name) || membersOf(u).some((m) => match(m.name)) || subsOf(u).some(matches);
       // Units nest under their superiors; members follow their subordinate units.
-      const renderUnit = (u: UnitSnapshot, into: HTMLElement) => {
+      const renderUnit = (u: UnitSnapshot, into: HTMLElement, parent?: string) => {
         if (!matches(u)) return;
         const members = membersOf(u);
         const lead = members[0];
-        into.append(item(u.id, `${u.name}`, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon, this.sidc(lead.typeId)) : null));
+        into.append(item(u.id, `${u.name}`, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon, this.sidc(lead.typeId)) : null, false, parent));
         const kids = h('div', { class: 'tree-children' });
-        for (const sub of subsOf(u)) renderUnit(sub, kids);
-        kids.append(...members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolCanvas(f, m.domain, m.symbol, 16, undefined, this.sidc(m.typeId)), m.damage === 'destroyed')));
+        for (const sub of subsOf(u)) renderUnit(sub, kids, u.name);
+        kids.append(...members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolCanvas(f, m.domain, m.symbol, 16, undefined, this.sidc(m.typeId)), m.damage === 'destroyed', u.name)));
         into.append(kids);
       };
       for (const u of units) if (!u.parentId || !byId.has(u.parentId)) renderUnit(u, el);
@@ -1531,9 +1533,9 @@ class App {
       items.push(h('div', { class: 'title', text: `${group.length} selected` }));
       const selForces = new Set(group.map((id) => this.entity(id)?.force ?? this.unit(id)?.force));
       if (hitEntity && hit && !selForces.has(hitEntity.force) && hitEntity.damage !== 'destroyed') {
-        add(`All attack ${hitEntity.name}`, () => this.groupOrder((id) => this.task(id, { type: 'attack', targetId: hitEntity.id })));
+        add(`All attack ${hitEntity.name}`, () => this.groupOrder((targetId) => ({ cmd: 'assignTask', targetId, task: { type: 'attack', targetId: hitEntity.id } })));
       } else if (this.unit(hit) && selForces.has(this.unit(hit)!.force) && group.every((id) => this.unit(id))) {
-        add(`Put under ${this.unit(hit)!.name}`, () => this.groupOrder((id) => this.cmd({ cmd: 'setSuperior', unitId: id, superiorId: hit! })));
+        add(`Put under ${this.unit(hit)!.name}`, () => this.groupOrder((unitId) => ({ cmd: 'setSuperior', unitId, superiorId: hit! })));
       } else {
         add('Move here (keep formation)', () => this.groupTaskAt(world, (t) => ({ type: 'moveTo', target: t }), false));
         add('Move here by a covered route', () => this.groupTaskAt(world, (t) => ({ type: 'moveTo', target: t, covered: true }), false));
@@ -1542,7 +1544,7 @@ class App {
         const guns = group.filter((id) => this.hasIndirect(id));
         if (guns.length) add(`Fire mission here (${guns.length} firing)`, () => void Promise.all(guns.map((id) => this.task(id, { type: 'fireMission', target: world, rounds: 3, radius: this.unit(id) ? 50 : 0 }))));
       }
-      add('Stop all', () => this.groupOrder((id) => this.cmd({ cmd: 'stop', targetId: id })));
+      add('Stop all', () => this.groupOrder((targetId) => ({ cmd: 'stop', targetId })));
       sep();
     } else if (selTaskable && hit !== sel) {
       items.push(h('div', { class: 'title', text: selName ?? '' }));
@@ -2071,14 +2073,15 @@ class App {
         'div',
         { class: 'section row' },
         loose.length >= 2 && forces.size === 1 ? h('button', { text: 'Group into a unit', onclick: () => this.cmd({ cmd: 'groupUnit', entityIds: loose }).then((r) => r.ok && r.id && this.select(r.id)) }) : null,
-        h('button', { text: 'Stop all', onclick: () => this.groupOrder((id) => this.cmd({ cmd: 'stop', targetId: id })) }),
+        h('button', { text: 'Stop all', onclick: () => this.groupOrder((targetId) => ({ cmd: 'stop', targetId })) }),
         h('button', { text: 'Clear selection', onclick: () => this.select(null) }),
         h('button', {
           class: 'danger',
           text: 'Delete all',
           onclick: async () => {
             if (!confirm(`Delete ${ids.length} objects?`)) return;
-            for (const id of ids) if (this.exists(id)) await this.cmd({ cmd: 'deleteObject', id });
+            const commands: Command[] = ids.filter((id) => this.exists(id)).map((id) => ({ cmd: 'deleteObject', id }));
+            if (commands.length) await this.cmd({ cmd: 'batch', commands });
             this.select(null);
           },
         }),
@@ -2096,8 +2099,11 @@ class App {
     });
   }
 
-  private async groupOrder(fn: (id: string) => Promise<unknown>): Promise<void> {
-    for (const id of this.orderable()) await fn(id);
+  /** One command per selected thing, sent together: one edit, one undo step. */
+  private async groupOrder(make: (id: string) => Command | null | undefined): Promise<void> {
+    const commands = this.orderable().map(make).filter((c): c is Command => !!c);
+    if (!commands.length) return;
+    await this.cmd(commands.length === 1 ? commands[0] : { cmd: 'batch', commands });
     this.refreshPath();
   }
 
@@ -2135,10 +2141,8 @@ class App {
     } else {
       targets = pos.map((p) => clamp({ x: world.x + p.x - c.x, y: world.y + p.y - c.y }));
     }
-    void (async () => {
-      for (let i = 0; i < ids.length; i++) await this.cmd({ cmd: 'assignTask', targetId: ids[i], task: make(targets[i], Math.round(facing)) });
-      this.refreshPath();
-    })();
+    const commands: Command[] = ids.map((targetId, i) => ({ cmd: 'assignTask', targetId, task: make(targets[i], Math.round(facing)) }));
+    void this.cmd(commands.length === 1 ? commands[0] : { cmd: 'batch', commands }).then(() => this.refreshPath());
   }
 
   private buildGraphicInspector(el: HTMLElement, g: Graphic): void {

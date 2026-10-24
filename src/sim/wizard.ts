@@ -330,7 +330,7 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
       engine.addGraphic('phaseLine', line(objective, width(o.blue.size) + 300), 'PL 1', 1);
       engine.addGraphic('phaseLine', line(rear, width(o.blue.size) + 300), 'PL 2', 1);
       engine.addGraphic('point', [rear], `OBJ ${objName} 2`, 2);
-      phases[1].push({ id: 'P1', name: 'Screen', trigger: { type: 'time', time: 0 }, orders: [order(blue, { type: 'screen', position: objective, facing: deg(blueHeading), width: width(o.blue.size), fallback: rear, breakContact: 2500 }, `${blue.name}: screen on PL 1, fall back to PL 2`)] });
+      phases[1].push({ id: 'P1', name: 'Screen', trigger: { type: 'time', time: 0 }, orders: [order(blue, { type: 'screen', position: objective, facing: deg(blueHeading), width: width(o.blue.size), fallback: rear }, `${blue.name}: screen on PL 1, fall back to PL 2`)] });
       phases[2].push({ id: 'P1', name: 'Advance', trigger: opener, orders: [order(red, { type: 'moveTo', target: rear }, `${red.name}: advance through OBJ ${objName} to PL 2`)] });
       lines.push(`Blue (${sideName(o.blue, blue)}) screens on PL 1 at OBJ ${objName} and falls back to PL 2 when Red closes. Red (${sideName(o.red, red)}) pushes through from ${km(D)} out.`);
       break;
@@ -375,7 +375,7 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
       extra.push(
         attacking || o.mission === 'meeting'
           ? order(scouts, { type: 'overwatch', position: forward, facing: deg(heading) }, `${scouts.name}: watch OBJ ${objName}`)
-          : order(scouts, { type: 'screen', position: forward, facing: deg(heading), width: 600, fallback: objective, breakContact: 2500 }, `${scouts.name}: screen forward`),
+          : order(scouts, { type: 'screen', position: forward, facing: deg(heading), width: 600, fallback: objective }, `${scouts.name}: screen forward`),
       );
     }
     if (s.support.includes('engineers') && attacking) {

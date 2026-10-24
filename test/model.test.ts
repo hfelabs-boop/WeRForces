@@ -79,6 +79,19 @@ describe('direct fire', () => {
   });
 });
 
+describe('orders while paused', () => {
+  it('plan the route at once, so it shows before the clock runs', () => {
+    const eng = engine();
+    const tank = eng.createEntity({ typeId: 'us-m1a2', force: 1, x: 500, y: 500 });
+    const plt = eng.createUnitFromTemplate('us-mech-platoon', 1, 1000, 500);
+    eng.assignTask(tank.id, { type: 'moveTo', target: { x: 3000, y: 3000 } });
+    eng.assignTask(plt.id, { type: 'moveTo', target: { x: 3000, y: 1000 } });
+    expect(eng.plannedPath(tank.id).at(-1)).toEqual({ x: 3000, y: 3000 });
+    expect(eng.plannedPath(plt.leader!.id).length).toBeGreaterThan(0);
+    expect(eng.snapshot().entities.find((e) => e.id === tank.id)!.travel?.remaining).toBeGreaterThan(3000);
+  });
+});
+
 describe('plan conditions', () => {
   it('enemyInArea fires when a hostile enters the area', () => {
     const eng = engine();

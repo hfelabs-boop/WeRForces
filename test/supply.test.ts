@@ -83,6 +83,28 @@ describe('resupply', () => {
     expect(truck.supplies).toBeGreaterThan(5);
   });
 
+  it('a helicopter team flies to the truck, sets down, refuels and goes back up', () => {
+    const eng = engine();
+    const truck = eng.createEntity({ typeId: 'us-hemtt', force: 1, x: 1000, y: 1000 });
+    const team = eng.createUnitFromTemplate('us-attack-team', 1, 3000, 3000);
+    for (const m of team.memberList) m.fuel = 0.3;
+    eng.runFor(20);
+    eng.assignTask(team.id, { type: 'resupply' });
+    let landed = 0;
+    for (let t = 0; t < 600 && team.taskStatus() !== 'done'; t++) {
+      eng.runFor(1);
+      landed = Math.max(landed, team.memberList.filter((m) => m.z - eng.terrain.surfaceHeight(m.x, m.y) < 1).length);
+    }
+    expect(landed).toBe(2);
+    for (const m of team.memberList) expect(m.fuel).toBeGreaterThan(0.99);
+    eng.runFor(30);
+    for (const m of team.memberList) expect(m.z - eng.terrain.surfaceHeight(m.x, m.y)).toBeGreaterThan(20);
+    const jet = eng.createEntity({ typeId: 'us-f16', force: 1, x: 2000, y: 2000 });
+    eng.assignTask(jet.id, { type: 'resupply' });
+    eng.runFor(1);
+    expect(jet.task?.message).toMatch(/helicopters/);
+  });
+
   it('stock runs out', () => {
     const eng = engine();
     const truck = eng.createEntity({ typeId: 'ru-ural-supply', force: 2, x: 1000, y: 1000 });

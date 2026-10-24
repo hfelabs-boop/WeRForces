@@ -687,7 +687,8 @@ export class ApiV1 {
         if (err instanceof OrderError) throw new HttpError(400, err.message);
         throw err;
       }
-      if (b.dryRun !== true) for (const c of parsed.commands) this.run(c);
+      // An order to several units is one edit: one undo step.
+      if (b.dryRun !== true) this.run(parsed.commands.length === 1 ? parsed.commands[0] : { cmd: 'batch', commands: parsed.commands });
       return { json: { description: parsed.description, targets: parsed.targets.map((o) => o.id), commands: parsed.commands, executed: b.dryRun !== true } };
     });
     r.get(`${P}/alerts`, (req) => {

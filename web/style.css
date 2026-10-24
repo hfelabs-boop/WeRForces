@@ -466,6 +466,12 @@ aside {
   text-overflow: ellipsis;
 }
 
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
 .tree-item:hover {
   background: var(--panel-2);
 }
