@@ -326,6 +326,25 @@ describe('LLM commander (scripted transport)', () => {
   });
 });
 
+// Against the real API only when a key and model are configured (never in CI by default).
+const live = llmConfig(process.env).config;
+describe.skipIf(!live)('LLM commander against the live API', () => {
+  it('decides on a quick battle and gives orders through the tools', async () => {
+    const engine = new Engine({ seed: 1 });
+    generateBattle(engine, { seed: 3, mission: 'meeting', terrain: { seed: 5, size: 12000 } });
+    engine.sync.set({ force: 2, phases: [] });
+    engine.commanders.llm = { transport: httpTransport(live!) };
+    engine.commanders.set(2, 'llm', { maxToolCalls: 6, tokenBudget: 60000 });
+    for (let i = 0; i < 240 && engine.commanders.get(2)!.decisions.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      engine.runFor(1);
+    }
+    const c = engine.commanders.get(2)!;
+    expect(c.error).toBeUndefined();
+    expect(c.decisions[0].orders.length + (c.decisions[0].rejected?.length ?? 0)).toBeGreaterThan(0);
+  }, 180_000);
+});
+
 describe('commanders over REST and MCP', () => {
   let server: SimServer;
   let url: string;

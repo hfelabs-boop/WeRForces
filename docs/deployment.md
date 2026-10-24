@@ -129,7 +129,9 @@ simulated minute (`maxCallsPerMinute`, default 4: at a high time multiplier
 that is many per real minute), output tokens per call (`maxTokens`), tool calls
 per decision (`maxToolCalls`) and a total `tokenBudget` (default 500000), after
 which it stops with an error. Batch runs and headless `--duration` runs do not
-call models.
+call models. With both variables set, `npx vitest run test/commander.test.ts`
+also plays a short battle against the live API (otherwise that test is
+skipped).
 
 ## Docker
 
