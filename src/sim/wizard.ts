@@ -55,6 +55,8 @@ export interface WizardOptions {
   weather?: Weather;
   /** Civilian traffic and pedestrians in the towns. */
   civilians?: boolean;
+  /** Sides run by the rule-based commander instead of a phase plan. */
+  commander?: { blue?: 'none' | 'rules'; red?: 'none' | 'rules' };
 }
 
 export interface WizardResult {
@@ -152,9 +154,10 @@ function pick<T>(v: unknown, options: readonly T[], fallback: T, what: string): 
 }
 
 /** Check and fill in the options, with the defaults for anything left out. */
-export interface NormalizedWizardOptions extends Required<Omit<WizardOptions, 'terrain' | 'distance' | 'blue' | 'red'>> {
+export interface NormalizedWizardOptions extends Required<Omit<WizardOptions, 'terrain' | 'distance' | 'blue' | 'red' | 'commander'>> {
   blue: Required<WizardSide>;
   red: Required<WizardSide>;
+  commander: { blue: 'none' | 'rules'; red: 'none' | 'rules' };
   terrain?: Partial<TerrainSpec>;
   distance?: number;
 }
@@ -175,6 +178,7 @@ export function normalizeWizardOptions(o: WizardOptions): NormalizedWizardOption
   if (o.time !== undefined && (typeof o.time !== 'number' || !(o.time >= 0 && o.time < 24))) throw new WizardError('time: hours from 0 to 24');
   if (o.seed !== undefined && (typeof o.seed !== 'number' || !Number.isFinite(o.seed))) throw new WizardError('seed must be a number');
   if (o.name !== undefined && (typeof o.name !== 'string' || o.name.length > 80)) throw new WizardError('name: up to 80 characters');
+  if (o.commander !== undefined && (typeof o.commander !== 'object' || o.commander === null)) throw new WizardError('commander must be an object, e.g. {"red": "rules"}');
   return {
     name: o.name?.trim() ?? '',
     seed: o.seed === undefined ? Math.floor(Math.random() * 1e6) : Math.floor(o.seed),
@@ -186,6 +190,10 @@ export function normalizeWizardOptions(o: WizardOptions): NormalizedWizardOption
     time: o.time ?? 10,
     weather: pick(o.weather, WEATHERS, 'clear', 'weather'),
     civilians: o.civilians === true,
+    commander: {
+      blue: pick(o.commander?.blue, ['none', 'rules'] as const, 'none', 'commander.blue'),
+      red: pick(o.commander?.red, ['none', 'rules'] as const, 'none', 'commander.red'),
+    },
   };
 }
 
@@ -408,7 +416,14 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
   support(1, o.blue, blue, blueStart, blueHeading, blueAttacks || o.mission === 'meeting');
   support(2, o.red, red, redStart, redHeading, redAttacks || o.mission === 'meeting');
 
-  for (const f of [1, 2] as ForceId[]) if (phases[f].length) engine.sync.set({ force: f, phases: phases[f] });
+  // A side with a commander has no phase plan: the commander runs it from the graphics.
+  const commanded = (f: ForceId) => o.commander[f === 1 ? 'blue' : 'red'] === 'rules';
+  for (const f of [1, 2] as ForceId[]) {
+    if (commanded(f)) {
+      engine.commanders.set(f, 'rules', {}, true);
+      lines.push(`${f === 1 ? 'Blue' : 'Red'} is run by the rule-based commander.`);
+    } else if (phases[f].length) engine.sync.set({ force: f, phases: phases[f] });
+  }
 
   // ---------------------------------------------------------------- setting
   const env: Environment = { time: o.time, ...WEATHER_ENV[o.weather] };
@@ -419,7 +434,7 @@ export function generateBattle(engine: Engine, options: WizardOptions): WizardRe
   const description = [
     MISSION_TEXT[o.mission] + '.',
     ...lines,
-    `Starts at ${String(Math.floor(o.time)).padStart(2, '0')}:${String(Math.round((o.time % 1) * 60)).padStart(2, '0')}, ${o.weather}. Each side's plan is in its synchronization matrix (Phases). Seed ${o.seed}.`,
+    `Starts at ${String(Math.floor(o.time)).padStart(2, '0')}:${String(Math.round((o.time % 1) * 60)).padStart(2, '0')}, ${o.weather}. ${commanded(1) && commanded(2) ? 'Both sides are run by commanders' : commanded(1) || commanded(2) ? "The other side's plan is in its synchronization matrix (Phases)" : "Each side's plan is in its synchronization matrix (Phases)"}. Seed ${o.seed}.`,
   ].join(' ');
   engine.description = description;
   engine.markRewindPoint();

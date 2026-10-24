@@ -299,6 +299,18 @@ export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
   return result;
 }
 
+/**
+ * Run a command straight on the engine, with no runner: no undo checkpoint and no time
+ * control. Commanders give their orders this way, after the same permission check as a player.
+ */
+export function applyCommand(engine: Engine, raw: unknown): CommandResult {
+  const refuse = () => {
+    throw new ValidationError('not available here');
+  };
+  const runner = { engine, recorder: null, setRunning: refuse, stepFor: refuse, setTimeScale: refuse, undo: refuse, redo: refuse } as unknown as SimRunner;
+  return runCommand(runner, raw);
+}
+
 function runCommand(runner: SimRunner, raw: unknown): CommandResult {
   const engine = runner.engine;
   return engine.safely(() => {
@@ -460,6 +472,16 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         const id = str(c.phaseId, 'phaseId');
         if (!engine.sync.get(f)?.phases.some((p) => p.id === id)) throw new ValidationError(`unknown phase ${id}`);
         engine.sync.start(f, id, 'started by hand');
+        return;
+      }
+      case 'setCommander': {
+        const kind = c.kind;
+        if (kind !== 'none' && kind !== 'rules' && kind !== 'llm') throw new ValidationError("kind must be 'none', 'rules' or 'llm'");
+        try {
+          engine.commanders.set(force(c.force), kind, c.options);
+        } catch (err) {
+          throw new ValidationError((err as Error).message);
+        }
         return;
       }
       case 'ackAlert': {

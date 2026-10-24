@@ -16,6 +16,7 @@ import { datasetLoader } from '../terrain/store.js';
 import { SimRunner } from './runner.js';
 import { type OidcOptions, parseRole, parseRoleRule } from './oidc.js';
 import { SimServer } from './server.js';
+import { llmProvider } from './llm.js';
 
 const HELP = `WeRForces - computer generated forces simulator
 
@@ -53,6 +54,9 @@ Options:
       --webhook <url>         POST simulation events to a URL (Slack/Discord URLs get chat formatting); repeatable
       --terrains <dir>        Folder of imported terrain datasets (default ./terrains; see werforces-terrain)
       --record-interval <s>   Seconds of simulated time between recorded frames for playback/AAR (default 1, 0 = off)
+      --ai-model <id>         Model id for LLM commanders (or env WERFORCES_AI_MODEL; there is no default).
+                              The key comes from env WERFORCES_AI_API_KEY only
+      --ai-base-url <url>     Messages API base URL for LLM commanders (or env WERFORCES_AI_BASE_URL)
       --headless              No web server; run the scenario and print events
       --duration <s>          Headless only: simulated seconds to run as fast as possible
   -h, --help                  Show this help
@@ -128,6 +132,8 @@ async function main(): Promise<void> {
       'oidc-role': { type: 'string', multiple: true },
       'oidc-default-role': { type: 'string' },
       webhook: { type: 'string', multiple: true },
+      'ai-model': { type: 'string' },
+      'ai-base-url': { type: 'string' },
       headless: { type: 'boolean', default: false },
       duration: { type: 'string' },
       help: { type: 'boolean', short: 'h', default: false },
@@ -166,6 +172,10 @@ async function main(): Promise<void> {
     }
     return;
   }
+
+  // Not in --duration runs above: they step faster than any model could answer.
+  engine.commanders.llm = llmProvider(process.env, { model: values['ai-model'], baseUrl: values['ai-base-url'] });
+  if (engine.commanders.llm.transport) console.log('LLM commanders: available');
 
   const recordInterval = Number(values['record-interval']);
   if (!Number.isFinite(recordInterval) || recordInterval < 0) throw new Error('--record-interval must be a number of seconds (0 = off)');
