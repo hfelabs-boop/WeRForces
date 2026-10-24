@@ -52,6 +52,7 @@ These pages are also served by a running server at **`/docs`** (toolbar → **He
 - [Architecture](architecture.md): how the code is organised, the simulation
   loop, and how to add features.
 - [FAQ and troubleshooting](faq.md)
+- [Roadmap](roadmap.md): where the project is going, release by release, with acceptance tests
 
 ## Reference
 
