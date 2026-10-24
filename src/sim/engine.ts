@@ -53,6 +53,7 @@ import { createTask, MountTask, type Task, type TaskStatus } from './tasks.js';
 import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
 import { formationOffset, perMemberTask, splitOrder, Unit } from './units.js';
 import { Alerts } from './alerts.js';
+import { TravelCache } from './eta.js';
 
 export const DEFAULT_DT = 0.1;
 export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
@@ -143,6 +144,7 @@ export class Engine {
   readonly listeners: EngineListeners = { event: [], fire: [], detonation: [], removed: [], reset: [], step: [] };
   /** Things the operator should look at (idle, broken, out of fuel...). Read-only toward the simulation. */
   readonly alerts: Alerts = new Alerts(this);
+  private readonly travel = new TravelCache(this);
 
   private hostilities = new Set<string>(['1-2']);
   private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
@@ -1510,6 +1512,7 @@ export class Engine {
       fuel: e.type.endurance && this.rules.fuel ? Math.round(e.fuel * 1000) / 1000 : undefined,
       supplies: e.type.supply ? Math.round(e.supplies * 100) / 100 : undefined,
       prepared: e.prepared,
+      travel: !e.unit || e.unit.leader === e ? this.travel.get(e) : undefined,
     };
   }
 
@@ -1549,6 +1552,7 @@ export class Engine {
         withdrawn: u.withdrawn || undefined,
         morale: this.rules.morale ? Math.round(u.morale * 100) / 100 : undefined,
         moraleState: this.rules.morale ? u.moraleState : undefined,
+        travel: u.leader ? this.travel.get(u.leader) : undefined,
       };
     });
     return {

@@ -24,6 +24,7 @@ import type {
   SimState,
   TaskSpec,
   TerrainData,
+  Travel,
   UnitSnapshot,
   UnitTemplate,
   Vec2,
@@ -1609,6 +1610,16 @@ class App {
     }, 8000);
   }
 
+  /** "2.3 km to go, ETA 14:32 local (in 6 min)" for a move. */
+  private travelText(t: Travel | undefined): string {
+    if (!t) return '';
+    const left = t.remaining >= 1000 ? `${(t.remaining / 1000).toFixed(1)} km` : `${t.remaining} m`;
+    if (t.eta === undefined) return `${left} to go, stalled${t.stalled ? `: ${t.stalled}` : ''}`;
+    const secs = Math.max(0, t.eta - (this.state?.time ?? 0));
+    const inText = secs < 90 ? `${Math.round(secs)} s` : secs < 5400 ? `${Math.round(secs / 60)} min` : `${(secs / 3600).toFixed(1)} h`;
+    return `${left} to go, ETA ${t.etaLocal ?? fmtTime(t.eta)}${t.etaLocal ? ' local' : ''} (in ${inText})`;
+  }
+
   private pendingOrderText(id: string): string {
     const o = this.state?.orders?.find((x) => x.targetId === id);
     return o ? `ORDER IN ${Math.max(0, Math.ceil(o.due - (this.state?.time ?? 0)))} s: ${o.text}` : '';
@@ -2401,6 +2412,7 @@ class App {
           e.prepared === 'dugIn' ? 'DUG IN' : e.prepared === 'hullDown' ? 'HULL-DOWN' : '',
           e.plan,
           e.task,
+          this.travelText(e.travel),
         ]
           .filter(Boolean)
           .join(' — ') ||
@@ -2461,6 +2473,7 @@ class App {
           lead?.halted ? 'HALTED (contact)' : '',
           u.plan,
           u.task,
+          this.travelText(u.travel),
         ]
           .filter(Boolean)
           .join(' — ') || 'idle (in formation)',

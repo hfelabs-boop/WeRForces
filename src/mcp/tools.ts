@@ -68,6 +68,7 @@ interface EntityRow {
   contacts: string[];
   engagingId?: string;
   ammo: { weapon: string; rounds: number }[];
+  travel?: { remaining: number; eta?: number; etaLocal?: string; stalled?: string };
 }
 
 function compactEntity(e: EntityRow) {
@@ -87,6 +88,7 @@ function compactEntity(e: EntityRow) {
     damage: e.damage,
     task: e.plan ? `${e.plan}${e.task ? ` / ${e.task}` : ''}` : e.task,
     ...(e.remote ? { remote: true } : {}),
+    ...(e.travel ? { travel: e.travel.eta !== undefined ? `${(e.travel.remaining / 1000).toFixed(1)} km to go, arrives ${fmtTime(e.travel.eta)}${e.travel.etaLocal ? ` (${e.travel.etaLocal} local)` : ''}` : `stalled: ${e.travel.stalled}` } : {}),
   };
 }
 

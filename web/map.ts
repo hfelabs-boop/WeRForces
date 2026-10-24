@@ -693,6 +693,12 @@ export class MapView {
       ctx.setLineDash([4, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
+      // Arrival time at the end of the path.
+      const travel = sel.travel ?? (this.selectedId ? this.unitById.get(this.selectedId)?.travel : undefined);
+      if (travel?.eta !== undefined) {
+        const end = this.toScreen(this.selectedPath[this.selectedPath.length - 1]);
+        label(ctx, `ETA ${travel.etaLocal ?? ''}`.trim(), end.x + 8, end.y + 10, '#ffffff', 'bold 11px system-ui');
+      }
     }
     if (this.layers.contacts) {
       for (const cid of sel.contacts) {

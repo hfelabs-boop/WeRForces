@@ -618,6 +618,20 @@ export interface EntitySnapshot {
   supplies?: number;
   /** In a prepared position: infantry dug in, or a vehicle hull-down (harder to see and hit). */
   prepared?: 'dugIn' | 'hullDown';
+  /** Moving along a planned path: what is left of it and when it should arrive. */
+  travel?: Travel;
+}
+
+/** Estimate for a move: distance left on the planned path, and simulation time of arrival. */
+export interface Travel {
+  /** Metres left along the planned path. */
+  remaining: number;
+  /** Simulation time it should arrive, at the speeds the ground allows (absent when it cannot move on). */
+  eta?: number;
+  /** Why there is no arrival time (e.g. out of fuel). */
+  stalled?: string;
+  /** Local time of day it should arrive (HH:MM), from the scenario's environment. */
+  etaLocal?: string;
 }
 
 export interface UnitSnapshot {
@@ -640,6 +654,8 @@ export interface UnitSnapshot {
   /** 0..1 cohesion; see moraleState. */
   morale?: number;
   moraleState?: MoraleState;
+  /** The unit's move (its leader's): distance left and time of arrival. */
+  travel?: Travel;
 }
 
 export type SimEventKind =
