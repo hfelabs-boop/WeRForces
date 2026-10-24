@@ -10,10 +10,11 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { WebSocket, WebSocketServer } from 'ws';
 import { IntegrationHub, type IntegrationOptions } from '../integrations/hub.js';
 import { createMcpServer, type ApiCaller } from '../mcp/tools.js';
-import type { ClientMessage, ServerMessage, SimEvent } from '../shared/types.js';
+import type { ClientMessage, CommandResult, ForceId, Role, ServerMessage, SimEvent, SimState } from '../shared/types.js';
 import { ApiV1 } from './apiV1.js';
 import { executeCommand } from './commands.js';
 import { DocsSite } from './docs.js';
+import { CONTROLLER, checkCommand, filterEvents, filterState, ForbiddenError } from './fog.js';
 import { docsPage } from './openapi.js';
 import type { RouteResponse } from './router.js';
 import type { SimRunner } from './runner.js';
@@ -39,8 +40,10 @@ export interface ServerOptions {
   recordingDir?: string;
   /** State broadcasts per second. */
   stateRate?: number;
-  /** When set, every /api, /ws and /mcp request must present this key. */
+  /** When set, every /api, /ws and /mcp request must present this key (or a player key). */
   apiKey?: string;
+  /** Player keys: a client presenting one sees and commands only that force (fog of war). */
+  players?: { force: ForceId; key: string }[];
   /** Browser origins allowed to call the API cross-origin ('*' for any). */
   corsOrigins?: string[];
   /** Markdown documentation folder served at /docs. */
@@ -94,6 +97,7 @@ export class SimServer {
   private pendingEvents: SimEvent[] = [];
   private frameCount = 0;
   private docs: DocsSite | null;
+  private wsRoles = new WeakMap<WebSocket, Role>();
 
   constructor(
     readonly runner: SimRunner,
@@ -114,7 +118,7 @@ export class SimServer {
       maxPayload: MAX_BODY,
       verifyClient: (info: { req: http.IncomingMessage; origin?: string }) => this.allowRequest(info.req, new URL(info.req.url ?? '/', 'http://x')) === null && this.allowWsOrigin(info.req),
     });
-    this.wss.on('connection', (ws) => this.onConnection(ws));
+    this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
     runner.engine.on('event', (ev) => this.pendingEvents.push(ev));
     const every = Math.max(1, Math.round(1000 / runner.frameMs / (opts.stateRate ?? 10)));
     runner.onFrame(() => {
@@ -123,12 +127,11 @@ export class SimServer {
         this.broadcast({ type: 'terrainChanged', terrainVersion: this.lastTerrainVersion });
       }
       if (this.pendingEvents.length) {
-        this.broadcast({ type: 'events', events: this.pendingEvents });
+        const events = this.pendingEvents;
         this.pendingEvents = [];
+        this.broadcastPerRole((role) => ({ type: 'events', events: role.kind === 'player' ? filterEvents(this.runner.engine, events, role.force) : events }));
       }
-      if (++this.frameCount % every === 0 && this.wss.clients.size > 0) {
-        this.broadcast({ type: 'state', state: this.runner.state() });
-      }
+      if (++this.frameCount % every === 0 && this.wss.clients.size > 0) this.broadcastState();
     });
   }
 
@@ -155,8 +158,8 @@ export class SimServer {
   }
 
   /** In-process API caller used by the embedded MCP endpoint. */
-  localCaller(baseUrl: string): ApiCaller {
-    return async (method, p, body) => this.api.call(method, p, body, baseUrl);
+  localCaller(baseUrl: string, role: Role = CONTROLLER): ApiCaller {
+    return async (method, p, body) => this.api.call(method, p, body, baseUrl, role);
   }
 
   // ------------------------------------------------------------ security
@@ -168,19 +171,27 @@ export class SimServer {
       return { status: 403, json: { error: { status: 403, message: 'host not allowed' } } };
     }
     const protectedPath = url.pathname.startsWith('/api/') || url.pathname === '/ws' || url.pathname === '/mcp';
-    if (protectedPath && url.pathname !== '/api/docs' && this.opts.apiKey && !this.keyMatches(req, url)) {
+    if (protectedPath && url.pathname !== '/api/docs' && !this.roleFor(req, url)) {
       return { status: 401, json: { error: { status: 401, message: 'missing or invalid API key' } } };
     }
     return null;
   }
 
-  private keyMatches(req: http.IncomingMessage, url: URL): boolean {
+  /** The caller's role from its key: the API key is exercise control, a player key one force. */
+  roleFor(req: http.IncomingMessage, url: URL): Role | null {
+    const players = this.opts.players ?? [];
+    if (!this.opts.apiKey && players.length === 0) return CONTROLLER;
     const auth = req.headers.authorization;
     const presented =
       (auth?.startsWith('Bearer ') ? auth.slice(7) : undefined) ?? (req.headers['x-api-key'] as string | undefined) ?? url.searchParams.get('api_key') ?? '';
-    const a = Buffer.from(presented);
-    const b = Buffer.from(this.opts.apiKey!);
-    return a.length === b.length && timingSafeEqual(a, b);
+    const same = (key: string) => {
+      const a = Buffer.from(presented);
+      const b = Buffer.from(key);
+      return a.length === b.length && timingSafeEqual(a, b);
+    };
+    if (this.opts.apiKey && same(this.opts.apiKey)) return CONTROLLER;
+    for (const p of players) if (same(p.key)) return { kind: 'player', force: p.force };
+    return null;
   }
 
   private corsOrigin(req: http.IncomingMessage): string | null {
@@ -265,42 +276,67 @@ export class SimServer {
       }
     }
     const baseUrl = `http://${req.headers.host ?? 'localhost'}`;
+    const role = this.roleFor(req, url) ?? CONTROLLER;
 
-    if (p === '/mcp') return this.handleMcp(req, res, body, baseUrl, corsHeaders);
+    if (p === '/mcp') return this.handleMcp(req, res, body, baseUrl, corsHeaders, role);
 
     if (p.startsWith('/api/v1')) {
-      const r = await this.api.router.dispatch({ method, path: p, query: url.searchParams, body, baseUrl });
+      const r = await this.api.dispatch({ method, path: p, query: url.searchParams, body, baseUrl, role });
       return this.send(res, r, corsHeaders);
     }
 
     // Endpoints used by the GUI.
     const engine = this.runner.engine;
+    const player = role.kind === 'player' ? role.force : undefined;
+    const forbidden = () => this.send(res, { status: 403, json: { ok: false, error: 'exercise control only' } }, corsHeaders);
     if (method === 'GET' && p === '/api/catalog') return this.send(res, { status: 200, json: engine.catalog.catalog }, corsHeaders);
     if (method === 'GET' && p === '/api/terrain') return this.send(res, { status: 200, text: this.terrainJson(), contentType: 'application/json' }, corsHeaders);
-    if (method === 'GET' && p === '/api/state') return this.send(res, { status: 200, json: this.runner.state() }, corsHeaders);
-    if (method === 'GET' && p === '/api/events') return this.send(res, { status: 200, json: engine.eventsSince(Number(url.searchParams.get('since') ?? 0)) }, corsHeaders);
-    if (method === 'GET' && p === '/api/scenario') return this.send(res, { status: 200, json: engine.toScenario() }, corsHeaders);
-    if (method === 'GET' && p.startsWith('/api/path/')) return this.send(res, { status: 200, json: engine.plannedPath(decodeURIComponent(p.slice('/api/path/'.length))) }, corsHeaders);
+    if (method === 'GET' && p === '/api/state') return this.send(res, { status: 200, json: this.stateFor(role) }, corsHeaders);
+    if (method === 'GET' && p === '/api/events') {
+      const evs = engine.eventsSince(Number(url.searchParams.get('since') ?? 0));
+      return this.send(res, { status: 200, json: player === undefined ? evs : filterEvents(engine, evs, player) }, corsHeaders);
+    }
+    if (method === 'GET' && p === '/api/scenario') return player === undefined ? this.send(res, { status: 200, json: engine.toScenario() }, corsHeaders) : forbidden();
+    if (method === 'GET' && p.startsWith('/api/path/')) {
+      const id = decodeURIComponent(p.slice('/api/path/'.length));
+      const own = player === undefined || engine.entities.get(id)?.force === player;
+      return this.send(res, { status: 200, json: own ? engine.plannedPath(id) : [] }, corsHeaders);
+    }
     if (method === 'POST' && p === '/api/command') {
-      const result = executeCommand(this.runner, body);
+      const result = this.command(role, body);
       return this.send(res, { status: result.ok ? 200 : 400, json: result }, corsHeaders);
     }
     // Scenario storage (kept for the GUI; same behaviour as /api/v1/scenarios).
     if (p === '/api/scenarios' || p.startsWith('/api/scenarios/')) {
       const v1 = p.replace('/api/', '/api/v1/');
-      const r = await this.api.router.dispatch({ method, path: v1, query: url.searchParams, body, baseUrl });
+      const r = await this.api.dispatch({ method, path: v1, query: url.searchParams, body, baseUrl, role });
       return this.send(res, r, corsHeaders);
     }
     return this.send(res, { status: 404, json: { ok: false, error: 'unknown endpoint' } }, corsHeaders);
   }
 
-  private async handleMcp(req: http.IncomingMessage, res: http.ServerResponse, body: unknown, baseUrl: string, corsHeaders: Record<string, string>): Promise<void> {
+  /** Run a command as a role (players are limited to their own force). */
+  private command(role: Role, raw: unknown): CommandResult {
+    try {
+      checkCommand(this.runner.engine, role, raw);
+    } catch (err) {
+      if (err instanceof ForbiddenError) return { ok: false, error: err.message };
+      throw err;
+    }
+    return executeCommand(this.runner, raw);
+  }
+
+  private stateFor(role: Role, full = this.runner.state()): SimState {
+    return role.kind === 'player' ? filterState(this.runner.engine, full, role.force) : full;
+  }
+
+  private async handleMcp(req: http.IncomingMessage, res: http.ServerResponse, body: unknown, baseUrl: string, corsHeaders: Record<string, string>, role: Role): Promise<void> {
     if (req.method !== 'POST') {
       return this.send(res, { status: 405, json: { jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed (stateless MCP endpoint: use POST)' }, id: null } }, corsHeaders);
     }
     for (const [k, v] of Object.entries(corsHeaders)) res.setHeader(k, v);
     // Stateless mode: a fresh server/transport per request.
-    const server = createMcpServer(this.localCaller(baseUrl));
+    const server = createMcpServer(this.localCaller(baseUrl, role));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => {
       void transport.close();
@@ -317,12 +353,36 @@ export class SimServer {
     for (const c of this.wss.clients) if (c.readyState === WebSocket.OPEN) c.send(data);
   }
 
-  private onConnection(ws: WebSocket): void {
+  /** Send each client the message for its role (built once per role). */
+  private broadcastPerRole(build: (role: Role) => ServerMessage | null): void {
+    const cache = new Map<string, string | null>();
+    for (const c of this.wss.clients) {
+      if (c.readyState !== WebSocket.OPEN) continue;
+      const role = this.wsRoles.get(c) ?? CONTROLLER;
+      const key = role.kind === 'player' ? `p${role.force}` : 'c';
+      if (!cache.has(key)) {
+        const msg = build(role);
+        cache.set(key, msg && (msg.type !== 'events' || msg.events.length) ? JSON.stringify(msg) : null);
+      }
+      const data = cache.get(key);
+      if (data) c.send(data);
+    }
+  }
+
+  private broadcastState(): void {
+    const full = this.runner.state();
+    this.broadcastPerRole((role) => ({ type: 'state', state: this.stateFor(role, full) }));
+  }
+
+  private onConnection(ws: WebSocket, req: http.IncomingMessage): void {
     const engine = this.runner.engine;
-    const hello: ServerMessage = { type: 'hello', catalog: engine.catalog.catalog, scenarioName: engine.scenarioName, terrainVersion: engine.terrainVersion };
+    const role = this.roleFor(req, new URL(req.url ?? '/', 'http://x')) ?? CONTROLLER;
+    this.wsRoles.set(ws, role);
+    const hello: ServerMessage = { type: 'hello', catalog: engine.catalog.catalog, scenarioName: engine.scenarioName, terrainVersion: engine.terrainVersion, role };
     ws.send(JSON.stringify(hello));
-    ws.send(JSON.stringify({ type: 'events', events: engine.eventsSince(0).slice(-200) } satisfies ServerMessage));
-    ws.send(JSON.stringify({ type: 'state', state: this.runner.state() } satisfies ServerMessage));
+    const recent = engine.eventsSince(0);
+    ws.send(JSON.stringify({ type: 'events', events: (role.kind === 'player' ? filterEvents(engine, recent, role.force) : recent).slice(-200) } satisfies ServerMessage));
+    ws.send(JSON.stringify({ type: 'state', state: this.stateFor(role) } satisfies ServerMessage));
     ws.on('message', (data) => {
       let msg: ClientMessage;
       try {
@@ -331,9 +391,9 @@ export class SimServer {
         return;
       }
       if (msg?.type !== 'command') return;
-      const result = executeCommand(this.runner, msg.command);
+      const result = this.command(role, msg.command);
       // Push state first, so clients already know about any object the result refers to.
-      this.broadcast({ type: 'state', state: this.runner.state() });
+      this.broadcastState();
       ws.send(JSON.stringify({ type: 'result', reqId: msg.reqId, result } satisfies ServerMessage));
     });
   }

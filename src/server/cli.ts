@@ -11,6 +11,7 @@ import { DEFAULT_CATALOG, mergeCatalog } from '../sim/catalog.js';
 import { Engine } from '../sim/engine.js';
 import type { ScenarioFile } from '../shared/types.js';
 import { IntegrationHub, type IntegrationOptions } from '../integrations/hub.js';
+import { parsePlayer } from './fog.js';
 import { SimRunner } from './runner.js';
 import { SimServer } from './server.js';
 
@@ -32,6 +33,8 @@ Options:
       --site <n>              DIS site id (default 1)
       --application <n>       DIS application id (default 3001)
       --api-key <key>         Require this key on /api, /ws and /mcp (or env WERFORCES_API_KEY)
+      --player <force:key>    Player key for a force (blue, red, neutral): fog of war, own force only; repeatable.
+                              Requires --api-key, which stays the exercise-control (full view) key
       --cors <origin>         Allow cross-origin browser access from an origin ('*' for any); repeatable
       --cot <url>             Stream Cursor-on-Target to TAK: udp://239.2.3.1:6969 or tcp://host:8087
       --cot-interval <s>      Seconds between CoT position reports (default 2)
@@ -100,6 +103,7 @@ async function main(): Promise<void> {
       cot: { type: 'string' },
       'cot-interval': { type: 'string', default: '2' },
       'record-interval': { type: 'string', default: '1' },
+      player: { type: 'string', multiple: true },
       webhook: { type: 'string', multiple: true },
       headless: { type: 'boolean', default: false },
       duration: { type: 'string' },
@@ -176,7 +180,12 @@ async function main(): Promise<void> {
     });
     console.log('Running headless. Ctrl+C to stop.');
   } else {
+    const players = (values.player ?? []).map(parsePlayer);
+    if (players.length && !values['api-key']) throw new Error('--player needs --api-key (the exercise-control key)');
+    if (new Set(players.map((p) => p.key)).size !== players.length || players.some((p) => p.key === values['api-key'])) throw new Error('player keys must be unique and differ from --api-key');
+    for (const p of players) console.log(`Player key for ${['Other', 'Blue', 'Red', 'Neutral'][p.force]}: fog of war on`);
     const server = new SimServer(runner, {
+      players,
       port: Number(values.port),
       host: values.host!,
       webRoot: path.join(root, 'dist', 'web'),

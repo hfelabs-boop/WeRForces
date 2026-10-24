@@ -397,6 +397,8 @@ export interface EntitySnapshot {
   embarkedIn?: string;
   /** Ids of entities riding in this carrier. */
   passengers?: string[];
+  /** Fog of war: this is another force's entity known only as a sensor contact, last seen this many seconds ago. */
+  contactAge?: number;
 }
 
 export interface UnitSnapshot {
@@ -518,8 +520,14 @@ export interface CommandResult {
   id?: string;
 }
 
+/**
+ * Who a client is. The controller (exercise control) sees and commands everything; a
+ * player sees its own force plus what its force has detected, and commands only its force.
+ */
+export type Role = { kind: 'controller' } | { kind: 'player'; force: ForceId };
+
 export type ServerMessage =
-  | { type: 'hello'; catalog: Catalog; scenarioName: string; terrainVersion: number }
+  | { type: 'hello'; catalog: Catalog; scenarioName: string; terrainVersion: number; role: Role }
   | { type: 'state'; state: SimState }
   | { type: 'events'; events: SimEvent[] }
   | { type: 'terrainChanged'; terrainVersion: number }

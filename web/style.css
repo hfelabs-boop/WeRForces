@@ -985,3 +985,24 @@ body.aar #btn-aar {
   margin-right: 5px;
   vertical-align: middle;
 }
+
+/* ------------------------------------------------ roles */
+
+body.player [data-controller-only] {
+  display: none !important;
+}
+
+.pill.force-1 {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
+.pill.force-2 {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.pill.force-3 {
+  color: var(--neutral);
+  border-color: var(--neutral);
+}

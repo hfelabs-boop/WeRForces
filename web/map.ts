@@ -593,7 +593,8 @@ export class MapView {
           destroyed: e.damage === 'destroyed',
           damaged: e.damage === 'mobility' || e.damage === 'firepower',
           remote: e.remote,
-          alpha: inSelUnit || !selUnit ? 1 : 0.9,
+          // Fog of war: contacts fade as they go stale.
+          alpha: e.contactAge !== undefined ? (e.contactAge > 5 ? 0.45 : 0.8) : inSelUnit || !selUnit ? 1 : 0.9,
         });
         if (inSelUnit) {
           ctx.beginPath();

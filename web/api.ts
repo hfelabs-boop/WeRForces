@@ -1,9 +1,9 @@
 // WebSocket client for the WeRForces remote-control API.
 
-import type { Catalog, Command, CommandResult, ServerMessage, SimEvent, SimState, TerrainData } from '../src/shared/types.js';
+import type { Catalog, Command, CommandResult, Role, ServerMessage, SimEvent, SimState, TerrainData } from '../src/shared/types.js';
 
 export interface ApiHandlers {
-  hello(catalog: Catalog, terrainVersion: number): void;
+  hello(catalog: Catalog, terrainVersion: number, role: Role): void;
   state(state: SimState): void;
   events(events: SimEvent[]): void;
   terrainChanged(version: number): void;
@@ -81,7 +81,7 @@ export class Api {
       const msg = JSON.parse(ev.data as string) as ServerMessage;
       switch (msg.type) {
         case 'hello':
-          this.handlers.hello(msg.catalog, msg.terrainVersion);
+          this.handlers.hello(msg.catalog, msg.terrainVersion, msg.role ?? { kind: 'controller' });
           break;
         case 'state':
           this.handlers.state(msg.state);

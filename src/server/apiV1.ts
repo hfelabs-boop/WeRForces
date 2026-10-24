@@ -5,7 +5,8 @@ import path from 'node:path';
 import { entitiesGeoJSON, frameFor, graphicsGeoJSON, liveKML, sceneKML } from '../integrations/gis.js';
 import type { IntegrationHub } from '../integrations/hub.js';
 import { dist2d } from '../shared/math.js';
-import type { Command, CommandResult, EntitySnapshot, ForceId, SimEventKind, SimState, UnitSnapshot, Vec2 } from '../shared/types.js';
+import type { Command, CommandResult, EntitySnapshot, ForceId, Role, SimEventKind, SimState, UnitSnapshot, Vec2 } from '../shared/types.js';
+import { CONTROLLER, canSee, checkCommand, filterEvents, filterState, ForbiddenError } from './fog.js';
 import { FORCE_NAMES } from '../shared/types.js';
 import { executeCommand } from './commands.js';
 import { buildOpenApi } from './openapi.js';
@@ -34,8 +35,22 @@ function num(v: unknown, what: string): number {
   return n;
 }
 
+/** Routes a player may use (everything else is exercise control only). */
+const PLAYER_ROUTES: [string, RegExp][] = [
+  ['GET', /^\/api\/v1\/?$/],
+  ['GET', /^\/api\/v1\/(openapi\.json|simulation|catalog(\/[\w-]+)?|entities|units|graphics|events|terrain(\/point)?)\/?$/],
+  ['GET', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
+  ['GET', /^\/api\/v1\/entities\/[^/]+\/path\/?$/],
+  ['POST', /^\/api\/v1\/(entities|units)\/[^/]+\/(task|plan|stop|embark|disembark)\/?$/],
+  ['POST', /^\/api\/v1\/(graphics|terrain\/line-of-sight|terrain\/route)\/?$/],
+  ['PATCH', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
+  ['DELETE', /^\/api\/v1\/graphics\/[^/]+\/?$/],
+];
+
 export class ApiV1 {
   readonly router = new Router();
+  /** Role of the request being handled (handlers run synchronously, one at a time). */
+  private role: Role = CONTROLLER;
 
   constructor(readonly ctx: ApiContext) {
     this.routes();
@@ -45,7 +60,24 @@ export class ApiV1 {
     return this.ctx.runner.engine;
   }
 
+  /** Handle a request as a role: players get their force's view and orders only. */
+  dispatch(input: Omit<RouteRequest, 'params'>) {
+    const role = input.role ?? CONTROLLER;
+    if (role.kind === 'player' && !PLAYER_ROUTES.some(([m, re]) => m === input.method && re.test(input.path))) {
+      const status = this.router.matches(input.path) ? 403 : 404;
+      return Promise.resolve({ status, json: { error: { status, message: status === 403 ? 'exercise control only' : 'unknown endpoint' } } });
+    }
+    this.role = role;
+    return this.router.dispatch(input);
+  }
+
   private run(c: Command): CommandResult {
+    try {
+      checkCommand(this.engine, this.role, c);
+    } catch (err) {
+      if (err instanceof ForbiddenError) throw new HttpError(403, err.message);
+      throw err;
+    }
     const r = executeCommand(this.ctx.runner, c);
     if (!r.ok) throw new HttpError(/^unknown (entity|unit|object|local entity|graphic)/.test(r.error ?? '') ? 404 : 400, r.error ?? 'command failed');
     return r;
@@ -83,13 +115,22 @@ export class ApiV1 {
   }
 
   private state(): SimState {
-    return this.ctx.runner.state();
+    const s = this.ctx.runner.state();
+    return this.role.kind === 'player' ? filterState(this.engine, s, this.role.force) : s;
   }
 
   private entity(id: string): EntitySnapshot {
     const e = this.engine.entities.get(id);
-    if (!e) throw new HttpError(404, `unknown entity ${id}`);
+    if (!e || !canSee(this.engine, this.role, id)) throw new HttpError(404, `unknown entity ${id}`);
+    if (this.role.kind === 'player' && e.force !== this.role.force) return this.state().entities.find((x) => x.id === id)!;
     return this.engine.snapshotEntity(e);
+  }
+
+  /** Entities a player may ask detailed questions about (own force only). */
+  private ownEntity(id: string): EntitySnapshot {
+    const e = this.entity(id);
+    if (this.role.kind === 'player' && e.force !== this.role.force) throw new HttpError(404, `unknown entity ${id}`);
+    return e;
   }
 
   private unit(id: string): UnitSnapshot {
@@ -289,7 +330,7 @@ export class ApiV1 {
       this.run({ cmd: 'deleteObject', id: req.params.id });
       return { status: 204 };
     });
-    r.get(`${P}/entities/{id}/path`, (req) => (this.entity(req.params.id), { json: this.engine.plannedPath(req.params.id) }));
+    r.get(`${P}/entities/{id}/path`, (req) => (this.ownEntity(req.params.id), { json: this.engine.plannedPath(req.params.id) }));
     for (const kind of ['entities', 'units'] as const) {
       const check = (id: string) => (kind === 'entities' ? this.entity(id) : this.unit(id));
       r.post(`${P}/${kind}/{id}/task`, (req) => {
@@ -384,7 +425,7 @@ export class ApiV1 {
     });
     r.get(`${P}/graphics/{id}`, (req) => {
       const g = this.engine.graphics.get(req.params.id);
-      if (!g) throw new HttpError(404, `unknown graphic ${req.params.id}`);
+      if (!g || (this.role.kind === 'player' && g.force !== this.role.force && g.force !== 0)) throw new HttpError(404, `unknown graphic ${req.params.id}`);
       return { json: g };
     });
     r.patch(`${P}/graphics/{id}`, (req) => {
@@ -409,6 +450,7 @@ export class ApiV1 {
       const kinds = req.query.get('kinds')?.split(',').filter(Boolean) as SimEventKind[] | undefined;
       const limit = Math.min(1000, Math.max(1, Number(req.query.get('limit') ?? 200) || 200));
       let evs = this.engine.eventsSince(since);
+      if (this.role.kind === 'player') evs = filterEvents(this.engine, evs, this.role.force);
       if (kinds?.length) evs = evs.filter((e) => kinds.includes(e.kind));
       return { json: evs.slice(-limit) };
     });
@@ -520,6 +562,7 @@ export class ApiV1 {
     if (typeof v === 'string') {
       const e = this.engine.entities.get(v);
       if (!e) throw new HttpError(404, `unknown entity ${v}`);
+      this.ownEntity(v);
       return e.eye;
     }
     const p = this.point(v, what);
@@ -595,9 +638,9 @@ export class ApiV1 {
   }
 
   /** In-process call (used by the embedded MCP server). */
-  call(method: string, pathAndQuery: string, body?: unknown, baseUrl = '') {
+  call(method: string, pathAndQuery: string, body?: unknown, baseUrl = '', role: Role = CONTROLLER) {
     const u = new URL(pathAndQuery, 'http://local');
-    return this.router.dispatch({ method, path: u.pathname, query: u.searchParams, body, baseUrl });
+    return this.dispatch({ method, path: u.pathname, query: u.searchParams, body, baseUrl, role });
   }
 }
 

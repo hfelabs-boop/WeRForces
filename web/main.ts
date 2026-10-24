@@ -15,6 +15,7 @@ import type {
   Plan,
   PlanStatement,
   Roe,
+  Role,
   SimEvent,
   SimState,
   TaskSpec,
@@ -80,6 +81,8 @@ class App {
   view: '2d' | '3d' | 'split' = '2d';
   selectedId: string | null = null;
   force: ForceId = 1;
+  /** Exercise control, or a player limited to one force. */
+  role: Role = { kind: 'controller' };
   armed: string | null = null;
   events: SimEvent[] = [];
   planDrafts = new Map<string, Plan>();
@@ -94,7 +97,7 @@ class App {
 
   constructor() {
     this.api = new Api({
-      hello: (catalog, version) => this.onHello(catalog, version),
+      hello: (catalog, version, role) => this.onHello(catalog, version, role),
       state: (s) => this.onState(s),
       events: (evs) => this.onEvents(evs),
       terrainChanged: (v) => this.loadTerrain(v),
@@ -136,7 +139,19 @@ class App {
 
   // ------------------------------------------------------------ server messages
 
-  private onHello(catalog: Catalog, terrainVersion: number): void {
+  private onHello(catalog: Catalog, terrainVersion: number, role: Role): void {
+    this.role = role;
+    const player = role.kind === 'player';
+    document.body.classList.toggle('player', player);
+    const pill = $('#role-status');
+    pill.classList.toggle('hidden', !player);
+    if (player) {
+      pill.textContent = `${FORCE_NAMES[role.force]} player · fog of war`;
+      pill.className = `pill force-${role.force}`;
+      this.force = role.force;
+      // Players cannot create objects: start on the Objects tab.
+      ($('[data-tab="objects"]') as HTMLElement).click();
+    }
     this.catalog = catalog;
     this.types = new Map(catalog.entityTypes.map((t) => [t.id, t]));
     this.renderPalette();
@@ -455,7 +470,7 @@ class App {
     if (e) {
       el.append(
         h('h3', {}, symbolCanvas(e.force, e.domain, e.symbol, 24), ` ${e.name}`),
-        h('div', { class: 'sub', text: `${this.types.get(e.typeId)?.name ?? e.typeId} · ${FORCE_NAMES[e.force]} · ${e.id} · replay` }),
+        h('div', { class: 'sub', text: `${this.types.get(e.typeId)?.name ?? e.typeId} · ${FORCE_NAMES[e.force]} · ${e.id} · ${this.aar.active ? 'replay' : 'contact'}` }),
         h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Altitude', this.bind('alt'), 'Heading', this.bind('heading'), 'Speed', this.bind('speed'), 'Damage', this.bind('damage')),
         h('div', { class: 'section' }, h('h4', { text: 'Status' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
       );
@@ -468,7 +483,14 @@ class App {
         h('div', { class: 'section' }, h('h4', { text: 'Members' }), h('div', { 'data-bind': 'members' })),
       );
     }
-    el.append(h('p', { class: 'hint', text: 'After-action review: positions and damage as recorded. Exit the AAR to give orders.' }));
+    el.append(
+      h('p', {
+        class: 'hint',
+        text: this.aar.active
+          ? 'After-action review: positions and damage as recorded. Exit the AAR to give orders.'
+          : `Enemy contact, last seen ${e?.contactAge ?? 0} s ago. Position is where your force last saw it.`,
+      }),
+    );
   }
 
   private modal(content: HTMLElement): () => void {
@@ -1078,7 +1100,7 @@ class App {
       const e = this.entity(id);
       const u = this.unit(id);
       const g = this.graphic(id);
-      if (this.aar.active && (e || u)) this.buildReplayInspector(el, id);
+      if ((this.aar.active || e?.contactAge !== undefined) && (e || u)) this.buildReplayInspector(el, id);
       else if (e) this.buildEntityInspector(el, e);
       else if (u) this.buildUnitInspector(el, u);
       else if (g) this.buildGraphicInspector(el, g);
