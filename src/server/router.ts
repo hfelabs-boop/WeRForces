@@ -30,6 +30,8 @@ export interface RouteResponse {
   json?: unknown;
   /** Raw text body with a content type. */
   text?: string;
+  /** Binary body with a content type (e.g. a PDF). */
+  bytes?: Uint8Array;
   contentType?: string;
   headers?: Record<string, string>;
 }

@@ -67,6 +67,8 @@ export function buildOpenApi(baseUrl: string): Schema {
       '/api/v1/scenario/new': {
         post: op('Scenario', 'Start an empty scenario', body({ type: 'object', properties: { name: { type: 'string' }, terrain: { type: 'object', description: 'generation settings (seed, size, cellSize, relief, waterFraction, forestFraction, towns, origin) or {"dataset": name} for imported terrain' } } })),
       },
+      '/api/v1/scenario/undo': { post: op('Scenario', 'Take back the last edit (anything but run, pause, step and time scale); up to 30 steps') },
+      '/api/v1/scenario/redo': { post: op('Scenario', 'Redo an edit taken back with undo') },
       '/api/v1/scenarios': { get: op('Scenario', 'List scenarios stored on the server') },
       '/api/v1/scenarios/{name}': {
         get: op('Scenario', 'Read a stored scenario', { parameters: [idParam('name')] }, ok(ref('Scenario'))),
@@ -75,6 +77,36 @@ export function buildOpenApi(baseUrl: string): Schema {
       '/api/v1/scenarios/{name}/load': { post: op('Scenario', 'Load a stored scenario', { parameters: [idParam('name')] }) },
       '/api/v1/terrains': { get: op('Terrain', 'Imported real-world terrain datasets (use one with POST /scenario/new {"terrain":{"dataset":name}})') },
       '/api/v1/terrains/{name}': { put: op('Terrain', 'Upload a terrain dataset made with werforces-terrain', { parameters: [idParam('name')], ...body({ type: 'object' }) }) },
+      '/api/v1/simulation/rules': {
+        get: op('Simulation', 'Which optional models are on'),
+        put: op('Simulation', 'Turn optional models on or off', {
+          ...body({
+            type: 'object',
+            properties: {
+              suppression: { type: 'boolean', description: 'incoming fire suppresses: less accurate, slower, worse at spotting; infantry get pinned' },
+              morale: { type: 'boolean', description: 'units become shaken and break under losses and fire' },
+              fuel: { type: 'boolean', description: 'vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down' },
+              orderDelay: { type: 'boolean', description: 'orders take time to pass down the chain of command: 5 s for an entity, 15 s a section, 30 s a platoon, 60 s a company (off by default)' },
+            },
+          }),
+        }),
+      },
+      '/api/v1/simulation/environment': {
+        get: op('Simulation', 'Time of day and weather: the settings, plus the current local time, sun altitude and light level'),
+        put: op('Simulation', 'Change the time of day and weather (fields left out keep their values)', {
+          ...body({
+            type: 'object',
+            properties: {
+              date: { type: 'string', description: 'date at the scenario start, YYYY-MM-DD' },
+              time: { type: 'number', minimum: 0, maximum: 24, description: 'local solar time at the scenario start, hours' },
+              visibility: { type: 'number', minimum: 50, maximum: 100000, description: 'meteorological visibility in metres (fog: a few hundred)' },
+              precipitation: { type: 'string', enum: ['none', 'rain', 'heavyRain', 'snow'] },
+              windSpeed: { type: 'number', minimum: 0, maximum: 40, description: 'm/s; drifts smoke' },
+              windFrom: { type: 'number', minimum: 0, maximum: 360, description: 'degrees the wind blows from' },
+            },
+          }),
+        }),
+      },
       '/api/v1/recording': { get: op('Recording', 'Recording summary: time span, frames, bookmarks, live or reviewing a loaded recording') },
       '/api/v1/recording/data': { get: op('Recording', 'The whole recording (frames, events, bookmarks) as JSON, for saving or replaying elsewhere') },
       '/api/v1/recording/report': { get: op('Recording', 'After-action report: strength per force, losses, kills with killer and weapon, rounds fired, strength over time') },
@@ -83,6 +115,30 @@ export function buildOpenApi(baseUrl: string): Schema {
           parameters: [{ name: 'time', in: 'query', schema: { type: 'number' }, description: 'simulation time in seconds (default: end of the recording)' }],
         }),
       },
+      '/api/v1/recording/events.csv': { get: op('Recording', 'The recorded event log as CSV (time, kind, text, entity, target)') },
+      '/api/v1/recording/kills.csv': { get: op('Recording', 'Kills as CSV: time, victim, killer, weapon') },
+      '/api/v1/recording/strength.csv': { get: op('Recording', 'Alive entities per force over time, as CSV') },
+      '/api/v1/recording/report.pdf': { get: op('Recording', 'The after-action report as a printable PDF: summary, strength chart, kills, weapons, bookmarks') },
+      '/api/v1/batch': {
+        get: op('Batch', 'Batch (Monte Carlo) jobs: status and progress'),
+        post: op('Batch', 'Start a batch: replicate a scenario with different random seeds (in a worker thread) and summarise the outcomes', {
+          ...body({
+            type: 'object',
+            properties: {
+              scenario: { description: 'a stored scenario name, or a scenario file; default: the current state', oneOf: [{ type: 'string' }, { type: 'object' }] },
+              runs: { type: 'integer', minimum: 1, maximum: 1000, default: 10 },
+              duration: { type: 'number', description: 'simulated seconds per run (default 1800)' },
+              seed: { type: 'integer', description: 'seed of the first run; run i uses seed + i (default 1000)' },
+              stopWhenDestroyed: { type: 'boolean', description: 'end a run early once a force has nothing left alive (default true)' },
+            },
+          }),
+        }),
+      },
+      '/api/v1/batch/{id}': {
+        get: op('Batch', 'A batch job: progress, and when done the summary (losses per force with mean, sd, 95% CI and histogram; exchange ratio; area control; shots). ?outcomes=true adds every run.', { parameters: [idParam()] }),
+        delete: { tags: ['Batch'], summary: 'Cancel a running batch', parameters: [idParam()], responses: { '204': { description: 'Cancelled' }, ...errors } },
+      },
+      '/api/v1/batch/{id}/runs.csv': { get: op('Batch', 'One row per run: seed, end time, losses per force, shots, first kill, area control', { parameters: [idParam()] }) },
       '/api/v1/recording/bookmarks': {
         post: op('Recording', 'Add a bookmark (note) to the recording', {
           ...body({ type: 'object', required: ['text'], properties: { text: { type: 'string' }, time: { type: 'number', description: 'default: now' } } }),
@@ -132,7 +188,19 @@ export function buildOpenApi(baseUrl: string): Schema {
       },
       '/api/v1/units/{id}': {
         get: op('Units', 'Get a unit with its members', { parameters: [idParam()] }),
-        patch: op('Units', 'Rename, set formation, ROE or reactions', { parameters: [idParam()], ...body({ type: 'object', properties: { name: { type: 'string' }, formation: ref('Formation'), roe: ref('Roe'), reactions: ref('Reactions') } }) }),
+        patch: op('Units', 'Rename, set formation, ROE or reactions, or put under a superior unit', {
+          parameters: [idParam()],
+          ...body({
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              formation: ref('Formation'),
+              roe: ref('Roe'),
+              reactions: ref('Reactions'),
+              superiorId: { type: ['string', 'null'], description: 'superior unit in the chain of command (null: independent). Orders to the superior pass down to it.' },
+            },
+          }),
+        }),
         delete: { tags: ['Units'], summary: 'Delete a unit and its members', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } },
       },
       ...taskable('units', 'Units'),
@@ -171,7 +239,7 @@ export function buildOpenApi(baseUrl: string): Schema {
       '/api/v1/terrain/line-of-sight': {
         post: op(
           'Terrain',
-          'Line of sight between two entities or points',
+          'Line of sight between two entities or points, through terrain, forest, buildings and smoke (`radar: true` sees through smoke)',
           body({ type: 'object', required: ['from', 'to'], properties: { from: { oneOf: [{ type: 'string', description: 'entity id' }, ref('Position')] }, to: { oneOf: [{ type: 'string' }, ref('Position')] } } }),
         ),
       },
@@ -179,7 +247,17 @@ export function buildOpenApi(baseUrl: string): Schema {
         post: op(
           'Terrain',
           'Plan a route without moving anything',
-          body({ type: 'object', required: ['from', 'to'], properties: { from: ref('Position'), to: ref('Position'), domain: { enum: ['ground', 'lifeform', 'surface', 'air'] } } }),
+          body({
+            type: 'object',
+            required: ['from', 'to'],
+            properties: {
+              from: ref('Position'),
+              to: ref('Position'),
+              domain: { enum: ['ground', 'lifeform', 'surface', 'air'] },
+              force: { type: 'integer', description: "plan for this force: round obstacles and the minefields it knows" },
+              covered: { type: 'boolean', description: "with force: keep out of sight of the enemies it knows about" },
+            },
+          }),
         ),
       },
       '/api/v1/integrations': { get: op('Integrations', 'Status of CoT/TAK and webhooks') },
@@ -220,7 +298,7 @@ export function buildOpenApi(baseUrl: string): Schema {
         Formation: { enum: ['column', 'line', 'wedge', 'vee', 'echelonRight'] },
         Task: {
           oneOf: [
-            { type: 'object', required: ['type', 'target'], properties: { type: { const: 'moveTo' }, target: ref('Position'), speed: { type: 'number', description: 'm/s' } } },
+            { type: 'object', required: ['type', 'target'], properties: { type: { const: 'moveTo' }, target: ref('Position'), speed: { type: 'number', description: 'm/s' }, covered: { type: 'boolean', description: "route out of sight of known enemies' direct fire where possible" } } },
             { type: 'object', required: ['type', 'routeId'], properties: { type: { const: 'followRoute' }, routeId: { type: 'string' }, speed: { type: 'number' }, reverse: { type: 'boolean' }, startIndex: { type: 'integer' } } },
             { type: 'object', required: ['type', 'routeId'], properties: { type: { const: 'patrol' }, routeId: { type: 'string' }, speed: { type: 'number' } } },
             { type: 'object', required: ['type', 'duration'], properties: { type: { const: 'wait' }, duration: { type: 'number' } } },
@@ -244,7 +322,42 @@ export function buildOpenApi(baseUrl: string): Schema {
                 rounds: { type: 'integer', minimum: 1, maximum: 100, description: 'rounds per tube (default 3)' },
                 radius: { type: 'number', minimum: 0, maximum: 1000, description: 'spread rounds over this radius in m (default 0)' },
                 weaponId: { type: 'string', description: 'indirect-fire weapon to use (default: first that can reach)' },
+                smoke: { type: 'boolean', description: 'fire smoke rounds: a cloud that blocks sight instead of a blast' },
               },
+            },
+            {
+              type: 'object',
+              required: ['type', 'graphicId'],
+              description: 'Engineers: move to a minefield or obstacle line and breach a 30 m lane through it.',
+              properties: { type: { const: 'breach' }, graphicId: { type: 'string' } },
+            },
+            {
+              type: 'object',
+              required: ['type'],
+              description: 'Drive to a friendly supply vehicle (the nearest with stock, or supplierId), halt beside it and take on fuel and ammunition. Units send every member that needs it.',
+              properties: { type: { const: 'resupply' }, supplierId: { type: 'string' } },
+            },
+            {
+              type: 'object',
+              required: ['type', 'position'],
+              description:
+                'Take a position and hold it facing `facing` (degrees; default the direction of the move). overwatch: watch and engage (optional `duration` s). defend: dig in and fight from it. screen: return-fire ROE, fall back to `fallback` (default 2 km to the rear) when an enemy comes within `breakContact` m. ambush: weapons tight until an enemy enters the `killZoneId` area, then everyone opens fire. Units deploy in a line `width` m wide. Infantry dig in after 90 s, vehicles go hull-down after 30 s: harder to see and hit.',
+              properties: {
+                type: { enum: ['overwatch', 'defend', 'screen', 'ambush'] },
+                position: ref('Position'),
+                facing: { type: 'number', minimum: 0, maximum: 360 },
+                width: { type: 'number' },
+                duration: { type: 'number' },
+                killZoneId: { type: 'string' },
+                fallback: ref('Position'),
+                breakContact: { type: 'number' },
+              },
+            },
+            {
+              type: 'object',
+              required: ['type', 'areaId'],
+              description: "Sweep an area in parallel tracks spaced to the searcher's sensor range (or `spacing` m), then report what was found.",
+              properties: { type: { const: 'search' }, areaId: { type: 'string' }, spacing: { type: 'number' }, speed: { type: 'number' } },
             },
           ],
         },
@@ -264,7 +377,7 @@ export function buildOpenApi(baseUrl: string): Schema {
                 condition: {
                   type: 'object',
                   properties: {
-                    type: { enum: ['simTime', 'inArea', 'enemyInArea', 'enemyDetected', 'underFire', 'strengthBelow', 'entityDestroyed'] },
+                    type: { enum: ['simTime', 'inArea', 'enemyInArea', 'enemyDetected', 'underFire', 'strengthBelow', 'fuelBelow', 'ammoBelow', 'entityDestroyed'] },
                     time: { type: 'number' },
                     areaId: { type: 'string' },
                     entityId: { type: 'string' },
@@ -299,7 +412,13 @@ export function buildOpenApi(baseUrl: string): Schema {
         CreateGraphic: {
           type: 'object',
           required: ['kind', 'points'],
-          properties: { kind: { enum: ['route', 'area', 'phaseLine', 'point'] }, name: { type: 'string' }, force: ref('Force'), points: { type: 'array', items: ref('Position') } },
+          properties: {
+            kind: { enum: ['route', 'area', 'phaseLine', 'point', 'minefield', 'obstacle'], description: 'minefield: an area that damages what crosses it; obstacle: a line vehicles cannot cross (ditch, wire)' },
+            name: { type: 'string' },
+            force: ref('Force'),
+            points: { type: 'array', items: ref('Position') },
+            density: { type: 'number', description: 'minefields: 0.1 sparse .. 1.5 dense (default 0.5)' },
+          },
         },
         Entity: {
           type: 'object',
@@ -347,7 +466,7 @@ export function buildOpenApi(baseUrl: string): Schema {
           properties: {
             url: { type: 'string', format: 'uri' },
             format: { enum: ['json', 'slack', 'discord'] },
-            kinds: { type: 'array', items: { enum: ['fire', 'detonation', 'damaged', 'destroyed', 'detected', 'task', 'created', 'deleted', 'info'] } },
+            kinds: { type: 'array', items: { enum: ['fire', 'detonation', 'damaged', 'destroyed', 'detected', 'task', 'created', 'deleted', 'info', 'radio'] } },
             secret: { type: 'string', description: 'Signs payloads: X-WeRForces-Signature: sha256=<hmac>' },
             name: { type: 'string' },
           },

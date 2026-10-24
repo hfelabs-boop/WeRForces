@@ -32,7 +32,8 @@ to an imported terrain by name: `"terrain": {"dataset": "fulda"}`.
 The table describes generated terrain. Imported terrain has the same layers,
 taken from the data instead: elevation from the DEM, inland water (lakes and
 rivers, with bridges where roads cross) from an extra water layer, and forest,
-roads and towns from the features.
+roads and towns from the features. It can also carry **land cover** (from ESA
+WorldCover) and **buildings** (from OpenStreetMap), described below.
 
 | Feature | Model |
 | --- | --- |
@@ -51,16 +52,43 @@ roads and towns from the features.
 | Surface vessel | only on water (at sea level, or a lake's level) | – | – | – | – |
 | Aircraft | unaffected | | | | |
 
+**Land cover** (imported terrain) slows movement off roads: shrub × 0.8 for
+vehicles (× 0.85 on foot), built-up × 0.7 (× 0.9), wetland × 0.35 (× 0.6), snow
+× 0.6 (× 0.5). WorldCover tree cover also counts as forest, and permanent water
+as water. Built-up ground halves the chance of spotting what is on it (× 0.6),
+and shrub hides people (× 0.7).
+
+**Buildings** (imported terrain) are rasterised per grid post: the share of the
+cell their footprints cover, and their height. A post at least 25 % covered is
+built-up:
+
+- sight lines below the roofs are blocked after 25 m among buildings, so
+  streets and gaps give short views but not across a block; from above the
+  roofs you see over them;
+- vehicles cannot enter posts at least 50 % covered (solid blocks) and are
+  slowed to × 0.4 among buildings; troops × 0.8;
+- troops among buildings are harder to hit (× 0.6) and to spot.
+
 **Route planning.** *Move to* and *Follow route* plan a ground or water path with
 A\* over the terrain grid. Paths minimise travel time, so vehicles use roads when
 that is faster, and avoid water and cliffs. If a vehicle gets blocked for 3 s, it
-replans. Aircraft fly straight.
+replans. Aircraft fly straight. Routes also go round **obstacles** and the
+**minefields the force knows about** (through breached lanes where there are
+some).
+
+**Covered routes.** A *Move to* with `covered` (context menu: *Move here by a
+covered route*) also keeps out of sight of the enemies the force knows about:
+ground each known enemy can see and reach with direct fire costs more to cross,
+the more so the closer it is, so the route goes behind ridges, woods and
+buildings or round the enemy's reach. It replans every 15 s as contacts change.
+Broken units, withdrawing units and screens falling back take covered routes.
 
 **Line of sight.** Line of sight is sampled every 25 m along the line from the
 observer's eyes to the target. Terrain blocks it outright. Forest canopy (15 m)
 blocks it only once the line has passed through **more than 150 m of
 forest**, so vehicles at a wood's edge, or close together inside a wood, can
-still see each other.
+still see each other. Smoke clouds block it too (except for radar), and so do
+buildings (above).
 
 ## Forces and hostility
 
@@ -124,13 +152,40 @@ entities.
 
 - **Tasking a unit.** The leader does the task and the others hold formation on
   it. They speed up to catch up, and fall in behind the leader if their slot is
-  blocked by terrain. *Attack*, *Fire mission*, *Mount* and *Dismount* are
-  different: every member does them itself.
+  blocked by terrain. *Attack*, *Fire mission*, *Mount*, *Dismount* and
+  *Resupply* are different: every member does them itself. *Overwatch*,
+  *Defend*, *Screen* and *Ambush* deploy the members in a line across the
+  facing (`width` m wide, or at the unit's spacing).
 - **Shared contacts.** When one member detects something, every member knows
   about it.
 - **Succession.** If the leader is destroyed, or immobilised while another
   member can still move, the next member takes command and carries on the unit's
   task.
+
+### Chain of command
+
+A unit can have a **superior** unit (`parentId`; inspector *Superior*; REST
+`PATCH /units/{id}` with `superiorId`). Company templates build an HQ unit with
+three platoons under it, named after the company (*US Tank Company 1st
+Platoon*), with the HQ vehicles close together behind them. An order to a
+superior passes down:
+
+- *Move to*: each subordinate moves to the target plus its current offset from
+  the HQ, so the company keeps its shape;
+- *Overwatch*, *Defend*, *Screen*, *Ambush*: the subordinates spread in a line
+  across the facing (`width`, or 400 m apart for vehicles and 150 m on foot),
+  each with its share of the frontage, and the HQ takes post 300 m (150 m on
+  foot) behind;
+- anything else: every subordinate gets the same task.
+
+A superior's plan step lasts until its subordinates have finished too.
+
+**Order delay** (optional rule, off by default): orders take time to reach and
+be acted on. 5 s for an entity, 10 s a team or flight, 15 s a section, 30 s a
+platoon, 60 s a company or group, ± 20 %. An order to a company arrives after
+its delay, then each platoon gets its part after its own: orders pass down level
+by level. A new order replaces one still on its way; **Stop** is immediate.
+Orders received are acknowledged on the radio net.
 
 ## Tasks
 
@@ -149,6 +204,19 @@ plan. **Stop** clears both.
 | **Fire mission** *point* | Stops, lays the weapon (20 s), then fires `rounds` (default 3) indirect-fire rounds at the point, spread over `radius` m (default 0). On a unit, every tube that can reach fires | All rounds fired (fails out of range or out of ammunition) |
 | **Mount** *carrier* | Dismounted infantry walk to the carrier and board when it is stopped (a helicopter must have landed). A unit as carrier: each soldier takes the nearest free seat in it | Aboard (fails when no seats are left) |
 | **Dismount** | A carrier stops (a helicopter lands) and unloads its passengers in a line behind it | Passengers out |
+| **Overwatch** *position* | Takes the position facing `facing` (degrees; default the direction of the move) and watches and engages from it | `duration` elapsed, if set; otherwise never |
+| **Defend** *position* | Takes the position and holds it, fighting from it without chasing | Never |
+| **Ambush** *position, kill zone* | Takes the position with **hold fire**; as soon as an enemy enters the kill-zone area (or the ambushers come under fire) the whole unit switches to **fire at will** together | Never |
+| **Screen** *position* | Watches with **return fire**; when an enemy comes within `breakContact` m (default 1500) falls back to `fallback` (default 2 km to the rear) by a covered route | Back at the fallback point |
+| **Search** *area* | Sweeps the area in back-and-forth tracks spaced to the searcher's sensor range (or `spacing`), then reports how many enemies it found | Last track done |
+| **Breach** *minefield or obstacle* | Engineers only: go to the nearest edge and work there for the type's breach time (slower under fire), then open a 30 m lane | Lane open |
+| **Resupply** | Drives to the nearest friendly supply vehicle with stock (or the one given), halts within 36 m of it, and waits until full | Full (fails when there is no supply vehicle with stock) |
+
+**Prepared positions.** An entity holding still on *Overwatch*, *Defend*,
+*Ambush* or *Screen* is in a prepared position after a while: infantry **dug
+in** after 90 s, vehicles **hull-down** after 30 s. Dug-in infantry are hit
+with × 0.4 the usual chance and hull-down vehicles × 0.6, and while quiet both
+are half as likely to be spotted. Moving gives the position up.
 
 Every task accepts an optional `speed` (m/s) where it makes sense. The plan
 setting *Set speed* changes the default cruise speed.
@@ -269,6 +337,11 @@ than 6 m from where it was aimed.
 | Shooter moving > 2 m/s (unguided) | × 0.7 |
 | Target moving > 8 m/s (unguided) | × 0.8 |
 | Ground or person target in forest | × 0.75 |
+| Shooter suppressed | × (1 − 0.6 × suppression) |
+| Shooter's unit shaken / broken | × 0.8 / × 0.6 |
+| Target pinned | × 0.5 |
+| Target dug in / hull-down | × 0.4 / × 0.6 |
+| Infantry target among buildings | × 0.6 |
 
 **Outcome.**
 
@@ -286,6 +359,97 @@ of a missile in flight saves its target.
 
 **Remote targets.** Damage to remote (DIS) entities is decided by the
 simulation that owns them. WeRForces only sends the detonation.
+
+## Suppression and morale
+
+**Suppression** (0–1) builds up on whatever is under fire: a near miss or hit on
+it (0.25 for a miss, 0.35 for a hit), and blast within three times a round's
+radius. It halves every 6 s. A suppressed entity is less accurate (Pk ×
+(1 − 0.6 × suppression)), reloads slower (× (1 + suppression)) and spots less
+(× (1 − 0.5 × suppression)). Infantry at 0.6 or more are **pinned**: they stop
+moving and are half as easy to hit, until suppression falls below 0.45.
+
+**Morale** (0–1, per unit; entities not in units have their own) falls with
+losses (1.5 ÷ unit size per member lost) and with sustained suppression, and
+recovers slowly when not under fire (up to a ceiling set by losses):
+
+| Morale | State | Effect |
+| --- | --- | --- |
+| ≥ 0.5 | steady | – |
+| ≥ 0.25 | shaken | less accurate (× 0.8) |
+| < 0.25 | broken | drops its plan, switches to return fire and falls back 1.5 km away from the nearest known enemy by a covered route; **rallies** at 0.4 |
+
+## Optional models
+
+Simulation settings (and `PUT /api/v1/simulation/rules`) turn parts of the model
+on and off per scenario, for comparison runs:
+
+| Rule | Default | What it does |
+| --- | --- | --- |
+| `suppression` | on | Suppression and pinning (above) |
+| `morale` | on | Shaken and broken units (above) |
+| `fuel` | on | Fuel use and running out (below) |
+| `orderDelay` | off | Orders take time to pass down the [chain of command](#chain-of-command) |
+
+## Night and weather
+
+The scenario's **environment** sets the date and local time of day at the start,
+visibility (m), precipitation (none, rain, heavy rain, snow) and wind. The sun's
+altitude at the terrain's location gives the **light**: full by day, falling
+through civil and nautical twilight to 8 % at night. The clock runs on with the
+simulation, past midnight.
+
+| Sensor | Range |
+| --- | --- |
+| Eyes, binoculars | max range × light, at most the visibility |
+| Image intensifiers (night-vision goggles) | as eyes, but keep 60 % of their range in the dark |
+| Thermal sights (tanks, IFVs, Apache, observers, UAVs) | max range, unaffected by darkness, at most 3 × the visibility |
+| Radar | max range |
+
+Rain cuts optical ranges (× 0.8; heavy rain × 0.55; snow × 0.6; thermals a
+little less), and slows movement off roads (rain × 0.9, heavy rain × 0.75, snow
+× 0.7). A shooter's **muzzle flash** shows it up at night: for 5 s after firing
+it can be seen as if at half daylight. **Wind** drifts smoke clouds.
+
+## Smoke, minefields, obstacles and engineers
+
+**Smoke.** Smoke rounds (155 mm, 152 mm, 81 mm, 120 mm) make a cloud of 40–75 m
+radius for 2–3 minutes; tanks and IFVs with smoke grenades fire them (two
+salvos) when a guided missile is launched at them: a 25 m cloud between them and
+the shooter for 45 s. A cloud blocks sight lines that pass through at least 20 m
+of it (or all of it, if smaller) below its 25 m top. Radar sees through it.
+
+**Minefields** are areas with a density: the chance of a mine strike per 100 m
+driven through (default 0.5). A strike kills or immobilises vehicles depending
+on their armour (an armoured vehicle: 10 % kill, 75 % mobility kill) and kills
+people half the time. The force that laid it, and any force that strikes a mine
+in it, **knows** it: their routes avoid it, with a margin (25× the cost),
+unless there is no other way. Moving units replan as soon as a minefield
+becomes known, so after the first strike the rest go round. Engineers sent to
+breach a minefield make it known to their side. Players only see enemy
+minefields they know about.
+
+**Obstacles** are lines (anti-tank ditches, wire): vehicles stop at them and
+routes go round; infantry climb through at a third of their speed.
+
+**Engineers** (US Combat Engineer, M1150 Assault Breacher, RU Sapper) breach a
+30 m **lane** through a minefield or obstacle: 4 minutes for sappers on foot,
+90 s for the M1150, slower under fire. Lanes are safe passages; routes thread
+through them, and a unit's followers find their own way through the lane to
+their place in formation.
+
+## Fuel, ammunition and resupply
+
+Vehicles burn fuel by distance (a full tank lasts the type's range: M1A2 426 km,
+T-72B3 500 km...) and aircraft by time aloft (AH-64 2.5 h, F-16 2 h). Below
+20 % the log warns; out of fuel, vehicles stop and aircraft come down.
+
+**Supply vehicles** (M977 HEMTT, Ural-4320 supply truck) carry ten vehicle loads
+of fuel and ammunition. When one is halted, friendly entities halted within 60 m
+take on fuel (a full tank in 60 s) and ammunition (a full load in 40 s), using
+up its stock (a full load of fuel and ammunition is one load). The *Resupply*
+task drives there; plans can wait until *fuel below* or *ammunition below* a
+level.
 
 ## Indirect fire and call for fire
 
@@ -380,5 +544,7 @@ the square of the entity count.
 writes a full checkpoint: damage, ammunition, contacts, plan and task progress
 (a route resumes from its current waypoint, a fire mission keeps the rounds
 still to fire), munitions in flight, passengers and the random number state.
-Loading it continues the run exactly; only route planning restarts from the
-current positions.
+Loading it continues the run from that state, but route planning restarts
+from the current positions (and patrols rejoin their route at the nearest
+point), so it drifts from the run that was saved. Loading the same checkpoint
+twice gives the same run.

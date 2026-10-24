@@ -4,6 +4,7 @@ import { pointInPolygon } from '../shared/math.js';
 import type { Condition, Plan, PlanStatement, TaskSpec } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
+import { ammoFraction } from './supply.js';
 import { DEFAULT_MISSION_ROUNDS, type TaskStatus } from './tasks.js';
 
 /** Something a plan can drive: an entity or a unit. */
@@ -43,8 +44,20 @@ export function describeStatement(st: PlanStatement, engine?: Engine): string {
           return `Mount ${engine?.entities.get(t.carrierId)?.name ?? engine?.units.get(t.carrierId)?.name ?? t.carrierId}`;
         case 'dismount':
           return 'Dismount passengers';
+        case 'breach':
+          return `Breach ${engine?.graphics.get(t.graphicId)?.name ?? t.graphicId}`;
+        case 'resupply':
+          return t.supplierId ? `Resupply from ${engine?.entities.get(t.supplierId)?.name ?? t.supplierId}` : 'Resupply';
+        case 'overwatch':
+        case 'defend':
+        case 'screen':
+          return `${t.type[0].toUpperCase()}${t.type.slice(1)} (${Math.round(t.position.x)}, ${Math.round(t.position.y)})${t.facing !== undefined ? ` facing ${Math.round(t.facing)}°` : ''}`;
+        case 'ambush':
+          return `Ambush ${engine?.graphics.get(t.killZoneId)?.name ?? t.killZoneId} from (${Math.round(t.position.x)}, ${Math.round(t.position.y)})`;
+        case 'search':
+          return `Search ${engine?.graphics.get(t.areaId)?.name ?? t.areaId}`;
         case 'fireMission':
-          return `Fire mission at (${Math.round(t.target.x)}, ${Math.round(t.target.y)}), ${t.rounds ?? DEFAULT_MISSION_ROUNDS} rounds`;
+          return `${t.smoke ? 'Smoke' : 'Fire'} mission at (${Math.round(t.target.x)}, ${Math.round(t.target.y)}), ${t.rounds ?? DEFAULT_MISSION_ROUNDS} rounds`;
       }
       break;
     }
@@ -86,6 +99,10 @@ export function describeCondition(c: Condition, engine?: Engine): string {
       return `enemy in ${engine?.graphics.get(c.areaId)?.name ?? c.areaId}`;
     case 'strengthBelow':
       return `strength below ${Math.round(c.fraction * 100)}%`;
+    case 'fuelBelow':
+      return `fuel below ${Math.round(c.fraction * 100)}%`;
+    case 'ammoBelow':
+      return `ammunition below ${Math.round(c.fraction * 100)}%`;
   }
 }
 
@@ -122,6 +139,14 @@ export function evaluateCondition(c: Condition, engine: Engine, owner: Taskable)
       const members = owner.members();
       if (members.length === 0) return false;
       return members.filter((m) => m.alive).length / members.length < c.fraction;
+    }
+    case 'fuelBelow': {
+      const v = owner.members().filter((m) => m.alive && m.type.endurance);
+      return v.length > 0 && v.reduce((s, m) => s + m.fuel, 0) / v.length < c.fraction;
+    }
+    case 'ammoBelow': {
+      const v = owner.members().filter((m) => m.alive && m.type.weapons.length);
+      return v.length > 0 && v.reduce((s, m) => s + ammoFraction(engine, m), 0) / v.length < c.fraction;
     }
   }
 }
@@ -163,12 +188,13 @@ export class PlanExecutor {
       const st = this.plan.statements[this.index];
       if (st.kind === 'task') {
         if (!this.taskActive) {
-          owner.startTask(engine, this.resumeTask ?? st.task);
+          // A task resumed from a checkpoint is not passed down again: subordinates resume their own.
+          engine.startOrder(owner, this.resumeTask ?? st.task, !this.resumeTask);
           this.resumeTask = undefined;
           this.taskActive = true;
           return;
         }
-        const status = owner.taskStatus();
+        const status = engine.orderStatus(owner);
         if (status === 'running') return;
         this.taskActive = false;
         this.index++;

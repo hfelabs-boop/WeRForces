@@ -60,7 +60,7 @@ Recent simulation events (detections, fire, hits, kills, task changes). Use `sin
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `since` | integer (-9007199254740991–9007199254740991) |  |  |
-| `kinds` | array of `"fire"` \| `"detonation"` \| `"damaged"` \| `"destroyed"` \| `"detected"` \| `"task"` \| `"created"` \| `"deleted"` \| `"info"` |  |  |
+| `kinds` | array of `"fire"` \| `"detonation"` \| `"damaged"` \| `"destroyed"` \| `"detected"` \| `"task"` \| `"created"` \| `"deleted"` \| `"info"` \| `"radio"` |  |  |
 | `limit` | integer (1–500) |  |  |
 
 ## `query_terrain` _(read-only)_
@@ -73,7 +73,7 @@ Terrain at a point: elevation, water, forest, road, slope and nearest town.
 
 ## `check_line_of_sight` _(read-only)_
 
-Whether two entities (by id) or points can see each other over terrain and forest.
+Whether two entities (by id) or points can see each other over terrain, forest, buildings and smoke.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -107,14 +107,15 @@ Create a unit (e.g. a tank platoon) from a unit template id; members are placed 
 
 ## `create_graphic`
 
-Draw a tactical graphic: a route (for follow/patrol tasks), an area (for "in area" plan conditions), a phase line or a point.
+Draw a tactical graphic: a route (for follow/patrol tasks), an area (for "in area" plan conditions), a phase line, a point, a minefield (an area that damages what crosses it; density 0.1-1.5) or an obstacle line (ditch or wire that vehicles cannot cross; engineers can breach both).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `kind` | `"route"` \| `"area"` \| `"phaseLine"` \| `"point"` | yes |  |
+| `kind` | `"route"` \| `"area"` \| `"phaseLine"` \| `"point"` \| `"minefield"` \| `"obstacle"` | yes |  |
 | `points` | array of {x, y, lat, lon, town} | yes |  |
 | `name` | string |  |  |
 | `force` | `1` or `2` or `3` or `0` |  | 1 Blue, 2 Red, 3 Neutral, 0 Other |
+| `density` | number (0.05–3) |  |  |
 
 ## `delete_object` _(destructive)_
 
@@ -126,23 +127,28 @@ Delete an entity, a unit (with its members) or a graphic.
 
 ## `assign_task`
 
-Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
+Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm. Tactical tasks: overwatch/defend/screen need `to` (the position) and take `facing` (degrees) and `width` (units deploy in a line); ambush also needs `graphicId` (the kill zone area) and opens fire only when an enemy enters it; screen falls back when an enemy comes within 1.5 km; search needs `graphicId` (an area) and sweeps it. Holding still, infantry dig in and vehicles go hull-down. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `targetId` | string | yes | entity (E..) or unit (U..) id |
-| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` \| `"mount"` \| `"dismount"` | yes |  |
+| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` \| `"mount"` \| `"dismount"` \| `"breach"` \| `"resupply"` \| `"overwatch"` \| `"defend"` \| `"screen"` \| `"ambush"` \| `"search"` | yes |  |
 | `to` | {x, y, lat, lon, town} |  | Location as {x,y}, {lat,lon} or {town} |
 | `routeId` | string |  |  |
 | `targetEntityId` | string |  |  |
 | `duration` | number |  | seconds |
 | `radius` | number |  | orbit radius in m (default 2000), or fire mission sheaf radius (default 0) |
 | `rounds` | integer (1–100) |  | fire mission rounds per tube (default 3) |
+| `smoke` | boolean |  | fire mission: smoke rounds instead of high explosive |
+| `graphicId` | string |  | breach: the minefield or obstacle; ambush: the kill zone area; search: the area |
+| `facing` | number (0–360) |  | overwatch/defend/screen/ambush: direction to face, degrees from north |
+| `width` | number |  | defend/screen/ambush: frontage in m for a unit |
 | `speedKmh` | number |  |  |
+| `covered` | boolean |  | moveTo: take a covered route, out of sight of known enemies' direct fire where possible |
 
 ## `assign_plan`
 
-Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: {kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), {kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, {kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, {kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"entityDestroyed",entityId}}.
+Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: {kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), {kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, {kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, {kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"fuelBelow",fraction}|{type:"ammoBelow",fraction}|{type:"entityDestroyed",entityId}}.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -178,6 +184,39 @@ Set rules of engagement for an entity or unit: fireAtWill, returnFire or holdFir
 | `targetId` | string | yes |  |
 | `roe` | `"fireAtWill"` \| `"returnFire"` \| `"holdFire"` | yes |  |
 
+## `set_unit_superior` _(idempotent)_
+
+Put a unit under a superior unit in the chain of command (or make it independent with superiorId null). An order given to the superior passes down to its subordinate units: moves keep their positions relative to each other, defend/overwatch/screen/ambush spread them in a line, other tasks go to all. With the orderDelay simulation rule on, each level adds a delay.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `unitId` | string | yes |  |
+| `superiorId` | string/null | yes |  |
+
+## `set_simulation_rules` _(idempotent)_
+
+Turn optional parts of the model on or off for this scenario. Suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel) are on by default; orderDelay (orders take 5-60 s to pass down the chain of command, by echelon) is off by default. Useful for comparison runs.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `suppression` | boolean |  |  |
+| `morale` | boolean |  |  |
+| `fuel` | boolean |  |  |
+| `orderDelay` | boolean |  |  |
+
+## `set_environment` _(idempotent)_
+
+Set the time of day and weather. Darkness cuts the range of eyes and binoculars (night-vision goggles keep about 60%, thermal sights are unaffected); fog and precipitation cut every optical sensor; rain and snow slow movement off roads; wind drifts smoke. Fields left out keep their values. Returns the current environment (local time, sun altitude, light level).
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `date` | string |  | date at the scenario start |
+| `time` | number (0–24) |  | local solar time at the scenario start, in hours (e.g. 4.5 = 04:30) |
+| `visibility` | number (50–100000) |  | metres; fog is a few hundred, clear is 20000+ |
+| `precipitation` | `"none"` \| `"rain"` \| `"heavyRain"` \| `"snow"` |  |  |
+| `windSpeed` | number (0–40) |  | m/s |
+| `windFrom` | number (0–360) |  | degrees the wind blows from |
+
 ## `set_reactions` _(idempotent)_
 
 Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out; callForFire makes it request fire missions from idle friendly artillery in range on hostiles it sees (not within 150 m of friendly troops).
@@ -189,6 +228,19 @@ Automatic behaviours that run alongside tasks: onContact "halt" makes the entity
 | `withdrawBelow` | number (0–1) |  |  |
 | `withdrawTo` | {x, y, lat, lon, town} |  | Location as {x,y}, {lat,lon} or {town} |
 | `callForFire` | boolean |  |  |
+
+## `run_batch`
+
+Monte Carlo analysis: replicate a scenario (a stored one by name, or the current state) with different random seeds and summarise the outcomes: losses per force (mean, standard deviation, 95% confidence interval, histogram), loss exchange ratio, which force holds each area at the end, rounds fired. Runs in the background on the server; waits up to `waitSeconds` for the result, else returns the job id to check with jobId.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `scenario` | string |  | stored scenario name (default: the current state) |
+| `runs` | integer (1–1000) |  | replications (default 10) |
+| `durationMinutes` | number |  | simulated minutes per run (default 30) |
+| `seed` | integer (-9007199254740991–9007199254740991) |  |  |
+| `waitSeconds` | number (0–600) |  | how long to wait for the result (default 120) |
+| `jobId` | string |  | check on a batch started earlier instead of starting one |
 
 ## `after_action_report` _(read-only)_
 
@@ -234,11 +286,11 @@ Simulate the given number of seconds immediately (as fast as possible) and summa
 
 ## `manage_scenario`
 
-List, load or save scenarios stored on the server, or start an empty one.
+List, load or save scenarios stored on the server, start an empty one, or undo/redo the last edit (up to 30 steps).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `action` | `"list"` \| `"load"` \| `"save"` \| `"new"` | yes |  |
+| `action` | `"list"` \| `"load"` \| `"save"` \| `"new"` \| `"undo"` \| `"redo"` | yes |  |
 | `name` | string |  |  |
 
 ## Resources

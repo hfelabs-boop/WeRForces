@@ -1,4 +1,4 @@
-import type { DamageState, EntityTypeDef, ForceId, Plan, Reactions, Roe, TaskSpec, Vec2, Vec3 } from '../shared/types.js';
+import type { DamageState, EntityTypeDef, ForceId, MoraleState, Plan, Reactions, Roe, TaskSpec, Vec2, Vec3 } from '../shared/types.js';
 import type { PlanExecutor } from './plans.js';
 import type { Task } from './tasks.js';
 import type { Unit } from './units.js';
@@ -58,6 +58,21 @@ export class Entity {
   embarkedIn?: string;
   /** Simulation time this observer may call for fire again. */
   callForFireAt = -Infinity;
+  /** Smoke grenade salvos left. */
+  smokeLeft = 0;
+  /** 0..1 suppression from incoming fire (decays). */
+  suppression = 0;
+  /** True while pinned down by fire (infantry). */
+  pinned = false;
+  /** Morale of an entity that is not in a unit (units keep their own). */
+  morale = 1;
+  moraleState: MoraleState = 'steady';
+  /** In a prepared position: infantry dug in, or a vehicle hull-down. */
+  prepared?: 'dugIn' | 'hullDown';
+  /** 0..1 fuel left. */
+  fuel = 1;
+  /** Supply vehicles: full loads left to hand out. */
+  supplies = 0;
 
   /** Cruise speed override (m/s) set by plans. */
   speedOverride?: number;

@@ -37,6 +37,8 @@ export type SymbolKind =
   | 'wheeled'
   | 'air-defense'
   | 'artillery'
+  | 'engineer'
+  | 'supply'
   | 'rotary'
   | 'fixed-wing'
   | 'uav'
@@ -94,6 +96,8 @@ export interface WeaponDef {
   blastRadius?: number;
   /** One-sigma radial aiming error in metres at maximum range (half that at short range). */
   dispersion?: number;
+  /** Indirect fire that can also fire smoke rounds: cloud radius (m) and how long it lasts (s). */
+  smoke?: { radius: number; duration: number };
 }
 
 export interface SensorDef {
@@ -106,6 +110,10 @@ export interface SensorDef {
   detects: Domain[];
   /** Ignores forest concealment and terrain masking only for air targets (radar). */
   radar?: boolean;
+  /** Thermal imager: unaffected by darkness, less affected by haze. */
+  thermal?: boolean;
+  /** Image intensifier (night-vision goggles): keeps much of its range at night. */
+  nightVision?: boolean;
 }
 
 export interface EntityTypeDef {
@@ -114,6 +122,8 @@ export interface EntityTypeDef {
   description: string;
   domain: Domain;
   symbol: SymbolKind;
+  /** MIL-STD-2525C letter SIDC pattern (dimension and function ID used), e.g. "S-G-UCFM--"; default from `symbol`. */
+  sidc?: string;
   armor: ArmorClass;
   dis: DisEntityType;
   /** Maximum speed in m/s. */
@@ -139,6 +149,14 @@ export interface EntityTypeDef {
   crew: number;
   /** Seats for dismounted infantry (lifeform entities) carried as passengers. */
   capacity?: number;
+  /** Smoke grenade salvos, fired automatically when a guided missile is launched at it. */
+  smokeGrenades?: number;
+  /** Engineers: seconds to breach a lane through a minefield or obstacle. */
+  breachTime?: number;
+  /** How far a full tank goes (vehicles, km) or how long it lasts (aircraft, hours). Missing: no fuel model. */
+  endurance?: { km?: number; hours?: number };
+  /** Supply vehicles: how many full loads (fuel and ammunition) of other vehicles they carry. */
+  supply?: { capacity: number };
   /** Reactions that new entities of this type start with (e.g. observers call for fire). */
   reactions?: Reactions;
 }
@@ -150,6 +168,8 @@ export interface UnitTemplate {
   members: string[];
   formation: Formation;
   spacing: number;
+  /** Subordinate unit templates (e.g. a company's platoons), placed in `formation` at `spacing` around the members (the HQ). */
+  subunits?: string[];
 }
 
 export interface Catalog {
@@ -162,7 +182,8 @@ export interface Catalog {
 // ---------------------------------------------------------------- tasks & plans
 
 export type TaskSpec =
-  | { type: 'moveTo'; target: Vec2; speed?: number }
+  /** `covered`: keep out of sight of known enemies' direct fire where possible (slower, safer route). */
+  | { type: 'moveTo'; target: Vec2; speed?: number; covered?: boolean }
   | { type: 'followRoute'; routeId: string; speed?: number; reverse?: boolean; startIndex?: number }
   | { type: 'patrol'; routeId: string; speed?: number }
   | { type: 'wait'; duration: number }
@@ -174,7 +195,21 @@ export type TaskSpec =
    * Indirect fire on a location: `rounds` per tube (default 3), spread over `radius`
    * metres around the target (default 0, all rounds at the aim point).
    */
-  | { type: 'fireMission'; target: Vec2; rounds?: number; radius?: number; weaponId?: string }
+  | { type: 'fireMission'; target: Vec2; rounds?: number; radius?: number; weaponId?: string; smoke?: boolean }
+  /** Engineers: go to a minefield or obstacle and breach a 30 m lane through it. */
+  | { type: 'breach'; graphicId: string }
+  /** Go to a friendly supply vehicle (the nearest, or the one given), halt beside it and take on fuel and ammunition. */
+  | { type: 'resupply'; supplierId?: string }
+  /** Support by fire: take a position and watch toward `facing` (degrees; default: the direction of the move), for `duration` s or until changed. */
+  | { type: 'overwatch'; position: Vec2; facing?: number; duration?: number }
+  /** Hold a position and fight from it; after a while in place, infantry dig in and vehicles go hull-down. Units deploy in a line across `facing`, `width` m wide. */
+  | { type: 'defend'; position: Vec2; facing?: number; width?: number }
+  /** Wait in position with weapons tight; open fire together when an enemy enters the kill zone area (or the ambush is found). */
+  | { type: 'ambush'; position: Vec2; killZoneId: string; facing?: number; width?: number; sprung?: boolean }
+  /** Watch from a position with return-fire ROE; fall back (to `fallback`, default 2 km to the rear) when an enemy comes within `breakContact` m (default 1500). */
+  | { type: 'screen'; position: Vec2; facing?: number; width?: number; fallback?: Vec2; breakContact?: number }
+  /** Sweep an area in parallel tracks spaced to the searcher's sensor range (or `spacing` m). */
+  | { type: 'search'; areaId: string; spacing?: number; speed?: number; startIndex?: number }
   /** Infantry walk to a carrier (entity, or any member of a unit with free seats) and board it. */
   | { type: 'mount'; carrierId: string }
   /** A carrier stops and lets all its passengers out. */
@@ -189,7 +224,11 @@ export type Condition =
   /** A hostile (to the plan's owner) entity is inside the area. */
   | { type: 'enemyInArea'; areaId: string }
   /** Fraction of the owner's members still alive is below `fraction` (0..1). */
-  | { type: 'strengthBelow'; fraction: number };
+  | { type: 'strengthBelow'; fraction: number }
+  /** Average fuel of the owner's vehicles is below `fraction`. */
+  | { type: 'fuelBelow'; fraction: number }
+  /** Average ammunition (fraction of full loads) of the owner's members is below `fraction`. */
+  | { type: 'ammoBelow'; fraction: number };
 
 /** Automatic behaviours that run alongside tasks and plans. */
 export interface Reactions {
@@ -220,7 +259,7 @@ export interface Plan {
 
 // ---------------------------------------------------------------- tactical graphics
 
-export type GraphicKind = 'route' | 'area' | 'point' | 'phaseLine';
+export type GraphicKind = 'route' | 'area' | 'point' | 'phaseLine' | 'minefield' | 'obstacle';
 
 export interface Graphic {
   id: string;
@@ -228,6 +267,22 @@ export interface Graphic {
   name: string;
   points: Vec2[];
   force: ForceId;
+  /** Minefields: mines per metre of front, roughly (0.1 sparse .. 1.5 dense; default 0.5). */
+  density?: number;
+  /** Minefields and obstacles: breached lanes (a centreline; lanes are 30 m wide). */
+  lanes?: { from: Vec2; to: Vec2 }[];
+  /** Minefields: forces that know where it is (its own force always does). */
+  knownBy?: ForceId[];
+}
+
+/** A smoke cloud: blocks sight (not radar) until it disperses. */
+export interface SmokeCloud {
+  id: number;
+  x: number;
+  y: number;
+  radius: number;
+  /** Simulation time it is gone. */
+  until: number;
 }
 
 // ---------------------------------------------------------------- terrain
@@ -260,7 +315,7 @@ export interface TerrainDataset extends TerrainData {
   name: string;
   title?: string;
   /** Where the data came from, for attribution. */
-  source?: { dem?: string; features?: string; imported?: string; attribution?: string };
+  source?: { dem?: string; features?: string; landCover?: string; imported?: string; attribution?: string };
 }
 
 export interface Town {
@@ -280,8 +335,18 @@ export interface TerrainData {
   forestB64: string;
   /** 1 = inland water (lakes, rivers) per post; sea is wherever elevation is below 0. */
   waterB64?: string;
+  /** Land cover class per post (see LAND_COVER), e.g. from ESA WorldCover. */
+  landCoverB64?: string;
+  /** Building footprints, e.g. from OpenStreetMap. */
+  buildings?: Building[];
   roads: Vec2[][];
   towns: Town[];
+}
+
+/** A building: footprint as local x,y pairs in metres (x0, y0, x1, y1, ...) and height in metres. */
+export interface Building {
+  pts: number[];
+  h: number;
 }
 
 // ---------------------------------------------------------------- scenario file
@@ -334,6 +399,15 @@ export interface EntityState {
   taskDone?: boolean;
   /** Simulation time this observer may call for fire again. */
   callForFireAt?: number;
+  /** Smoke grenade salvos left. */
+  smokeLeft?: number;
+  suppression?: number;
+  morale?: number;
+  moraleState?: MoraleState;
+  fuel?: number;
+  /** Supply vehicles: loads left. */
+  supplies?: number;
+  prepared?: 'dugIn' | 'hullDown';
 }
 
 export interface UnitRecord {
@@ -344,11 +418,13 @@ export interface UnitRecord {
   formation: Formation;
   spacing: number;
   echelon: UnitTemplate['echelon'];
+  /** Superior unit in the chain of command. */
+  parentId?: string;
   plan?: Plan;
   task?: TaskSpec;
   reactions?: Reactions;
   /** Runtime state, present in checkpoints. */
-  state?: { planIndex?: number; taskState?: TaskSpec; leaderId?: string; withdrawn?: boolean; taskDone?: boolean };
+  state?: { planIndex?: number; taskState?: TaskSpec; leaderId?: string; withdrawn?: boolean; taskDone?: boolean; morale?: number; moraleState?: MoraleState; lossesSeen?: number };
 }
 
 /** A munition in flight, saved in checkpoints. */
@@ -362,6 +438,8 @@ export interface ShotRecord {
   fireTime: number;
   impactTime: number;
   range: number;
+  /** A smoke round. */
+  smoke?: boolean;
 }
 
 export interface ScenarioFile {
@@ -378,7 +456,67 @@ export interface ScenarioFile {
   graphics: Graphic[];
   /** Checkpoint only: munitions in flight and the random number generator state. */
   shots?: ShotRecord[];
+  /** Checkpoint only: smoke clouds still hanging about. */
+  smoke?: SmokeCloud[];
   rngState?: number;
+  /** Which optional models are on (all default to on). */
+  rules?: SimulationRules;
+  /** Time of day and weather at the start. */
+  environment?: Environment;
+  /** Checkpoint only: orders still on their way. */
+  orders?: PendingOrder[];
+}
+
+/** Optional parts of the model, for comparison runs. Missing fields mean on. */
+export interface SimulationRules {
+  /** Incoming fire suppresses: less accurate, slower to fire and spot; infantry get pinned. */
+  suppression?: boolean;
+  /** Units lose cohesion with losses and suppression, and can break and fall back. */
+  morale?: boolean;
+  /** Vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down. */
+  fuel?: boolean;
+  /** Orders take time to pass down the chain of command (by echelon). Off by default. */
+  orderDelay?: boolean;
+}
+
+/** An order on its way to an entity or unit (rules.orderDelay). */
+export interface PendingOrder {
+  targetId: string;
+  task?: TaskSpec;
+  plan?: Plan;
+  /** Simulation time it arrives and is acted on. */
+  due: number;
+}
+
+export type MoraleState = 'steady' | 'shaken' | 'broken';
+
+export type Precipitation = 'none' | 'rain' | 'heavyRain' | 'snow';
+
+/** Time of day and weather. Missing fields keep their defaults (midsummer noon, clear, calm). */
+export interface Environment {
+  /** Date at the scenario's start, YYYY-MM-DD. */
+  date?: string;
+  /** Local solar time at the scenario's start, in hours (0-24). */
+  time?: number;
+  /** Meteorological visibility in metres (fog: a few hundred; clear: 20 km or more). */
+  visibility?: number;
+  precipitation?: Precipitation;
+  /** Wind speed in m/s; drifts smoke. */
+  windSpeed?: number;
+  /** Direction the wind blows from, degrees clockwise from north. */
+  windFrom?: number;
+}
+
+/** The environment now: settings plus the current clock and light. */
+export interface EnvironmentState extends Required<Environment> {
+  localDate: string;
+  /** HH:MM local solar time. */
+  localTime: string;
+  /** Degrees above the horizon (negative: below). */
+  sunAltitude: number;
+  /** Fraction of daylight range left to the naked eye (1 by day, under 0.1 at night). */
+  light: number;
+  period: 'day' | 'twilight' | 'night';
 }
 
 // ---------------------------------------------------------------- runtime snapshots
@@ -418,6 +556,19 @@ export interface EntitySnapshot {
   passengers?: string[];
   /** Fog of war: this is another force's entity known only as a sensor contact, last seen this many seconds ago. */
   contactAge?: number;
+  /** 0..1: how hard incoming fire is pressing it. */
+  suppression?: number;
+  /** Infantry pinned down by fire: not moving. */
+  pinned?: boolean;
+  /** Morale of an entity that is not in a unit. */
+  morale?: number;
+  moraleState?: MoraleState;
+  /** 0..1 fuel left (types with a fuel model). */
+  fuel?: number;
+  /** Supply vehicles: full loads of fuel and ammunition left to hand out. */
+  supplies?: number;
+  /** In a prepared position: infantry dug in, or a vehicle hull-down (harder to see and hit). */
+  prepared?: 'dugIn' | 'hullDown';
 }
 
 export interface UnitSnapshot {
@@ -426,6 +577,9 @@ export interface UnitSnapshot {
   force: ForceId;
   echelon: UnitTemplate['echelon'];
   formation: Formation;
+  /** Superior unit, and subordinate units, in the chain of command. */
+  parentId?: string;
+  childIds?: string[];
   leaderId?: string;
   memberIds: string[];
   x: number;
@@ -434,6 +588,9 @@ export interface UnitSnapshot {
   plan?: string;
   reactions?: Reactions;
   withdrawn?: boolean;
+  /** 0..1 cohesion; see moraleState. */
+  morale?: number;
+  moraleState?: MoraleState;
 }
 
 export type SimEventKind =
@@ -445,7 +602,9 @@ export type SimEventKind =
   | 'task'
   | 'created'
   | 'deleted'
-  | 'info';
+  | 'info'
+  /** A radio message: orders acknowledged, contact reports, calls for fire (sent on DIS as Signal PDUs). */
+  | 'radio';
 
 export interface SimEvent {
   seq: number;
@@ -472,6 +631,17 @@ export interface SimState {
   entities: EntitySnapshot[];
   units: UnitSnapshot[];
   graphics: Graphic[];
+  /** Smoke clouds on the battlefield. */
+  smoke?: SmokeCloud[];
+  environment?: EnvironmentState;
+  /** Orders on their way down the chain of command. */
+  orders?: { targetId: string; text: string; due: number }[];
+  /** Edits that can be undone and redone. */
+  history?: { undo: number; redo: number };
+  /** Share of wall-clock time the server spends simulating (near 1: it cannot keep up with the time scale). */
+  load?: number;
+  /** Plan steps waiting for a set time, soonest first (for the timeline). */
+  schedule?: { targetId: string; time: number; text: string }[];
   dis?: DisStatus;
 }
 
@@ -485,6 +655,10 @@ export interface DisStatus {
   pdusSent: number;
   pdusReceived: number;
   remoteEntities: number;
+  /** Local radios on the network (unit leaders and entities not in units). */
+  radios?: number;
+  /** Other simulations' radios heard. */
+  remoteRadios?: number;
 }
 
 // ---------------------------------------------------------------- remote control API
@@ -528,10 +702,18 @@ export type Command =
   | { cmd: 'embark'; passengerId: string; carrierId: string }
   /** Let a carrier's passengers out now. */
   | { cmd: 'disembark'; carrierId: string }
+  /** Turn optional model parts (suppression, morale, …) on or off. */
+  | { cmd: 'setRules'; rules: SimulationRules }
+  | { cmd: 'setEnvironment'; environment: Environment }
+  /** Put a unit under a superior unit (null: make it independent). */
+  | { cmd: 'setSuperior'; unitId: string; superiorId: string | null }
+  /** Take back the last edit (any command but run/pause/step/time scale), or redo it. */
+  | { cmd: 'undo' }
+  | { cmd: 'redo' }
   | { cmd: 'setFormation'; unitId: string; formation: Formation }
   | { cmd: 'rename'; id: string; name: string }
-  | { cmd: 'createGraphic'; kind: GraphicKind; name?: string; points: Vec2[]; force?: ForceId }
-  | { cmd: 'updateGraphic'; id: string; name?: string; points?: Vec2[] };
+  | { cmd: 'createGraphic'; kind: GraphicKind; name?: string; points: Vec2[]; force?: ForceId; density?: number }
+  | { cmd: 'updateGraphic'; id: string; name?: string; points?: Vec2[]; density?: number };
 
 export interface CommandResult {
   ok: boolean;

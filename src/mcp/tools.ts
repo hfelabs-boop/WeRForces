@@ -205,7 +205,7 @@ export function createMcpServer(call: ApiCaller): McpServer {
     'Recent simulation events (detections, fire, hits, kills, task changes). Use `since` with the last seq you saw.',
     {
       since: z.number().int().optional(),
-      kinds: z.array(z.enum(['fire', 'detonation', 'damaged', 'destroyed', 'detected', 'task', 'created', 'deleted', 'info'])).optional(),
+      kinds: z.array(z.enum(['fire', 'detonation', 'damaged', 'destroyed', 'detected', 'task', 'created', 'deleted', 'info', 'radio'])).optional(),
       limit: z.number().int().min(1).max(500).optional(),
     },
     async (a) => {
@@ -231,7 +231,7 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'check_line_of_sight',
-    'Whether two entities (by id) or points can see each other over terrain and forest.',
+    'Whether two entities (by id) or points can see each other over terrain, forest, buildings and smoke.',
     { from: z.union([z.string(), position]), to: z.union([z.string(), position]) },
     async (a) => api('POST', '/api/v1/terrain/line-of-sight', a),
     { readOnlyHint: true },
@@ -274,8 +274,8 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'create_graphic',
-    'Draw a tactical graphic: a route (for follow/patrol tasks), an area (for "in area" plan conditions), a phase line or a point.',
-    { kind: z.enum(['route', 'area', 'phaseLine', 'point']), points: z.array(position).min(1), name: z.string().optional(), force: force.optional() },
+    'Draw a tactical graphic: a route (for follow/patrol tasks), an area (for "in area" plan conditions), a phase line, a point, a minefield (an area that damages what crosses it; density 0.1-1.5) or an obstacle line (ditch or wire that vehicles cannot cross; engineers can breach both).',
+    { kind: z.enum(['route', 'area', 'phaseLine', 'point', 'minefield', 'obstacle']), points: z.array(position).min(1), name: z.string().optional(), force: force.optional(), density: z.number().min(0.05).max(3).optional() },
     async (a) => api('POST', '/api/v1/graphics', a),
   );
 
@@ -295,17 +295,22 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'assign_task',
-    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
+    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetEntityId`; mount needs `targetEntityId` (the carrier entity or unit); wait needs `duration`; dismount (for a carrier) needs nothing; breach (engineers) needs `graphicId` of a minefield or obstacle; resupply sends it to the nearest friendly supply vehicle (or `targetEntityId`) to refuel and rearm. Tactical tasks: overwatch/defend/screen need `to` (the position) and take `facing` (degrees) and `width` (units deploy in a line); ambush also needs `graphicId` (the kill zone area) and opens fire only when an enemy enters it; screen falls back when an enemy comes within 1.5 km; search needs `graphicId` (an area) and sweeps it. Holding still, infantry dig in and vehicles go hull-down. Set `smoke` on a fireMission for smoke rounds. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
     {
       targetId: z.string().describe('entity (E..) or unit (U..) id'),
-      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission', 'mount', 'dismount']),
+      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission', 'mount', 'dismount', 'breach', 'resupply', 'overwatch', 'defend', 'screen', 'ambush', 'search']),
       to: position.optional(),
       routeId: z.string().optional(),
       targetEntityId: z.string().optional(),
       duration: z.number().optional().describe('seconds'),
       radius: z.number().optional().describe('orbit radius in m (default 2000), or fire mission sheaf radius (default 0)'),
       rounds: z.number().int().min(1).max(100).optional().describe('fire mission rounds per tube (default 3)'),
+      smoke: z.boolean().optional().describe('fire mission: smoke rounds instead of high explosive'),
+      graphicId: z.string().optional().describe('breach: the minefield or obstacle; ambush: the kill zone area; search: the area'),
+      facing: z.number().min(0).max(360).optional().describe('overwatch/defend/screen/ambush: direction to face, degrees from north'),
+      width: z.number().optional().describe('defend/screen/ambush: frontage in m for a unit'),
       speedKmh: z.number().optional(),
+      covered: z.boolean().optional().describe("moveTo: take a covered route, out of sight of known enemies' direct fire where possible"),
     },
     async (a) => {
       const speed = a.speedKmh === undefined ? undefined : a.speedKmh / 3.6;
@@ -315,13 +320,23 @@ export function createMcpServer(call: ApiCaller): McpServer {
       };
       const task =
         a.type === 'moveTo'
-          ? { type: 'moveTo', target: need(a.to, 'to'), speed }
+          ? { type: 'moveTo', target: need(a.to, 'to'), speed, covered: a.covered }
           : a.type === 'mount'
             ? { type: 'mount', carrierId: need(a.targetEntityId, 'targetEntityId') }
             : a.type === 'dismount'
             ? { type: 'dismount' }
             : a.type === 'fireMission'
-            ? { type: 'fireMission', target: need(a.to, 'to'), rounds: a.rounds, radius: a.radius }
+            ? { type: 'fireMission', target: need(a.to, 'to'), rounds: a.rounds, radius: a.radius, smoke: a.smoke }
+            : a.type === 'breach'
+            ? { type: 'breach', graphicId: need(a.graphicId, 'graphicId') }
+            : a.type === 'resupply'
+            ? { type: 'resupply', supplierId: a.targetEntityId }
+            : a.type === 'overwatch' || a.type === 'defend' || a.type === 'screen'
+            ? { type: a.type, position: need(a.to, 'to'), facing: a.facing, width: a.type === 'overwatch' ? undefined : a.width, duration: a.type === 'overwatch' ? a.duration : undefined }
+            : a.type === 'ambush'
+            ? { type: 'ambush', position: need(a.to, 'to'), killZoneId: need(a.graphicId, 'graphicId'), facing: a.facing, width: a.width }
+            : a.type === 'search'
+            ? { type: 'search', areaId: need(a.graphicId, 'graphicId'), speed }
             : a.type === 'orbit'
             ? { type: 'orbit', center: need(a.to, 'to'), radius: a.radius ?? 2000, duration: a.duration }
             : a.type === 'followRoute' || a.type === 'patrol'
@@ -341,7 +356,7 @@ export function createMcpServer(call: ApiCaller): McpServer {
       '{kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), ' +
       '{kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, ' +
       '{kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, ' +
-      '{kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"entityDestroyed",entityId}}.',
+      '{kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"fuelBelow",fraction}|{type:"ammoBelow",fraction}|{type:"entityDestroyed",entityId}}.',
     {
       targetId: z.string(),
       name: z.string().optional(),
@@ -396,6 +411,37 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'set_unit_superior',
+    'Put a unit under a superior unit in the chain of command (or make it independent with superiorId null). An order given to the superior passes down to its subordinate units: moves keep their positions relative to each other, defend/overwatch/screen/ambush spread them in a line, other tasks go to all. With the orderDelay simulation rule on, each level adds a delay.',
+    { unitId: z.string(), superiorId: z.string().nullable() },
+    async ({ unitId, superiorId }) => api('PATCH', `/api/v1/units/${encodeURIComponent(unitId)}`, { superiorId }),
+    { idempotentHint: true },
+  );
+
+  tool(
+    'set_simulation_rules',
+    'Turn optional parts of the model on or off for this scenario. Suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel) are on by default; orderDelay (orders take 5-60 s to pass down the chain of command, by echelon) is off by default. Useful for comparison runs.',
+    { suppression: z.boolean().optional(), morale: z.boolean().optional(), fuel: z.boolean().optional(), orderDelay: z.boolean().optional() },
+    async (rules) => api('PUT', '/api/v1/simulation/rules', rules),
+    { idempotentHint: true },
+  );
+
+  tool(
+    'set_environment',
+    'Set the time of day and weather. Darkness cuts the range of eyes and binoculars (night-vision goggles keep about 60%, thermal sights are unaffected); fog and precipitation cut every optical sensor; rain and snow slow movement off roads; wind drifts smoke. Fields left out keep their values. Returns the current environment (local time, sun altitude, light level).',
+    {
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('date at the scenario start'),
+      time: z.number().min(0).max(24).optional().describe('local solar time at the scenario start, in hours (e.g. 4.5 = 04:30)'),
+      visibility: z.number().min(50).max(100000).optional().describe('metres; fog is a few hundred, clear is 20000+'),
+      precipitation: z.enum(['none', 'rain', 'heavyRain', 'snow']).optional(),
+      windSpeed: z.number().min(0).max(40).optional().describe('m/s'),
+      windFrom: z.number().min(0).max(360).optional().describe('degrees the wind blows from'),
+    },
+    async (env) => api('PUT', '/api/v1/simulation/environment', env),
+    { idempotentHint: true },
+  );
+
+  tool(
     'set_reactions',
     'Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out; callForFire makes it request fire missions from idle friendly artillery in range on hostiles it sees (not within 150 m of friendly troops).',
     {
@@ -414,6 +460,39 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   // ---------------------------------------------------------------- after-action review
+
+  tool(
+    'run_batch',
+    'Monte Carlo analysis: replicate a scenario (a stored one by name, or the current state) with different random seeds and summarise the outcomes: losses per force (mean, standard deviation, 95% confidence interval, histogram), loss exchange ratio, which force holds each area at the end, rounds fired. Runs in the background on the server; waits up to `waitSeconds` for the result, else returns the job id to check with jobId.',
+    {
+      scenario: z.string().optional().describe('stored scenario name (default: the current state)'),
+      runs: z.number().int().min(1).max(1000).optional().describe('replications (default 10)'),
+      durationMinutes: z.number().positive().optional().describe('simulated minutes per run (default 30)'),
+      seed: z.number().int().optional(),
+      waitSeconds: z.number().min(0).max(600).optional().describe('how long to wait for the result (default 120)'),
+      jobId: z.string().optional().describe('check on a batch started earlier instead of starting one'),
+    },
+    async (a) => {
+      type Job = { id: string; status: string; done: number; runs: number; error?: string; summary?: { scenario: string; runs: number; duration: number; losses: { force: number; total: number; stats: { mean: number; sd: number; ci95: [number, number]; min: number; max: number } }[]; exchangeRatio?: number; areas: { name: string; held: Record<string, number> }[]; shots: { mean: number }; wallSeconds: number } };
+      let job = a.jobId
+        ? await api<Job>('GET', `/api/v1/batch/${encodeURIComponent(a.jobId)}`)
+        : await api<Job>('POST', '/api/v1/batch', { scenario: a.scenario, runs: a.runs, duration: a.durationMinutes === undefined ? undefined : a.durationMinutes * 60, seed: a.seed });
+      const until = Date.now() + (a.waitSeconds ?? 120) * 1000;
+      while (job.status === 'running' && Date.now() < until) {
+        await new Promise((r) => setTimeout(r, 1000));
+        job = await api<Job>('GET', `/api/v1/batch/${encodeURIComponent(job.id)}`);
+      }
+      if (job.status !== 'done' || !job.summary) return `Batch ${job.id}: ${job.status}, ${job.done}/${job.runs} runs${job.error ? ` (${job.error})` : ''}. Call run_batch with jobId "${job.id}" to check again.`;
+      const s = job.summary;
+      const name = (f: number) => ['Other', 'Blue', 'Red', 'Neutral'][f] ?? String(f);
+      const lines = [`Batch ${job.id}: ${s.scenario}, ${s.runs} runs of ${Math.round(s.duration / 60)} min (${s.wallSeconds} s)`];
+      for (const l of s.losses) lines.push(`${name(l.force)} losses: ${l.stats.mean} ± ${l.stats.sd} of ${l.total} (95% CI ${l.stats.ci95[0]}-${l.stats.ci95[1]}, range ${l.stats.min}-${l.stats.max})`);
+      if (s.exchangeRatio !== undefined) lines.push(`Loss exchange ratio (red/blue): ${s.exchangeRatio}`);
+      for (const ar of s.areas) lines.push(`${ar.name} held at the end: ${Object.entries(ar.held).map(([f, p]) => `${name(Number(f))} ${Math.round(p * 100)}%`).join(', ') || 'by nobody'}`);
+      lines.push(`Rounds fired per run: ${s.shots.mean}`);
+      return lines.join('\n');
+    },
+  );
 
   tool(
     'after_action_report',
@@ -490,10 +569,11 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'manage_scenario',
-    'List, load or save scenarios stored on the server, or start an empty one.',
-    { action: z.enum(['list', 'load', 'save', 'new']), name: z.string().optional() },
+    'List, load or save scenarios stored on the server, start an empty one, or undo/redo the last edit (up to 30 steps).',
+    { action: z.enum(['list', 'load', 'save', 'new', 'undo', 'redo']), name: z.string().optional() },
     async ({ action, name }) => {
       if (action === 'list') return api('GET', '/api/v1/scenarios');
+      if (action === 'undo' || action === 'redo') return api('POST', `/api/v1/scenario/${action}`);
       if (action === 'new') return api('POST', '/api/v1/scenario/new', { name: name ?? 'Untitled' });
       if (!name) throw new Error(`${action} needs a name`);
       if (action === 'load') return api('POST', `/api/v1/scenarios/${encodeURIComponent(name)}/load`);

@@ -19,21 +19,23 @@ function turnTowards(e: Entity, desired: number, dt: number): number {
   return turn / dt;
 }
 
-export function stepMovement(e: Entity, terrain: Terrain, dt: number): void {
+/** `offroadScale` slows movement off roads (rain, snow). */
+export function stepMovement(e: Entity, terrain: Terrain, dt: number, offroadScale = 1): void {
   if (e.remote) return;
   if (e.domain === 'air') stepAir(e, terrain, dt);
-  else stepSurfaceBound(e, terrain, dt);
+  else stepSurfaceBound(e, terrain, dt, offroadScale);
 }
 
-function stepSurfaceBound(e: Entity, terrain: Terrain, dt: number): void {
+function stepSurfaceBound(e: Entity, terrain: Terrain, dt: number, offroadScale: number): void {
   const t = e.type;
+  const offroad = t.offroadFactor * offroadScale;
   const cmd = e.destroyed || e.mobilityKill ? null : e.steer;
   e.blocked = false;
   let targetSpeed = 0;
   let dist = 0;
   if (cmd) {
     dist = Math.hypot(cmd.x - e.x, cmd.y - e.y);
-    const mob = terrain.mobilityFactor(e.x, e.y, e.domain, t.offroadFactor);
+    const mob = terrain.mobilityFactor(e.x, e.y, e.domain, offroad);
     targetSpeed = Math.min(cmd.speed, t.maxSpeed * Math.max(mob, 0.1));
     if (cmd.arrive) {
       targetSpeed = dist < 1 ? 0 : Math.min(targetSpeed, Math.sqrt(2 * t.acceleration * 0.6 * dist));
@@ -55,7 +57,7 @@ function stepSurfaceBound(e: Entity, terrain: Terrain, dt: number): void {
   if (step > 0) {
     const nx = clamp(e.x + Math.sin(e.heading) * step, 0, terrain.spec.size);
     const ny = clamp(e.y + Math.cos(e.heading) * step, 0, terrain.spec.size);
-    if (terrain.mobilityFactor(nx, ny, e.domain, t.offroadFactor) <= 0) {
+    if (terrain.mobilityFactor(nx, ny, e.domain, offroad) <= 0) {
       e.blocked = true;
       e.speed = 0;
     } else {

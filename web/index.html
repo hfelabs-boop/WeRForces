@@ -12,15 +12,22 @@
       <div class="menu" data-controller-only>
         <button id="btn-file">File ▾</button>
         <div class="menu-items" id="menu-file">
+          <button data-action="undo" data-controller-only>Undo <kbd>Ctrl+Z</kbd></button>
+          <button data-action="redo" data-controller-only>Redo <kbd>Ctrl+Y</kbd></button>
           <button data-action="new">New scenario</button>
           <button data-action="open-sample">Open scenario…</button>
           <button data-action="import">Import from file…</button>
           <button data-action="export">Export to file</button>
           <button data-action="save-server">Save on server…</button>
           <button data-action="review-recording">Review saved recording…</button>
+          <button data-action="batch" data-controller-only>Batch analysis…</button>
+          <button data-action="sessions" data-controller-only>Sessions…</button>
+          <button data-action="settings">Simulation settings…</button>
         </div>
       </div>
       <span id="scenario-name" class="scenario-name">—</span>
+      <span id="session-name" class="pill hidden" title="This exercise runs in its own session on the server"></span>
+      <a id="user-name" class="pill hidden" href="/auth/logout" title="Signed in: click to sign out"></a>
       <div class="sep"></div>
       <div class="sim-controls" data-controller-only>
         <button id="btn-rewind" title="Rewind to the last loaded or saved state">⏮</button>
@@ -36,6 +43,7 @@
           <option value="32">32×</option>
         </select>
         <span id="sim-time" class="sim-time">00:00:00</span>
+        <button id="env-chip" class="env-chip" title="Local time and weather: click to change">12:00</button>
       </div>
       <div class="sep"></div>
       <div class="tools" id="draw-tools">
@@ -43,6 +51,9 @@
         <button data-draw="area" title="Draw area">Area</button>
         <button data-draw="phaseLine" title="Draw phase line">Phase line</button>
         <button data-draw="point" title="Place point">Point</button>
+        <button data-draw="minefield" title="Draw minefield">Minefield</button>
+        <button data-draw="obstacle" title="Draw obstacle line (ditch, wire)">Obstacle</button>
+        <button id="btn-measure" title="Measure distance and bearing; with two points, check line of sight (M)">Measure</button>
       </div>
       <div class="sep"></div>
       <div class="menu" id="layers-menu">
@@ -57,6 +68,10 @@
             <option value="auto">Units: auto</option>
             <option value="units">Units: aggregate</option>
             <option value="entities">Units: entities</option>
+          </select>
+          <select id="sel-symbols" title="Symbol style">
+            <option value="2525">Symbols: MIL-STD-2525</option>
+            <option value="simple">Symbols: simple</option>
           </select>
         </div>
       </div>
@@ -119,10 +134,12 @@
         <label><input type="checkbox" data-log="detected" checked /> detections</label>
         <label><input type="checkbox" data-log="task" checked /> tasks</label>
         <label><input type="checkbox" data-log="info" checked /> info</label>
+        <label><input type="checkbox" data-log="radio" /> radio</label>
         <label><input type="checkbox" data-log="created" /> created/deleted</label>
         <span class="spacer"></span>
         <span id="score"></span>
       </div>
+      <div id="timeline-strip" class="timeline-strip" title="Timeline: kills (red), detections (blue), completed plans (green); scheduled plan steps (yellow) and orders on their way (purple). Click a past mark to review it."></div>
       <div id="log"></div>
     </footer>
 

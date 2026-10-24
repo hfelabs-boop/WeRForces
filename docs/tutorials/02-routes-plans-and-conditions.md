@@ -110,10 +110,12 @@ What happens (times are simulation time):
 | ~2:21 | The convoy comes round the bend. *US Mech Platoon 2 detected RU Supply Convoy Lead* (and the BRDM spots the Bradleys at the same moment, but holds its fire). The plan moves to step 3 |
 | ~2:41 | The 20 s are up: *US Mech Platoon: plan Ambush complete*, ROE is now fire at will, and the Bradleys fire TOWs at about 1.2 km. Being fired at, the BRDM answers with its heavy machine gun |
 | ~2:45 | *RU Supply Convoy Lead destroyed*. The reserve's condition is met, so the tank platoon forms a wedge and moves north. The BRDM has just destroyed *US Mech Platoon 2*, and that Bradley's TOW *lost guidance and missed* |
-| 3:00–3:50 | The trucks drive on west towards Calloway and are destroyed one by one; each time, the next vehicle takes command and carries on along the route. In our run a TOW immobilised the last truck at 3:44, and the arriving tanks finished it at 3:47 from about 1.3 km |
+| 3:00–3:50 | The trucks drive on west towards Calloway and are destroyed one by one; each time, the next vehicle takes command and carries on along the route. When the third vehicle is lost (3:40) the convoy *breaks and is falling back*, too late: in our run a TOW immobilised the last truck at 3:44, and the arriving tanks finished it at 3:47 from about 1.3 km |
 
 In our run the convoy was destroyed for the loss of one Bradley, hit by the
-BRDM's heavy machine gun. Your results will vary with exact positions.
+BRDM's heavy machine gun. Your results will vary with exact positions: in
+another run, with the units placed a few metres differently, both BRDM bursts
+missed and no Bradley was lost.
 
 ## 8. Experiment
 
@@ -122,7 +124,8 @@ Rewind (⏮) between experiments.
 - **No patience.** Remove the 20 s wait. The Bradleys open fire at the first
   sighting and destroy the BRDM at 2:26, while the trucks are still out of view.
   The trucks then drive into the kill zone one at a time; in our run the
-  Bradleys destroyed two of them and the reserve's tanks caught the last at 3:23.
+  Bradleys destroyed two of them (2:44 and 3:03), and the last one broke off,
+  fell back out of sight north of the road and survived.
 - **Make the convoy fight.** Set its ROE to **Fire at will**.
 - **Loop a patrol.** Give the convoy **Patrol** instead of Follow. An open route
   is driven back and forth; a closed one (last point on the first) loops.
@@ -142,7 +145,8 @@ Rewind (⏮) between experiments.
 
 Conditions: time, in area (the entity, or its unit's leader, is inside an area),
 enemy detected, under fire (shot at in the last 15 s), entity destroyed, enemy in
-area (a hostile is inside an area) and strength below a percentage. See
+area (a hostile is inside an area), and strength, fuel or ammunition below a
+percentage. See
 [Concepts → Plans](../concepts.md#plans).
 
 **Next:** [Tutorial 3: Building and sharing a scenario](03-building-a-scenario.md).

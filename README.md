@@ -7,13 +7,26 @@ tasks and plans, sensors, direct and guided fire with damage adjudication, and
 **DIS (IEEE 1278.1)** networking, so other DIS simulations can see and engage its
 entities. It covers artillery with forward observers, mounted infantry,
 reactions, fog of war with per-side player access, recording with after-action
-review, and real-world terrain imported from elevation data and OpenStreetMap.
+review, and real-world terrain imported from elevation data, OpenStreetMap
+buildings and ESA WorldCover land cover.
+
+The model includes suppression and morale, night and weather, smoke,
+minefields, obstacles and engineers, fuel and resupply, a chain of command with
+order delay, threat-aware covered routes, and tactical tasks such as overwatch,
+defend, ambush, screen and search. The editor has MIL-STD-2525 symbols,
+multi-select, undo/redo, a measuring tool and a timeline. Batch runs give
+Monte Carlo statistics, and the after-action review exports to CSV and PDF. One
+server can host several exercises, with sign-in through any OpenID Connect
+provider.
 
 It also connects to other systems:
 
 - a versioned **REST API** with an OpenAPI spec;
 - an **MCP server**, so AI agents such as Claude can inspect and command the
   simulation;
+- **DIS radio and simulation management**: Transmitter, Signal and Receiver
+  PDUs, and Start/Resume and Stop/Freeze;
+- an **HLA bridge** (RPR FOM 2.0 subset, tested with the OHLA RTI);
 - **TAK / Cursor-on-Target** output for ATAK, WinTAK and TAK Server;
 - **webhooks** for Slack, Discord or any HTTP endpoint;
 - **GeoJSON and KML** feeds for QGIS and Google Earth.
@@ -43,13 +56,16 @@ serves it at **`/docs`** (toolbar → **Help**).
   [9 Extending the catalog](docs/tutorials/09-extending-the-catalog.md) ·
   [10 Fire support and mech infantry](docs/tutorials/10-fire-support-and-mech-infantry.md) ·
   [11 Exercise control and AAR](docs/tutorials/11-exercise-control-and-aar.md) ·
-  [12 Real terrain](docs/tutorials/12-real-terrain.md)
+  [12 Real terrain](docs/tutorials/12-real-terrain.md) ·
+  [13 Obstacles, smoke and breaching](docs/tutorials/13-obstacles-smoke-and-breaching.md) ·
+  [14 Night, weather and supply](docs/tutorials/14-night-weather-and-supply.md) ·
+  [15 Command, tactics and analysis](docs/tutorials/15-command-tactics-and-analysis.md)
 - [User guide](docs/user-guide.md) · [Concepts](docs/concepts.md) · [Terrain import](docs/terrain-import.md) · [Deployment](docs/deployment.md) · [Architecture](docs/architecture.md) · [FAQ](docs/faq.md)
 - **Reference:**
   [CLI](docs/reference/cli.md) · [REST API](docs/reference/rest-api.md) ·
   [MCP tools](docs/reference/mcp-tools.md) · [Catalog](docs/reference/catalog.md) ·
   [Scenario format](docs/reference/scenario-format.md) · [DIS](docs/reference/dis.md) ·
-  [Integrations](docs/reference/integrations.md)
+  [Integrations](docs/reference/integrations.md) · [HLA](docs/hla.md)
 - Runnable [examples](examples/) in Node.js, Python and TypeScript
 
 ## Quick start

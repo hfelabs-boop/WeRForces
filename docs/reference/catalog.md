@@ -14,27 +14,32 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | --- | --- | --- | --- | --- | --- | --- |
 | `us-m1a2` | M1A2 Abrams — US main battle tank | 65 / 40 km/h | armored | 120mm M256 smoothbore (APFSDS)<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.1.1.3.0 |
 | `us-m2a3` | M2A3 Bradley — US infantry fighting vehicle | 61 / 40 km/h | light | 25mm M242 Bushmaster (burst)<br>BGM-71 TOW ATGM<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.2.1.3.0 |
-| `us-hmmwv` | M1151 HMMWV — US light utility vehicle with heavy machine gun | 112 / 65 km/h | soft | 12.7mm heavy machine gun (burst) | Binoculars | 1.1.225.6.1.1.0 |
+| `us-hmmwv` | M1151 HMMWV — US light utility vehicle with heavy machine gun | 112 / 65 km/h | soft | 12.7mm heavy machine gun (burst) | Binoculars<br>Night-vision goggles | 1.1.225.6.1.1.0 |
 | `ru-t72b3` | T-72B3 — Russian main battle tank | 58 / 36 km/h | armored | 125mm 2A46 smoothbore<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.222.1.2.6.0 |
 | `ru-bmp2` | BMP-2 — Russian infantry fighting vehicle | 65 / 40 km/h | light | 30mm 2A42 autocannon (burst)<br>9M113 Konkurs ATGM<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.222.2.2.0.0 |
 | `ru-brdm2` | BRDM-2 — Russian amphibious scout car | 94 / 58 km/h | light | 12.7mm heavy machine gun (burst) | Binoculars | 1.1.222.3.1.0.0 |
 | `ru-ural` | Ural-4320 — Russian cargo truck | 83 / 50 km/h | soft | — | Unaided eye | 1.1.222.7.1.0.0 |
+| `ru-ural-supply` | Ural-4320 supply truck — Russian supply truck: fuel and ammunition for 10 vehicles. Halt beside it to resupply. | 83 / 50 km/h | soft | — | Unaided eye | 1.1.222.7.1.0.0 |
+| `us-hemtt` | M977 HEMTT supply truck — US heavy expanded-mobility tactical truck with fuel and ammunition for 10 vehicles. Halt beside it to resupply. | 90 / 54 km/h | soft | — | Unaided eye | 1.1.225.7.3.0.0 |
 | `ru-sa8` | 9K33 Osa (SA-8) — Russian mobile short-range SAM system | 79 / 43 km/h | light | 9K33 Osa SAM | Search/track radar<br>Unaided eye | 1.1.222.28.1.0.0 |
 | `us-m109a7` | M109A7 Paladin — US 155mm self-propelled howitzer | 61 / 36 km/h | light | 155mm M284 howitzer (M795 HE)<br>12.7mm heavy machine gun (burst) | Unaided eye | 1.1.225.4.1.7.0 |
 | `ru-2s19` | 2S19 Msta-S — Russian 152mm self-propelled howitzer | 59 / 36 km/h | light | 152mm 2A64 howitzer (OF-45 HE)<br>12.7mm heavy machine gun (burst) | Unaided eye | 1.1.222.4.1.3.0 |
+| `us-m1150` | M1150 Assault Breacher Vehicle — US armoured breacher with mine plough and line charges (about 90 s per lane) | 65 / 32 km/h | armored | 12.7mm heavy machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.7.2.1.0 |
 | `civ-car` | Civilian Car — Neutral civilian sedan | 108 / 50 km/h | soft | — | — | 1.1.0.81.1.0.0 |
 
 ### Dismounted
 
 | Id | Name | Max / cruise speed | Armour class | Weapons | Sensors | DIS type |
 | --- | --- | --- | --- | --- | --- | --- |
-| `us-rifleman` | US Rifleman — Dismounted infantry with rifle and AT4 | 14 / 6 km/h | lifeform | 5.56mm rifle<br>AT4 84mm anti-armor | Binoculars | 3.1.225.1.1.0.0 |
-| `us-stinger-team` | Stinger Team — US MANPADS air-defense team | 13 / 5 km/h | lifeform | FIM-92 Stinger<br>5.56mm rifle | Binoculars | 3.1.225.1.3.0.0 |
+| `us-rifleman` | US Rifleman — Dismounted infantry with rifle and AT4 | 14 / 6 km/h | lifeform | 5.56mm rifle<br>AT4 84mm anti-armor | Binoculars<br>Night-vision goggles | 3.1.225.1.1.0.0 |
+| `us-stinger-team` | Stinger Team — US MANPADS air-defense team | 13 / 5 km/h | lifeform | FIM-92 Stinger<br>5.56mm rifle | Binoculars<br>Night-vision goggles | 3.1.225.1.3.0.0 |
 | `ru-rifleman` | Russian Rifleman — Dismounted infantry with rifle and RPG | 14 / 6 km/h | lifeform | 5.45mm rifle<br>RPG-7 | Binoculars | 3.1.222.1.1.0.0 |
 | `us-mortar-team` | 81mm Mortar Team — US dismounted 81mm mortar team | 11 / 5 km/h | lifeform | 81mm M252 mortar (M821 HE)<br>5.56mm rifle | Unaided eye | 3.1.225.1.6.0.0 |
 | `us-fo-team` | Forward Observer Team — US forward observers; call for fire on enemies they see | 14 / 6 km/h | lifeform | 5.56mm rifle | Observer optics (thermal, laser rangefinder) | 3.1.225.1.7.0.0 |
 | `ru-mortar-team` | 120mm Mortar Team — Russian dismounted 120mm 2B11 mortar team | 11 / 4 km/h | lifeform | 120mm 2B11 mortar (OF-843 HE)<br>5.45mm rifle | Unaided eye | 3.1.222.1.6.0.0 |
 | `ru-artillery-observer` | Artillery Observer — Russian artillery reconnaissance team; calls for fire on enemies it sees | 14 / 6 km/h | lifeform | 5.45mm rifle | Observer optics (thermal, laser rangefinder) | 3.1.222.1.7.0.0 |
+| `us-engineer` | US Combat Engineer — Sapper: breaches minefields and obstacles (about 4 minutes per lane) | 14 / 6 km/h | lifeform | 5.56mm rifle | Binoculars<br>Night-vision goggles | 3.1.225.1.8.0.0 |
+| `ru-sapper` | RU Sapper — Russian combat engineer: breaches minefields and obstacles (about 4 minutes per lane) | 14 / 6 km/h | lifeform | 5.45mm rifle | Binoculars | 3.1.222.1.8.0.0 |
 | `civ-person` | Civilian — Neutral civilian pedestrian | 11 / 5 km/h | lifeform | — | — | 3.1.0.0.0.0.0 |
 
 ### Aircraft
@@ -94,6 +99,7 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | --- | --- | --- | --- | --- | --- |
 | `eye` | Unaided eye | 1500 m | 360° | ground, lifeform, surface, air | no |
 | `binoculars` | Binoculars | 3000 m | 360° | ground, lifeform, surface, air | no |
+| `nvg` | Night-vision goggles | 1000 m | 40° | ground, lifeform, surface, air | no |
 | `thermal-sight` | Vehicle thermal sight | 4500 m | 120° | ground, lifeform, surface, air | no |
 | `mast-sight` | Mast-mounted sight | 8000 m | 360° | ground, lifeform, surface, air | no |
 | `eo-turret` | EO/IR turret | 10000 m | 360° | ground, lifeform, surface | no |
@@ -114,6 +120,10 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `us-fighter-flight` | F-16 Flight | flight | 2× F-16C Fighting Falcon | echelonRight | 600 m |
 | `us-paladin-platoon` | Paladin Platoon | platoon | 4× M109A7 Paladin | line | 100 m |
 | `us-mortar-section` | US 81mm Mortar Section | section | 2× 81mm Mortar Team | line | 40 m |
+| `us-supply-section` | US Supply Section | section | 2× M977 HEMTT supply truck | column | 40 m |
+| `us-engineer-squad` | US Engineer Squad | section | 6× US Combat Engineer | wedge | 12 m |
+| `us-tank-company` | US Tank Company | company | HQ 2× M1A2 Abrams; 3× `us-tank-platoon` | wedge | 500 m |
+| `us-mech-company` | US Mech Company | company | HQ 1× M2A3 Bradley, 1× M1A2 Abrams; 3× `us-mech-platoon` | line | 500 m |
 | `ru-tank-platoon` | RU Tank Platoon | platoon | 3× T-72B3 | wedge | 80 m |
 | `ru-mech-platoon` | RU Mech Platoon | platoon | 3× BMP-2 | line | 80 m |
 | `ru-rifle-squad` | RU Rifle Squad | section | 8× Russian Rifleman | wedge | 12 m |
@@ -121,4 +131,7 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `ru-supply-convoy` | RU Supply Convoy | section | 1× BRDM-2, 3× Ural-4320 | column | 50 m |
 | `ru-msta-battery` | 2S19 Battery | platoon | 6× 2S19 Msta-S | line | 100 m |
 | `ru-mortar-battery` | RU 120mm Mortar Battery | platoon | 4× 120mm Mortar Team | line | 40 m |
+| `ru-sapper-squad` | RU Sapper Squad | section | 6× RU Sapper | wedge | 12 m |
+| `ru-supply-section` | RU Supply Section | section | 2× Ural-4320 supply truck | column | 40 m |
+| `ru-tank-company` | RU Tank Company | company | HQ 1× T-72B3; 3× `ru-tank-platoon` | wedge | 500 m |
 | `ru-flanker-flight` | Su-27 Flight | flight | 2× Su-27 Flanker | echelonRight | 600 m |

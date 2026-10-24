@@ -110,35 +110,39 @@ FO Hawk at (5208, 12093), 243 m, 2.8 km from Calloway; reactions {"callForFire":
   00:00:49  Red Squad 5 destroyed by Steel Rain Lead
   00:00:50  Red Squad 8 destroyed by Steel Rain 4
   00:01:01  FO Hawk called for fire on Red Mech Lead: Steel Rain firing 3 rounds x 4 tubes
-  00:01:19  Red Squad 6 destroyed by Steel Rain Lead
-  00:01:42  Red Mech Lead destroyed by Steel Rain Lead
+  00:01:04  Red Squad 6 destroyed by Steel Rain 3
+  ...
+  00:05:56  Red Mech 2 destroyed by Steel Rain 3
   ...
   00:07:28  6 passengers dismounted from Team MECH Lead
   00:07:28  3 passengers dismounted from Team MECH 2
-  00:08:01  FO Hawk called for fire on Red Squad Lead: Steel Rain firing 3 rounds x 4 tubes
   ...
-  00:11:01  Red Squad Lead destroyed by Team MECH Lead
   00:12:01  Team MECH: plan Carry and support complete
-  00:13:23  FO Hawk called for fire on Red Mech 2: Steel Rain firing 3 rounds x 4 tubes
-  00:13:34  Red Mech 2: halted on contact
-  00:14:06  1st Squad 3 destroyed by Red Mech 2
-  00:14:16  1st Squad Lead destroyed by Red Mech 2
+  00:12:11  Red Squad 4 destroyed by Team MECH 2
+  00:13:25  Red Mech Lead: halted on contact
+  00:13:33  1st Squad 3 destroyed by Red Mech Lead
+  00:13:47  1st Squad Lead destroyed by Red Mech Lead
   ...
-  00:16:45  Red Mech 2 destroyed by Team MECH 3
-  00:17:40  Red Mech 3: halted on contact
-  00:17:43  Red Mech 3 destroyed by Team MECH 3
+  00:14:43  1st Squad 9 destroyed by Red Mech Lead
+  ...
+  00:16:55  Red Mech Lead destroyed by Team MECH 2
 
 After-action review
-  Blue  10/18 left, 11 kills, 160 rounds fired
-  Red    0/11 left, 8 kills, 42 rounds fired
-  Kills by weapon: how-155mm 8, gun-30mm-2a42 5, atgm-konkurs 2, atgm-tow 2, gun-25mm 1, mg-762 1
+  Blue  12/18 left, 9 kills, 176 rounds fired
+  Red    2/11 left, 6 kills, 30 rounds fired
+  Kills by weapon: how-155mm 7, gun-30mm-2a42 6, gun-25mm 1, atgm-tow 1
   Artillery rounds: 156
 ```
 
-The artillery breaks up the squad in the town and kills the BMP platoon leader
-long before contact, but the two surviving BMPs catch the dismounted squad in
-the open with their 30 mm cannon. Run it twice: the result is the same each
-time, because the simulation is deterministic.
+The artillery breaks up the squad in the town: it kills six of the nine
+riflemen, and the shelling pins the rest down again and again, so the squad
+breaks and falls back several times (the full event log shows *pinned down* and
+*broke and is falling back*). It also destroys one BMP and immobilises another
+3 km out, long before contact. But the last BMP catches the dismounted squad in
+the open and kills six of them with its 30 mm cannon before the Bradleys
+destroy it. One Red rifleman survives on the east edge of the town. Run it
+twice: the result is the same each time, because the simulation is
+deterministic.
 
 ## 6. Manual fire missions
 
@@ -151,15 +155,17 @@ one howitzer, or a mortar team) and either:
   click the target;
 - in a plan, add **Fire mission (pick), rounds**.
 
-Through the API:
+Through the API (in both the GUI build above and the script, the Paladin
+platoon is `U3`):
 
 ```bash
-curl -X POST localhost:8080/api/v1/units/U2/task -H 'Content-Type: application/json' \
+curl -X POST localhost:8080/api/v1/units/U3/task -H 'Content-Type: application/json' \
   -d '{"type": "fireMission", "target": {"town": "Calloway"}, "rounds": 4, "radius": 100}'
 ```
 
 `radius` spreads the rounds over an area (a sheaf). A target inside the
-weapon's minimum range (2 km for 155 mm) fails with *target out of range*.
+weapon's minimum range (2 km for 155 mm) fails with *target out of range* in the
+event log, and a unit without artillery with *no indirect-fire weapon*.
 
 ## 7. Things to try
 

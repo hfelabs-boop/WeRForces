@@ -396,3 +396,353 @@ export function decodeDetonation(buf: Uint8Array): DetonationPdu {
 export const DETONATION_ENTITY_IMPACT = 1;
 export const DETONATION_GROUND_IMPACT = 3;
 export const DETONATION_DETONATION = 5;
+
+// ---------------------------------------------------------------- simulation management
+
+export const PDU_START_RESUME = 13;
+export const PDU_STOP_FREEZE = 14;
+export const PDU_ACKNOWLEDGE = 15;
+export const PDU_COMMENT = 22;
+export const FAMILY_SIMULATION_MANAGEMENT = 5;
+export const START_RESUME_SIZE = 44;
+export const STOP_FREEZE_SIZE = 40;
+export const ACKNOWLEDGE_SIZE = 32;
+/** Addresses every simulation (site, application and entity all 0xFFFF). */
+export const ALL_ENTITIES: EntityId = { site: 0xffff, application: 0xffff, entity: 0xffff };
+/** Acknowledge flag values. */
+export const ACK_START_RESUME = 3;
+export const ACK_STOP_FREEZE = 4;
+/** Datum ID used for free-text Comment PDUs. */
+export const DATUM_TEXT = 0;
+
+/** DIS clock time: whole hours since 1970 and a timestamp within the hour. */
+export interface ClockTime {
+  hour: number;
+  timePastHour: number;
+}
+
+export function clockTime(date = new Date()): ClockTime {
+  return { hour: Math.floor(date.getTime() / 3600000), timePastHour: disTimestamp(date) };
+}
+
+export interface SimanHeader {
+  header: PduHeader;
+  originatingId: EntityId;
+  receivingId: EntityId;
+}
+
+export interface StartResumePdu extends SimanHeader {
+  realWorldTime: ClockTime;
+  simulationTime: ClockTime;
+  requestId: number;
+}
+
+export interface StopFreezePdu extends SimanHeader {
+  realWorldTime: ClockTime;
+  /** 0 other, 1 recess, 2 termination, 3 system failure, 4 security violation, 5 entity reconstitution, 6 stop for reset, 7 stop for restart, 8 abort training return to tactical operations. */
+  reason: number;
+  frozenBehavior: number;
+  requestId: number;
+}
+
+export interface AcknowledgePdu extends SimanHeader {
+  acknowledgeFlag: number;
+  /** 0 other, 1 able to comply, 2 unable to comply, 3 pending operator action. */
+  responseFlag: number;
+  requestId: number;
+}
+
+export interface CommentPdu extends SimanHeader {
+  /** Variable datum records: id and value (text). */
+  texts: { datumId: number; text: string }[];
+}
+
+function simanHead(w: Writer, p: SimanHeader, type: number, length: number) {
+  w.header({ ...p.header, pduType: type, protocolFamily: FAMILY_SIMULATION_MANAGEMENT }, length);
+  w.id(p.originatingId);
+  w.id(p.receivingId);
+}
+
+function readSimanHead(r: Reader): SimanHeader {
+  const header = { protocolVersion: r.u8(), exerciseId: r.u8(), pduType: r.u8(), protocolFamily: r.u8(), timestamp: r.u32(), length: r.u16() };
+  r.skip(2);
+  return { header, originatingId: r.id(), receivingId: r.id() };
+}
+
+export function encodeStartResume(p: StartResumePdu): Uint8Array {
+  const buf = new Uint8Array(START_RESUME_SIZE);
+  const w = new Writer(buf);
+  simanHead(w, p, PDU_START_RESUME, START_RESUME_SIZE);
+  w.u32(p.realWorldTime.hour);
+  w.u32(p.realWorldTime.timePastHour);
+  w.u32(p.simulationTime.hour);
+  w.u32(p.simulationTime.timePastHour);
+  w.u32(p.requestId);
+  return buf;
+}
+
+export function decodeStartResume(buf: Uint8Array): StartResumePdu {
+  const r = new Reader(buf);
+  const h = readSimanHead(r);
+  return { ...h, realWorldTime: { hour: r.u32(), timePastHour: r.u32() }, simulationTime: { hour: r.u32(), timePastHour: r.u32() }, requestId: r.u32() };
+}
+
+export function encodeStopFreeze(p: StopFreezePdu): Uint8Array {
+  const buf = new Uint8Array(STOP_FREEZE_SIZE);
+  const w = new Writer(buf);
+  simanHead(w, p, PDU_STOP_FREEZE, STOP_FREEZE_SIZE);
+  w.u32(p.realWorldTime.hour);
+  w.u32(p.realWorldTime.timePastHour);
+  w.u8(p.reason);
+  w.u8(p.frozenBehavior);
+  w.u16(0);
+  w.u32(p.requestId);
+  return buf;
+}
+
+export function decodeStopFreeze(buf: Uint8Array): StopFreezePdu {
+  const r = new Reader(buf);
+  const h = readSimanHead(r);
+  const realWorldTime = { hour: r.u32(), timePastHour: r.u32() };
+  const reason = r.u8();
+  const frozenBehavior = r.u8();
+  r.skip(2);
+  return { ...h, realWorldTime, reason, frozenBehavior, requestId: r.u32() };
+}
+
+export function encodeAcknowledge(p: AcknowledgePdu): Uint8Array {
+  const buf = new Uint8Array(ACKNOWLEDGE_SIZE);
+  const w = new Writer(buf);
+  simanHead(w, p, PDU_ACKNOWLEDGE, ACKNOWLEDGE_SIZE);
+  w.u16(p.acknowledgeFlag);
+  w.u16(p.responseFlag);
+  w.u32(p.requestId);
+  return buf;
+}
+
+export function decodeAcknowledge(buf: Uint8Array): AcknowledgePdu {
+  const r = new Reader(buf);
+  const h = readSimanHead(r);
+  return { ...h, acknowledgeFlag: r.u16(), responseFlag: r.u16(), requestId: r.u32() };
+}
+
+export function encodeComment(p: CommentPdu): Uint8Array {
+  const data = p.texts.map((t) => ({ id: t.datumId, bytes: new TextEncoder().encode(t.text) }));
+  // Each variable datum: id, length in bits, value padded to a 64-bit boundary.
+  const size = 12 + 12 + 8 + data.reduce((n, d) => n + 8 + Math.ceil(d.bytes.length / 8) * 8, 0);
+  const buf = new Uint8Array(size);
+  const w = new Writer(buf);
+  simanHead(w, p, PDU_COMMENT, size);
+  w.u32(0); // fixed datum records
+  w.u32(data.length);
+  for (const d of data) {
+    w.u32(d.id);
+    w.u32(d.bytes.length * 8);
+    buf.set(d.bytes, w.off);
+    w.off += Math.ceil(d.bytes.length / 8) * 8;
+  }
+  return buf;
+}
+
+export function decodeComment(buf: Uint8Array): CommentPdu {
+  const r = new Reader(buf);
+  const h = readSimanHead(r);
+  const fixed = r.u32();
+  const variable = r.u32();
+  r.skip(fixed * 8);
+  const texts: CommentPdu['texts'] = [];
+  for (let i = 0; i < variable && r.off + 8 <= buf.byteLength; i++) {
+    const datumId = r.u32();
+    const bits = r.u32();
+    const bytes = Math.ceil(bits / 8);
+    if (r.off + bytes > buf.byteLength) break;
+    texts.push({ datumId, text: new TextDecoder().decode(buf.subarray(r.off, r.off + bytes)) });
+    r.skip(Math.ceil(bytes / 8) * 8);
+  }
+  return { ...h, texts };
+}
+
+// ---------------------------------------------------------------- radio communications
+
+export const PDU_TRANSMITTER = 25;
+export const PDU_SIGNAL = 26;
+export const PDU_RECEIVER = 27;
+export const FAMILY_RADIO = 4;
+export const TRANSMITTER_SIZE = 104;
+export const RECEIVER_SIZE = 36;
+export const TRANSMIT_OFF = 0;
+export const TRANSMIT_ON_IDLE = 1;
+export const TRANSMIT_ON_TRANSMITTING = 2;
+export const RECEIVER_OFF = 0;
+export const RECEIVER_ON_IDLE = 1;
+export const RECEIVER_ON_RECEIVING = 2;
+/** Signal encoding classes (top two bits of the encoding scheme). */
+export const ENCODING_AUDIO = 0;
+export const ENCODING_RAW_BINARY = 1;
+export const ENCODING_APPLICATION = 2;
+
+export interface RadioType {
+  kind: number;
+  domain: number;
+  country: number;
+  category: number;
+  nomenclatureVersion: number;
+  nomenclature: number;
+}
+
+export interface TransmitterPdu {
+  header: PduHeader;
+  /** The entity the radio is on. */
+  radioReferenceId: EntityId;
+  radioNumber: number;
+  radioType: RadioType;
+  transmitState: number;
+  inputSource: number;
+  antennaLocation: Vec3;
+  relativeAntennaLocation: Vec3;
+  /** Hz. */
+  frequency: number;
+  bandwidth: number;
+  /** dBm. */
+  power: number;
+  modulation: { spreadSpectrum: number; majorModulation: number; detail: number; radioSystem: number };
+  cryptoSystem: number;
+  cryptoKeyId: number;
+}
+
+export interface SignalPdu {
+  header: PduHeader;
+  radioReferenceId: EntityId;
+  radioNumber: number;
+  /** Encoding class (top 2 bits) and type or message count (low 14 bits). */
+  encodingScheme: number;
+  tdlType: number;
+  sampleRate: number;
+  samples: number;
+  data: Uint8Array;
+  /** Data length in bits (defaults to the byte length × 8). */
+  dataBits?: number;
+}
+
+export interface ReceiverPdu {
+  header: PduHeader;
+  radioReferenceId: EntityId;
+  radioNumber: number;
+  receiverState: number;
+  receivedPower: number;
+  transmitterEntityId: EntityId;
+  transmitterRadioId: number;
+}
+
+export function encodeTransmitter(p: TransmitterPdu): Uint8Array {
+  const buf = new Uint8Array(TRANSMITTER_SIZE);
+  const w = new Writer(buf);
+  w.header({ ...p.header, pduType: PDU_TRANSMITTER, protocolFamily: FAMILY_RADIO }, TRANSMITTER_SIZE);
+  w.id(p.radioReferenceId);
+  w.u16(p.radioNumber);
+  w.u8(p.radioType.kind);
+  w.u8(p.radioType.domain);
+  w.u16(p.radioType.country);
+  w.u8(p.radioType.category);
+  w.u8(p.radioType.nomenclatureVersion);
+  w.u16(p.radioType.nomenclature);
+  w.u8(p.transmitState);
+  w.u8(p.inputSource);
+  w.u16(0); // variable transmitter parameter count
+  w.vec64(p.antennaLocation);
+  w.vec32(p.relativeAntennaLocation);
+  w.u16(0); // antenna pattern type: omnidirectional
+  w.u16(0); // antenna pattern length
+  w.view.setBigUint64(w.off, BigInt(Math.round(p.frequency)));
+  w.off += 8;
+  w.f32(p.bandwidth);
+  w.f32(p.power);
+  w.u16(p.modulation.spreadSpectrum);
+  w.u16(p.modulation.majorModulation);
+  w.u16(p.modulation.detail);
+  w.u16(p.modulation.radioSystem);
+  w.u16(p.cryptoSystem);
+  w.u16(p.cryptoKeyId);
+  w.u8(0); // modulation parameter count
+  w.u8(0);
+  w.u16(0);
+  return buf;
+}
+
+export function decodeTransmitter(buf: Uint8Array): TransmitterPdu {
+  const r = new Reader(buf);
+  const header = { protocolVersion: r.u8(), exerciseId: r.u8(), pduType: r.u8(), protocolFamily: r.u8(), timestamp: r.u32(), length: r.u16() };
+  r.skip(2);
+  const radioReferenceId = r.id();
+  const radioNumber = r.u16();
+  const radioType = { kind: r.u8(), domain: r.u8(), country: r.u16(), category: r.u8(), nomenclatureVersion: r.u8(), nomenclature: r.u16() };
+  const transmitState = r.u8();
+  const inputSource = r.u8();
+  r.skip(2);
+  const antennaLocation = r.vec64();
+  const relativeAntennaLocation = r.vec32();
+  r.skip(4);
+  const frequency = Number(r.view.getBigUint64(r.off));
+  r.skip(8);
+  const bandwidth = r.f32();
+  const power = r.f32();
+  const modulation = { spreadSpectrum: r.u16(), majorModulation: r.u16(), detail: r.u16(), radioSystem: r.u16() };
+  return { header, radioReferenceId, radioNumber, radioType, transmitState, inputSource, antennaLocation, relativeAntennaLocation, frequency, bandwidth, power, modulation, cryptoSystem: r.u16(), cryptoKeyId: r.u16() };
+}
+
+export function encodeSignal(p: SignalPdu): Uint8Array {
+  const padded = Math.ceil(p.data.length / 4) * 4;
+  const size = 32 + padded;
+  const buf = new Uint8Array(size);
+  const w = new Writer(buf);
+  w.header({ ...p.header, pduType: PDU_SIGNAL, protocolFamily: FAMILY_RADIO }, size);
+  w.id(p.radioReferenceId);
+  w.u16(p.radioNumber);
+  w.u16(p.encodingScheme);
+  w.u16(p.tdlType);
+  w.u32(p.sampleRate);
+  w.u16(p.dataBits ?? p.data.length * 8);
+  w.u16(p.samples);
+  buf.set(p.data, w.off);
+  return buf;
+}
+
+export function decodeSignal(buf: Uint8Array): SignalPdu {
+  const r = new Reader(buf);
+  const header = { protocolVersion: r.u8(), exerciseId: r.u8(), pduType: r.u8(), protocolFamily: r.u8(), timestamp: r.u32(), length: r.u16() };
+  r.skip(2);
+  const radioReferenceId = r.id();
+  const radioNumber = r.u16();
+  const encodingScheme = r.u16();
+  const tdlType = r.u16();
+  const sampleRate = r.u32();
+  const dataBits = r.u16();
+  const samples = r.u16();
+  const bytes = Math.min(Math.ceil(dataBits / 8), buf.byteLength - r.off);
+  return { header, radioReferenceId, radioNumber, encodingScheme, tdlType, sampleRate, samples, dataBits, data: buf.slice(r.off, r.off + bytes) };
+}
+
+export function encodeReceiver(p: ReceiverPdu): Uint8Array {
+  const buf = new Uint8Array(RECEIVER_SIZE);
+  const w = new Writer(buf);
+  w.header({ ...p.header, pduType: PDU_RECEIVER, protocolFamily: FAMILY_RADIO }, RECEIVER_SIZE);
+  w.id(p.radioReferenceId);
+  w.u16(p.radioNumber);
+  w.u16(p.receiverState);
+  w.u16(0);
+  w.f32(p.receivedPower);
+  w.id(p.transmitterEntityId);
+  w.u16(p.transmitterRadioId);
+  return buf;
+}
+
+export function decodeReceiver(buf: Uint8Array): ReceiverPdu {
+  const r = new Reader(buf);
+  const header = { protocolVersion: r.u8(), exerciseId: r.u8(), pduType: r.u8(), protocolFamily: r.u8(), timestamp: r.u32(), length: r.u16() };
+  r.skip(2);
+  const radioReferenceId = r.id();
+  const radioNumber = r.u16();
+  const receiverState = r.u16();
+  r.skip(2);
+  return { header, radioReferenceId, radioNumber, receiverState, receivedPower: r.f32(), transmitterEntityId: r.id(), transmitterRadioId: r.u16() };
+}

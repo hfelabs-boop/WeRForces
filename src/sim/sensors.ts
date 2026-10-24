@@ -4,9 +4,14 @@
 import { angleDiff, bearing, clamp } from '../shared/math.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
+import { LAND_COVER } from '../shared/terrainGrid.js';
+import { sensorRange } from './environment.js';
+import { spotFactor } from './morale.js';
 
 export const SENSOR_INTERVAL = 1;
 const CONTACT_TIMEOUT = 15;
+/** Light level at which a muzzle flash can be seen (fraction of daylight range). */
+const FLASH_LIGHT = 0.5;
 
 /** Probability that one sensor scan detects a target. */
 export function detectionProbability(engine: Engine, observer: Entity, target: Entity, range: number, maxRange: number, radar: boolean): number {
@@ -14,12 +19,17 @@ export function detectionProbability(engine: Engine, observer: Entity, target: E
   if (!radar) {
     const groundTarget = target.domain === 'ground' || target.domain === 'lifeform';
     if (groundTarget && engine.terrain.isForest(target.x, target.y)) p *= 0.35;
+    else if (groundTarget && engine.terrain.isBuiltUp(target.x, target.y)) p *= 0.6;
+    else if (target.domain === 'lifeform' && engine.terrain.coverAt(target.x, target.y) === LAND_COVER.shrub) p *= 0.7;
     if (target.domain === 'lifeform') p *= 0.6;
   }
   if (target.speed > 1) p *= 1.3;
+  // Dug in or hull-down and quiet: hard to spot.
+  else if (target.prepared && engine.time - target.lastFiredAt >= 5) p *= 0.5;
   if (engine.time - target.lastFiredAt < 5) p *= 2;
   // Contacts already being tracked are easy to maintain.
   if (observer.contacts.has(target.id)) p = Math.max(p, 0.95);
+  p *= spotFactor(engine, observer);
   return clamp(p, 0, 0.99);
 }
 
@@ -27,9 +37,14 @@ export function updateSensors(engine: Engine, observer: Entity): void {
   const now = engine.time;
   if (observer.alive && !observer.remote && !observer.embarkedIn && observer.type.sensors.length > 0) {
     const eye = observer.eye;
-    const sensors = observer.type.sensors.map((sid) => engine.catalog.sensors.get(sid)!);
+    // Muzzle flashes give away a shooter at night further than the dark would allow.
+    const flashEnv = engine.env.light < FLASH_LIGHT ? { ...engine.env, light: FLASH_LIGHT } : engine.env;
+    const sensors = observer.type.sensors.map((sid) => {
+      const s = engine.catalog.sensors.get(sid)!;
+      return { s, range: sensorRange(s, engine.env), flashRange: sensorRange(s, flashEnv) };
+    });
     let reach = 0;
-    for (const s of sensors) reach = Math.max(reach, s.maxRange);
+    for (const { flashRange } of sensors) reach = Math.max(reach, flashRange);
     engine.spatial.build(engine.entities.values(), engine.time);
     for (const target of engine.spatial.query(observer.x, observer.y, reach, observer.force)) {
       if (target === observer || target.destroyed || target.embarkedIn) continue;
@@ -39,15 +54,17 @@ export function updateSensors(engine: Engine, observer: Entity): void {
       const range2 = dx * dx + dy * dy + dz * dz;
       if (range2 > reach * reach) continue;
       const range = Math.sqrt(range2);
-      for (const s of sensors) {
-        if (range > s.maxRange || !s.detects.includes(target.domain)) continue;
+      const flash = now - target.lastFiredAt < 5;
+      for (const { s, range: dark, flashRange } of sensors) {
+        const maxRange = flash ? flashRange : dark;
+        if (range > maxRange || !s.detects.includes(target.domain)) continue;
         if (s.fov < Math.PI * 2 - 1e-6) {
           const off = Math.abs(angleDiff(observer.heading, bearing(observer, target)));
           if (off > s.fov / 2) continue;
         }
         const aim = { x: target.x, y: target.y, z: target.z + Math.min(2, target.type.sensorHeight || 2) };
-        if (!engine.terrain.lineOfSight(eye, aim)) continue;
-        if (!engine.rng.chance(detectionProbability(engine, observer, target, range, s.maxRange, !!s.radar))) continue;
+        if (!engine.lineOfSight(eye, aim, !!s.radar)) continue;
+        if (!engine.rng.chance(detectionProbability(engine, observer, target, range, maxRange, !!s.radar))) continue;
         recordContact(engine, observer, target, now);
         break;
       }
@@ -75,5 +92,8 @@ function recordContact(engine: Engine, observer: Entity, target: Entity, now: nu
   }
   if (isNew && engine.isHostile(observer.force, target.force)) {
     engine.log('detected', `${observer.name} detected ${target.name}`, observer.id, target.id);
+    // The unit's leader reports it on the radio net.
+    const speaker = observer.unit?.leader ?? observer;
+    engine.radio(speaker, `${observer.unit?.name ?? observer.name}: contact, ${target.type.name} at ${Math.round(target.x)} ${Math.round(target.y)}`, target.id);
   }
 }

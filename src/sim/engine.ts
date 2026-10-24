@@ -22,6 +22,10 @@ import type {
   SimEventKind,
   SimState,
   TaskSpec,
+  SimulationRules,
+  PendingOrder,
+  Environment,
+  EnvironmentState,
   TerrainData,
   TerrainSpec,
   UnitSnapshot,
@@ -33,17 +37,27 @@ import type {
 import { CatalogIndex, DEFAULT_CATALOG } from './catalog.js';
 import { applyBlast, applyDamage, type Detonation, effectivePk, resolveImpact, type Shot, updateCombat } from './combat.js';
 import { Entity } from './entity.js';
+import { DEFAULT_ENVIRONMENT, environmentAt, groundFactor, normalizeEnvironment, windVector } from './environment.js';
 import { checkCallsForFire } from './fires.js';
+import { decaySuppression, isPinned, updateMorale } from './morale.js';
 import { stepMovement } from './movement.js';
-import { PlanExecutor, type Taskable } from './plans.js';
+import { describeStatement, PlanExecutor, type Taskable } from './plans.js';
 import { Rng } from './rng.js';
 import { SENSOR_INTERVAL, updateSensors } from './sensors.js';
+import { Obstacles } from './obstacles.js';
+import { Smoke } from './smoke.js';
+import { ThreatMap } from './threats.js';
+import { burnFuel, updateResupply } from './supply.js';
 import { SpatialIndex } from './spatial.js';
 import { createTask, MountTask, type Task, type TaskStatus } from './tasks.js';
 import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
-import { formationOffset, perMemberTask, Unit } from './units.js';
+import { formationOffset, perMemberTask, splitOrder, Unit } from './units.js';
 
 export const DEFAULT_DT = 0.1;
+export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
+
+/** Seconds for an order to reach and be acted on, by echelon (rules.orderDelay). */
+const ORDER_DELAY: Record<UnitTemplate['echelon'] | 'entity', number> = { entity: 5, team: 10, flight: 10, section: 15, platoon: 30, company: 60, group: 60 };
 const MAX_EVENTS = 1000;
 
 type Listener<T> = (value: T) => void;
@@ -119,10 +133,16 @@ export class Engine {
   readonly units = new Map<string, Unit>();
   /** Grid of entity positions for neighbourhood queries, rebuilt on demand each tick. */
   readonly spatial = new SpatialIndex();
+  /** Minefields and obstacle lines (from graphics), lanes and route-cost overlays. */
+  readonly obstacles = new Obstacles(this);
+  /** Smoke clouds. */
+  readonly smoke = new Smoke(this);
+  readonly threats = new ThreatMap(this);
   readonly graphics = new Map<string, Graphic>();
   readonly listeners: EngineListeners = { event: [], fire: [], detonation: [], removed: [], reset: [], step: [] };
 
   private hostilities = new Set<string>(['1-2']);
+  private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
   private shots: Shot[] = [];
   private events: SimEvent[] = [];
   private eventSeq = 0;
@@ -132,6 +152,14 @@ export class Engine {
   private sensorDue = new Map<string, number>();
   private initialScenario: ScenarioFile | null = null;
 
+  /** Optional model parts (see SimulationRules); all on unless a scenario turns them off. */
+  rules: Required<SimulationRules> = { ...DEFAULT_RULES };
+  /** Orders on their way down the chain of command (rules.orderDelay). */
+  pendingOrders: PendingOrder[] = [];
+  /** Time of day and weather at the scenario's start (time 0). */
+  environment: Required<Environment> = { ...DEFAULT_ENVIRONMENT };
+  /** The environment now (clock and light), updated once a simulated second. */
+  env: EnvironmentState = environmentAt(DEFAULT_ENVIRONMENT, 0, 0);
   /** Loads imported terrain datasets by name (set by the server from its terrains folder). */
   terrainLoader?: (name: string) => TerrainData;
 
@@ -215,6 +243,8 @@ export class Engine {
     e.disNumber = ++this.disCounter;
     for (const w of type.weapons) e.ammo.set(w, this.catalog.weapon(w).ammo);
     if (type.reactions) e.reactions = { ...type.reactions };
+    e.smokeLeft = type.smokeGrenades ?? 0;
+    e.supplies = type.supply?.capacity ?? 0;
     this.spatial.invalidate();
     if (type.domain === 'air') {
       e.altitudeOverride = opts.altitude;
@@ -256,17 +286,39 @@ export class Engine {
     const tpl = this.catalog.templates.get(templateId);
     if (!tpl) throw new Error(`unknown unit template: ${templateId}`);
     const members: Entity[] = [];
+    // A headquarters keeps close together; the template's spacing is for its subordinate units.
+    const spacing = tpl.subunits?.length ? Math.min(tpl.spacing, 80) : tpl.spacing;
     // Place the leader at the point and followers at their formation slots.
     for (let k = 0; k < tpl.members.length; k++) {
-      const off = k === 0 ? { x: 0, y: 0 } : rotateSlot(tpl.formation, k, tpl.spacing, heading);
+      const off = k === 0 ? { x: 0, y: 0 } : rotateSlot(tpl.formation, k, spacing, heading);
       const slot = { x: clampTo(x + off.x, this.terrain.spec.size), y: clampTo(y + off.y, this.terrain.spec.size) };
       const domain = this.catalog.type(tpl.members[k]).domain;
       // Followers whose slot is unusable (e.g. in a lake) are placed at the nearest valid spot.
       const p = k === 0 ? slot : (this.findValidPosition(slot, domain) ?? this.findValidPosition({ x, y }, domain) ?? slot);
       members.push(this.createEntity({ typeId: tpl.members[k], force, x: p.x, y: p.y, heading }));
     }
-    const unit = this.groupUnit(members.map((m) => m.id), name ?? tpl.name, tpl.formation, tpl.spacing, tpl.echelon);
+    const unit = this.groupUnit(members.map((m) => m.id), name ?? tpl.name, tpl.formation, spacing, tpl.echelon);
     members.forEach((m, i) => (m.name = `${unit.name} ${i === 0 ? 'Lead' : i + 1}`));
+    if (tpl.subunits?.length) {
+      // The members are the HQ, set back behind the subordinate units' formation.
+      const back = rotateOffset({ x: 0, y: -tpl.spacing * 0.6 }, heading);
+      for (const m of members) {
+        const p = this.findValidPosition({ x: clampTo(m.x + back.x, this.terrain.spec.size), y: clampTo(m.y + back.y, this.terrain.spec.size) }, m.domain);
+        if (p) {
+          m.x = p.x;
+          m.y = p.y;
+        }
+      }
+      for (const m of members) m.name = `${unit.name} HQ${members.length > 1 ? ` ${members.indexOf(m) + 1}` : ''}`;
+      tpl.subunits.forEach((sid, k) => {
+        const off = rotateSlot(tpl.formation, k, tpl.spacing, heading);
+        const echelon = this.catalog.templates.get(sid)!.echelon;
+        const nth = `${k + 1}${k === 0 ? 'st' : k === 1 ? 'nd' : k === 2 ? 'rd' : 'th'}`;
+        // Named after the company, so two companies' platoons are told apart.
+        const sub = this.createUnitFromTemplate(sid, force, clampTo(x + off.x, this.terrain.spec.size), clampTo(y + off.y, this.terrain.spec.size), heading, `${unit.name} ${nth} ${echelon[0].toUpperCase()}${echelon.slice(1)}`);
+        sub.parentId = unit.id;
+      });
+    }
     return unit;
   }
 
@@ -303,19 +355,135 @@ export class Engine {
     const i = unit.memberList.indexOf(e);
     if (i >= 0) unit.memberList.splice(i, 1);
     e.unit = null;
-    if (unit.memberList.length === 0) this.units.delete(unit.id);
+    if (unit.memberList.length === 0) this.dropUnit(unit.id);
     else if (unit.leader === e) unit.update(this);
+  }
+
+  /** Remove a unit; its subordinates become independent. */
+  private dropUnit(id: string): void {
+    this.units.delete(id);
+    for (const u of this.units.values()) if (u.parentId === id) u.parentId = undefined;
+    this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== id);
+  }
+
+  /** Subordinate units of a unit. */
+  subordinatesOf(unit: Unit): Unit[] {
+    const out: Unit[] = [];
+    for (const u of this.units.values()) if (u.parentId === unit.id) out.push(u);
+    return out;
+  }
+
+  /** Put a unit under a superior unit of the same force (null: independent). */
+  setSuperior(unitId: string, superiorId: string | null): void {
+    const u = this.units.get(unitId);
+    if (!u) throw new Error(`unknown unit ${unitId}`);
+    if (superiorId === null) {
+      u.parentId = undefined;
+      return;
+    }
+    const sup = this.units.get(superiorId);
+    if (!sup) throw new Error(`unknown unit ${superiorId}`);
+    if (sup.force !== u.force) throw new Error('a superior must be of the same force');
+    for (let p: Unit | undefined = sup; p; p = p.parentId ? this.units.get(p.parentId) : undefined) {
+      if (p === u) throw new Error(`${sup.name} is under ${u.name} already`);
+    }
+    u.parentId = sup.id;
+    this.log('info', `${u.name} placed under ${sup.name}`, u.id, sup.id);
+  }
+
+  // ------------------------------------------------------------ orders
+
+  /**
+   * Give an entity or unit an order, as a player or API client does. With rules.orderDelay
+   * on it arrives after a delay that depends on the echelon; orders to a unit with
+   * subordinates pass on down the chain, each level adding its own delay.
+   */
+  issueOrder(targetId: string, order: { task?: TaskSpec; plan?: Plan }): number {
+    const t = this.resolveTarget(targetId);
+    if (order.task) this.validateTask(order.task);
+    if (order.plan) for (const st of order.plan.statements) if (st.kind === 'task') this.validateTask(st.task);
+    // A new order replaces one still on its way.
+    this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== targetId);
+    const base = this.rules.orderDelay ? ORDER_DELAY[t instanceof Unit ? t.echelon : 'entity'] : 0;
+    if (base <= 0) {
+      if (order.plan) this.assignPlan(targetId, order.plan);
+      else if (order.task) this.assignTask(targetId, order.task);
+      return 0;
+    }
+    const delay = Math.round(base * (0.8 + 0.4 * this.rng.next()));
+    this.pendingOrders.push({ targetId, task: order.task, plan: order.plan, due: Math.round((this.time + delay) * 10) / 10 });
+    this.log('task', `Order to ${t.name}: ${this.describeOrder(order)} (arrives in ${delay} s)`, t.id);
+    return delay;
+  }
+
+  /** A radio message from an entity (DIS gateways send it as a Signal PDU). */
+  radio(from: Entity, text: string, aboutId?: string): void {
+    if (from.remote || !from.alive) return;
+    this.log('radio', text, from.id, aboutId);
+  }
+
+  private describeOrder(o: { task?: TaskSpec; plan?: Plan }): string {
+    return o.plan ? `plan ${o.plan.name ?? ''}`.trim() : describeStatement({ kind: 'task', task: o.task! }, this);
+  }
+
+  private deliverOrders(): void {
+    if (!this.pendingOrders.length) return;
+    const due = this.pendingOrders.filter((o) => o.due <= this.time + 1e-9);
+    if (!due.length) return;
+    this.pendingOrders = this.pendingOrders.filter((o) => o.due > this.time + 1e-9);
+    for (const o of due) {
+      if (!this.entities.has(o.targetId) && !this.units.has(o.targetId)) continue;
+      try {
+        if (o.plan) this.assignPlan(o.targetId, o.plan);
+        else if (o.task) this.assignTask(o.targetId, o.task);
+        const t = this.resolveTarget(o.targetId);
+        const speaker = t instanceof Unit ? t.leader : t;
+        if (speaker) this.radio(speaker, `${t.name}: wilco, ${this.describeOrder(o)}`);
+      } catch (err) {
+        this.log('task', `Order to ${this.nameOf(o.targetId)} could not be carried out: ${(err as Error).message}`, o.targetId);
+      }
+    }
+  }
+
+  /** Start a task on an entity or unit; a unit with subordinates passes its part of it on. */
+  startOrder(owner: Taskable, spec: TaskSpec, cascade = true): void {
+    const unit = this.units.get(owner.id);
+    const subs = unit && cascade ? this.subordinatesOf(unit) : [];
+    if (!unit || subs.length === 0) {
+      if (unit && cascade) unit.orderedSubs = [];
+      owner.startTask(this, spec);
+      return;
+    }
+    const { own, children } = splitOrder(this, unit, subs, spec);
+    unit.startTask(this, own);
+    unit.orderedSubs = children.map((c) => c.unit.id);
+    for (const c of children) this.issueOrder(c.unit.id, { task: c.spec });
+  }
+
+  /** Task status of an entity or unit, counting subordinates still carrying out its order. */
+  orderStatus(owner: Taskable): TaskStatus | 'none' {
+    const own = owner.taskStatus();
+    if (own === 'running') return own;
+    const unit = this.units.get(owner.id);
+    for (const id of unit?.orderedSubs ?? []) {
+      if (this.pendingOrders.some((o) => o.targetId === id)) return 'running';
+      const sub = this.units.get(id);
+      if (sub && this.orderStatus(sub) === 'running') return 'running';
+    }
+    return own;
   }
 
   addGraphic(kind: GraphicKind, points: Vec2[], name?: string, force: ForceId = 1, id?: string): Graphic {
     if (points.length === 0) throw new Error('a graphic needs at least one point');
     if (kind === 'area' && points.length < 3) throw new Error('an area needs at least three points');
-    if ((kind === 'route' || kind === 'phaseLine') && points.length < 2) throw new Error(`a ${kind} needs at least two points`);
+    if ((kind === 'route' || kind === 'phaseLine' || kind === 'obstacle') && points.length < 2) throw new Error(`a ${kind} needs at least two points`);
+    if (kind === 'minefield' && points.length < 3) throw new Error('a minefield needs at least three points');
     const gid = id ?? this.nextId('G');
     this.bumpCounter(gid);
-    const label = { route: 'Route', area: 'Area', point: 'Point', phaseLine: 'PL' }[kind];
+    const label = { route: 'Route', area: 'Area', point: 'Point', phaseLine: 'PL', minefield: 'MF', obstacle: 'OBST' }[kind];
     const g: Graphic = { id: gid, kind, name: name ?? `${label} ${gid.slice(1)}`, points: points.map((p) => ({ x: p.x, y: p.y })), force };
     this.graphics.set(gid, g);
+    if (kind === 'minefield' || kind === 'obstacle') this.obstacles.changed();
     return g;
   }
 
@@ -336,10 +504,13 @@ export class Engine {
     const u = this.units.get(id);
     if (u) {
       for (const m of [...u.memberList]) this.deleteObject(m.id);
-      this.units.delete(id);
+      this.dropUnit(id);
       return;
     }
-    if (this.graphics.delete(id)) return;
+    if (this.graphics.delete(id)) {
+      this.obstacles.changed();
+      return;
+    }
     throw new Error(`unknown object ${id}`);
   }
 
@@ -464,13 +635,14 @@ export class Engine {
   }
 
   /** Assign a task directly; replaces any running plan on the target. */
-  assignTask(targetId: string, spec: TaskSpec): void {
+  /** Start a task now (no order delay). `cascade`: pass it on to subordinate units. */
+  assignTask(targetId: string, spec: TaskSpec, cascade = true): void {
     const t = this.resolveTarget(targetId);
     this.validateTask(spec);
     t.plan = null;
     t.assignedPlan = undefined;
     t.assignedTask = spec;
-    if (t instanceof Unit) t.startTask(this, spec);
+    if (t instanceof Unit) this.startOrder(t, spec, cascade);
     else this.setEntityTask(t, createTask(spec));
     this.log('task', `${t.name}: ${createTask(spec).describe(this)}`, t.id);
   }
@@ -492,6 +664,7 @@ export class Engine {
 
   stop(targetId: string): void {
     const t = this.resolveTarget(targetId);
+    this.pendingOrders = this.pendingOrders.filter((o) => o.targetId !== targetId);
     t.plan = null;
     t.assignedPlan = undefined;
     t.assignedTask = undefined;
@@ -552,7 +725,7 @@ export class Engine {
       u.withdrawn = true;
       u.plan = null;
       for (const m of u.memberList) m.roe = 'returnFire';
-      u.startTask(this, { type: 'moveTo', target: r.withdrawTo });
+      u.startTask(this, { type: 'moveTo', target: r.withdrawTo, covered: true });
       this.log('task', `${u.name}: strength ${alive}/${u.memberList.length}, withdrawing`, u.id);
     }
     for (const e of this.entities.values()) {
@@ -561,7 +734,7 @@ export class Engine {
       e.withdrawn = true;
       e.plan = null;
       e.roe = 'returnFire';
-      this.setEntityTask(e, createTask({ type: 'moveTo', target: r.withdrawTo }));
+      this.setEntityTask(e, createTask({ type: 'moveTo', target: r.withdrawTo, covered: true }));
       this.log('task', `${e.name}: weapons out of action, withdrawing`, e.id);
     }
   }
@@ -614,6 +787,21 @@ export class Engine {
         if (!this.terrain.inBounds(p.x, p.y)) throw new Error('destination is outside the terrain');
         break;
       }
+      case 'overwatch':
+      case 'defend':
+      case 'ambush':
+      case 'screen':
+        if (!this.terrain.inBounds(spec.position.x, spec.position.y)) throw new Error('position is outside the terrain');
+        if (spec.type === 'ambush') {
+          const g = this.graphics.get(spec.killZoneId);
+          if (!g || g.kind !== 'area') throw new Error(`unknown area ${spec.killZoneId}`);
+        }
+        break;
+      case 'search': {
+        const g = this.graphics.get(spec.areaId);
+        if (!g || g.kind !== 'area') throw new Error(`unknown area ${spec.areaId}`);
+        break;
+      }
       default:
         break;
     }
@@ -625,6 +813,13 @@ export class Engine {
     this.shots.push(shot);
     const shooter = this.entities.get(shot.shooterId);
     const target = shot.targetId ? this.entities.get(shot.targetId) : undefined;
+    // A vehicle with smoke grenades screens itself when a missile is fired at it.
+    if (target && !target.remote && target.alive && shot.weapon.guided && target.smokeLeft > 0) {
+      target.smokeLeft--;
+      const d = Math.hypot(shot.from.x - target.x, shot.from.y - target.y) || 1;
+      this.smoke.add({ x: target.x + ((shot.from.x - target.x) / d) * 30, y: target.y + ((shot.from.y - target.y) / d) * 30 }, 25, 45);
+      this.log('info', `${target.name} fired smoke grenades`, target.id);
+    }
     const at = target?.name ?? (shot.targetId ? 'target' : `(${Math.round(shot.to.x)}, ${Math.round(shot.to.y)})`);
     this.log('fire', `${shooter?.name ?? shot.shooterId} fired ${shot.weapon.name} at ${at} (${Math.round(shot.range)} m)`, shot.shooterId, shot.targetId, {
       from: shot.from,
@@ -633,6 +828,60 @@ export class Engine {
       indirect: shot.weapon.indirect || undefined,
     });
     for (const fn of this.listeners.fire) fn(shot);
+  }
+
+  /**
+   * Line of sight from an entity's eyes to a target's centre of mass, reusing the last
+   * answer while neither has moved (the result is the same; only the work is saved).
+   */
+  losCached(from: Entity, to: Entity): boolean {
+    const key = `${from.id}>${to.id}`;
+    const c = this.losMemo.get(key);
+    const v = this.terrainVersion * 1e6 + this.smoke.version;
+    if (c && c.ax === from.x && c.ay === from.y && c.az === from.z && c.bx === to.x && c.by === to.y && c.bz === to.z && c.v === v) return c.visible;
+    const visible = this.lineOfSight(from.eye, { x: to.x, y: to.y, z: to.z + 1.5 });
+    if (this.losMemo.size > 200_000) this.losMemo.clear();
+    this.losMemo.set(key, { ax: from.x, ay: from.y, az: from.z, bx: to.x, by: to.y, bz: to.z, v, visible });
+    return visible;
+  }
+
+  /** Line of sight through terrain, canopy and smoke (radar sees through smoke). */
+  lineOfSight(a: Vec3, b: Vec3, radar = false): boolean {
+    return this.terrain.lineOfSight(a, b) && (radar || !this.smoke.blocks(a, b));
+  }
+
+  /** A route for a domain, avoiding obstacles and the minefields `force` knows about. */
+  /**
+   * Plan a route for a force: round obstacles and known minefields, and with `avoidThreats`
+   * away from ground known enemies can see and cover with direct fire.
+   */
+  planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number, force?: ForceId, avoidThreats = false): Vec2[] | null {
+    let overlay = this.obstacles.overlay(force, domain);
+    const threat = avoidThreats && force !== undefined ? this.threats.overlay(force, domain) : null;
+    if (threat) overlay = overlay ? overlay.map((v, i) => v * threat[i]) : threat;
+    const route = this.terrain.planRoute(from, to, domain, offroadFactor, overlay);
+    return route && overlay && domain !== 'lifeform' ? this.obstacles.threadLanes(route, from) : route;
+  }
+
+  /** An entity set off a mine. */
+  mineStrike(e: Entity, field: Graphic): void {
+    const roll = this.rng.next();
+    const armor = e.type.armor;
+    // Kill / mobility-kill chances by armour; the rest of the time the blast does no lasting harm.
+    const [kill, mobility] = armor === 'lifeform' ? [0.5, 0] : armor === 'armored' ? [0.1, 0.75] : armor === 'light' ? [0.3, 0.6] : [0.6, 0.35];
+    let outcome = 'noEffect';
+    if (roll < kill) {
+      e.destroyed = true;
+      outcome = 'kill';
+    } else if (roll < kill + mobility) {
+      if (e.mobilityKill) e.destroyed = true;
+      e.mobilityKill = true;
+      outcome = e.destroyed ? 'kill' : 'mobility';
+    }
+    e.underFireUntil = this.time + 15;
+    this.log('detonation', `${e.name} struck a mine in ${field.name}${outcome === 'noEffect' ? ', no damage' : ''}`, e.id, undefined, { to: e.position, hit: outcome !== 'noEffect' });
+    this.obstacles.reveal(field, e.force);
+    if (outcome !== 'noEffect') this.afterDamage(e, outcome, undefined, `a mine in ${field.name}`);
   }
 
   /** Munitions currently in flight. */
@@ -654,6 +903,11 @@ export class Engine {
 
   private reportDetonation(det: Detonation): void {
     const shot = det.shot;
+    if (det.smoke) {
+      this.log('detonation', `${shot.weapon.name.replace(/\s*\([^)]*\)$/, '')} smoke round at (${Math.round(det.location.x)}, ${Math.round(det.location.y)})`, shot.shooterId, undefined, { to: det.location, hit: false, weaponId: shot.weapon.id });
+      for (const fn of this.listeners.detonation) fn(det);
+      return;
+    }
     if (det.effects) {
       const names = det.effects.map((f) => `${this.nameOf(f.entityId)}${f.outcome === 'kill' ? ' destroyed' : ` ${f.outcome} kill`}`);
       const at = `(${Math.round(det.location.x)}, ${Math.round(det.location.y)})`;
@@ -685,7 +939,7 @@ export class Engine {
     if (target) this.afterDamage(target, det.outcome, shot.shooterId);
   }
 
-  private afterDamage(target: Entity, outcome: string, byId?: string): void {
+  afterDamage(target: Entity, outcome: string, byId?: string, cause?: string): void {
     if ((outcome === 'kill' || outcome === 'mobility') && !target.remote) {
       // Passengers of a knocked-out carrier: some die with it, the rest bail out.
       if (outcome === 'kill') {
@@ -704,11 +958,32 @@ export class Engine {
       target.plan = null;
       target.steer = null;
       target.contacts.clear();
-      const by = byId ? this.nameOf(byId) : 'unknown';
+      const by = byId ? this.nameOf(byId) : (cause ?? 'unknown');
       this.log('destroyed', `${target.name} destroyed by ${by}`, target.id, byId);
     } else if (outcome === 'mobility' || outcome === 'firepower') {
       this.log('damaged', `${target.name} suffered a ${outcome} kill`, target.id, byId);
     }
+  }
+
+  /** Turn optional model parts on or off. */
+  setRules(rules: SimulationRules): void {
+    for (const k of Object.keys(DEFAULT_RULES) as (keyof SimulationRules)[]) if (typeof rules[k] === 'boolean') this.rules[k] = rules[k]!;
+    if (!this.rules.suppression) for (const e of this.entities.values()) e.suppression = 0;
+  }
+
+  /** Change the time of day and weather. `time` is the time of day at the scenario's start. */
+  setEnvironment(env: Environment): void {
+    this.environment = normalizeEnvironment(env, this.environment);
+    this.updateEnvironment();
+  }
+
+  private updateEnvironment(): void {
+    this.env = environmentAt(this.environment, this.terrain.spec.origin.lat, this.time);
+  }
+
+  /** Give an entity a task without changing what was assigned to it (internal behaviours). */
+  assignTaskInternal(e: Entity, spec: TaskSpec): void {
+    this.setEntityTask(e, createTask(spec));
   }
 
   /** Catalog weapon with a given DIS munition type, if any. */
@@ -788,6 +1063,8 @@ export class Engine {
     // Round so repeated 0.1 s steps don't accumulate floating-point noise (900.0000000001).
     this.time = Math.round((this.time + dt) * 1e6) / 1e6;
     this.spatial.invalidate();
+    this.deliverOrders();
+    decaySuppression(this, dt);
     for (const u of this.units.values()) u.update(this);
     for (const u of this.units.values()) u.plan?.update(this, u);
 
@@ -802,7 +1079,12 @@ export class Engine {
         e.halted = halt;
         if (!e.unit || e.unit.leader === e) this.log('task', `${e.name}: ${halt ? 'halted on contact' : 'resuming'}`, e.id);
       }
-      if (halt) {
+      const pinned = isPinned(this, e);
+      if (pinned !== e.pinned) {
+        e.pinned = pinned;
+        if (!e.unit || e.unit.leader === e) this.log('info', `${e.name}: ${pinned ? 'pinned down' : 'moving again'}`, e.id);
+      }
+      if (halt || pinned) {
         // Stop and fight; the task keeps its progress and resumes afterwards.
         e.steer = { x: e.x, y: e.y, speed: 0, arrive: true };
       } else if (task && task.status === 'running') {
@@ -816,14 +1098,30 @@ export class Engine {
       }
     }
 
+    const ground = groundFactor(this.env);
+    let hasObstacles = false;
+    // Out of fuel, vehicles stop where they are.
+    if (this.rules.fuel) for (const e of this.entities.values()) if (e.fuel <= 0 && e.domain !== 'air' && !e.remote) e.steer = null;
+    for (const g of this.graphics.values()) if (g.kind === 'minefield' || g.kind === 'obstacle') hasObstacles = true;
     for (const e of this.entities.values()) {
       if (!e.embarkedIn) {
-        stepMovement(e, this.terrain, dt);
+        if (hasObstacles && !e.remote && !e.destroyed && (e.domain === 'ground' || e.domain === 'lifeform')) {
+          const prev = { x: e.x, y: e.y };
+          stepMovement(e, this.terrain, dt, ground);
+          this.obstacles.afterMove(e, prev);
+        } else {
+          stepMovement(e, this.terrain, dt, ground);
+        }
         continue;
       }
       const c = this.entities.get(e.embarkedIn);
       if (c) this.syncPassenger(e, c);
       else e.embarkedIn = undefined;
+    }
+    for (const e of this.entities.values()) {
+      if (this.rules.fuel && e.type.endurance) burnFuel(this, e, dt);
+      // Moving out of a prepared position gives it up.
+      if (e.prepared && e.speed > 0.5) e.prepared = undefined;
     }
 
     for (const e of this.entities.values()) {
@@ -834,7 +1132,13 @@ export class Engine {
         updateSensors(this, e);
       }
     }
-    if (Math.round(this.time * 10) % 10 === 0) checkCallsForFire(this);
+    if (Math.round(this.time * 10) % 10 === 0) {
+      this.updateEnvironment();
+      this.smoke.expire(windVector(this.env));
+      checkCallsForFire(this);
+      updateMorale(this);
+      updateResupply(this);
+    }
     for (const e of this.entities.values()) updateCombat(this, e);
     this.processImpacts();
     for (const fn of this.listeners.step) fn(this.time);
@@ -854,7 +1158,12 @@ export class Engine {
     this.units.clear();
     this.graphics.clear();
     this.shots = [];
+    this.pendingOrders = [];
     this.sensorDue.clear();
+    this.losMemo.clear();
+    this.smoke.clear();
+    this.threats.clear();
+    this.obstacles.changed();
     this.counters = { E: 0, U: 0, G: 0 };
     this.disCounter = 0;
     this.time = 0;
@@ -895,12 +1204,26 @@ export class Engine {
       this.terrainVersion++;
     }
     this.rng = new Rng(spec.seed);
+    this.rules = { ...DEFAULT_RULES };
+    this.setRules(s.rules ?? {});
+    this.environment = normalizeEnvironment(s.environment);
     this.events = [];
     this.scenarioName = s.name;
     this.description = s.description ?? '';
     this.time = s.startTime ?? 0;
+    this.updateEnvironment();
     this.setHostilities(s.hostilities ?? [[1, 2]]);
-    for (const g of s.graphics ?? []) this.addGraphic(g.kind, g.points, g.name, g.force, g.id);
+    for (const g of s.graphics ?? []) {
+      const added = this.addGraphic(g.kind, g.points, g.name, g.force, g.id);
+      // Minefields and obstacles keep their density, breached lanes and who knows about them.
+      const pt = (p: unknown) => !!p && Number.isFinite((p as Vec2).x) && Number.isFinite((p as Vec2).y);
+      if (typeof g.density === 'number' && g.density > 0) added.density = Math.min(3, g.density);
+      const lanes = Array.isArray(g.lanes) ? g.lanes.filter((l) => pt(l?.from) && pt(l?.to)) : [];
+      if (lanes.length) added.lanes = lanes.map((l) => ({ from: { x: l.from.x, y: l.from.y }, to: { x: l.to.x, y: l.to.y } }));
+      const known = Array.isArray(g.knownBy) ? g.knownBy.filter((f) => [0, 1, 2, 3].includes(f)) : [];
+      if (known.length) added.knownBy = known;
+      if (added.density !== undefined || added.lanes || added.knownBy) this.obstacles.changed();
+    }
     for (const r of s.entities ?? []) {
       const e = this.createEntity({ id: r.id, typeId: r.typeId, force: r.force, x: r.x, y: r.y, heading: r.heading, name: r.name, altitude: r.altitude });
       if (r.roe) e.roe = r.roe;
@@ -911,12 +1234,17 @@ export class Engine {
       const unit = this.groupUnit(u.memberIds, u.name, u.formation, u.spacing, u.echelon, u.id);
       if (u.reactions) unit.reactions = { ...u.reactions };
       unit.withdrawn = !!u.state?.withdrawn;
+      if (u.state?.morale !== undefined) unit.morale = u.state.morale;
+      if (u.state?.moraleState) unit.moraleState = u.state.moraleState;
+      if (u.state?.lossesSeen !== undefined) unit.lossesSeen = u.state.lossesSeen;
       const leader = u.state?.leaderId ? this.entities.get(u.state.leaderId) : undefined;
       if (leader && unit.memberList.includes(leader)) {
         unit.leader = leader;
         if (leader.alive) unit.formUp(this);
       }
     }
+    for (const u of s.units ?? []) if (u.parentId && this.units.has(u.parentId) && this.units.has(u.id)) this.units.get(u.id)!.parentId = u.parentId;
+    this.pendingOrders = (s.orders ?? []).filter((o) => this.entities.has(o.targetId) || this.units.has(o.targetId)).map((o) => ({ ...o }));
     // Tasks and plans last, since they can reference any object. Checkpoints resume them part-way.
     for (const r of s.entities ?? []) {
       const e = this.entities.get(r.id)!;
@@ -925,7 +1253,7 @@ export class Engine {
         this.assignPlan(r.id, r.plan);
         if (r.state?.planIndex !== undefined) e.plan!.resume(r.state.planIndex, r.state.taskState);
       } else if (r.task && !r.state?.taskDone) {
-        this.assignTask(r.id, r.state?.taskState ?? r.task);
+        this.assignTask(r.id, r.state?.taskState ?? r.task, false);
         e.assignedTask = r.task;
       } else if (r.task) {
         e.assignedTask = r.task;
@@ -939,7 +1267,7 @@ export class Engine {
         this.assignPlan(u.id, u.plan);
         if (u.state?.planIndex !== undefined) unit.plan!.resume(u.state.planIndex, u.state.taskState);
       } else if (u.task && !u.state?.taskDone) {
-        this.assignTask(u.id, u.state?.taskState ?? u.task);
+        this.assignTask(u.id, u.state?.taskState ?? u.task, false);
         unit.assignedTask = u.task;
         if (u.state && perMemberTask(u.task)) {
           // Each member resumes its own part (e.g. rounds left to fire); finished members stay idle.
@@ -952,6 +1280,7 @@ export class Engine {
         unit.assignedTask = u.task;
       }
     }
+    if (s.smoke) this.smoke.restore(s.smoke);
     for (const r of s.shots ?? []) {
       const weapon = this.catalog.weapons.get(r.weaponId);
       if (weapon) this.shots.push({ ...r, weapon });
@@ -981,6 +1310,13 @@ export class Engine {
     e.withdrawn = !!st.withdrawn;
     if (st.embarkedIn) e.embarkedIn = st.embarkedIn;
     if (st.callForFireAt !== undefined) e.callForFireAt = st.callForFireAt;
+    if (st.smokeLeft !== undefined) e.smokeLeft = st.smokeLeft;
+    if (st.suppression !== undefined) e.suppression = st.suppression;
+    if (st.morale !== undefined) e.morale = st.morale;
+    if (st.moraleState) e.moraleState = st.moraleState;
+    if (st.fuel !== undefined) e.fuel = st.fuel;
+    if (st.prepared) e.prepared = st.prepared;
+    if (st.supplies !== undefined) e.supplies = st.supplies;
   }
 
   private authoredState(e: Entity): EntityRecord['state'] {
@@ -1027,6 +1363,13 @@ export class Engine {
         embarkedIn: e.embarkedIn,
         taskDone: (!!e.assignedTask && !(e.task && e.task.status === 'running')) || undefined,
         callForFireAt: finite(e.callForFireAt),
+        smokeLeft: e.smokeLeft !== (e.type.smokeGrenades ?? 0) ? e.smokeLeft : undefined,
+        suppression: e.suppression || undefined,
+        morale: e.morale < 1 ? e.morale : undefined,
+        moraleState: e.moraleState !== 'steady' ? e.moraleState : undefined,
+        fuel: e.fuel < 1 ? e.fuel : undefined,
+        prepared: e.prepared,
+        supplies: e.type.supply && e.supplies !== e.type.supply.capacity ? e.supplies : undefined,
       },
     };
   }
@@ -1038,6 +1381,19 @@ export class Engine {
    */
   reseed(seed: number): void {
     this.rng = new Rng(seed);
+  }
+
+  /**
+   * Go back to a checkpoint taken earlier in this session (undo/redo): unlike loading a
+   * scenario, the event log and the rewind point are kept.
+   */
+  restoreCheckpoint(s: ScenarioFile, note: string): void {
+    const rewindPoint = this.initialScenario;
+    const events = this.events;
+    this.loadScenario(s);
+    this.initialScenario = rewindPoint;
+    this.events = events;
+    this.log('info', note);
   }
 
   /** Make the current state the point that rewind() returns to (done when a scenario is saved). */
@@ -1074,6 +1430,7 @@ export class Engine {
         formation: u.formation,
         spacing: u.spacing,
         echelon: u.echelon,
+        parentId: u.parentId,
         plan: u.assignedPlan,
         task: u.assignedTask,
         reactions: Object.keys(u.reactions).length ? u.reactions : undefined,
@@ -1083,9 +1440,12 @@ export class Engine {
           leaderId: u.leader?.id,
           withdrawn: u.withdrawn || undefined,
           taskDone: (!!u.assignedTask && u.taskStatus() !== 'running') || undefined,
+          morale: u.morale < 1 ? u.morale : undefined,
+          moraleState: u.moraleState !== 'steady' ? u.moraleState : undefined,
+          lossesSeen: u.lossesSeen || undefined,
         },
       })),
-      graphics: [...this.graphics.values()],
+      graphics: [...this.graphics.values()].map((g) => JSON.parse(JSON.stringify(g)) as Graphic),
       shots: this.shots.length === 0 ? undefined : this.shots.map((sh) => ({
         eventNumber: sh.eventNumber,
         shooterId: sh.shooterId,
@@ -1098,6 +1458,10 @@ export class Engine {
         range: sh.range,
       })),
       rngState: this.time === 0 ? undefined : this.rng.state,
+      rules: JSON.stringify(this.rules) === JSON.stringify(DEFAULT_RULES) ? undefined : { ...this.rules },
+      orders: this.pendingOrders.length ? this.pendingOrders.map((o) => ({ ...o })) : undefined,
+      environment: JSON.stringify(this.environment) === JSON.stringify(DEFAULT_ENVIRONMENT) ? undefined : { ...this.environment },
+      smoke: this.smoke.clouds.length ? this.smoke.clouds.map((c) => ({ ...c })) : undefined,
     };
   }
 
@@ -1135,6 +1499,13 @@ export class Engine {
       withdrawn: e.withdrawn || undefined,
       embarkedIn: e.embarkedIn,
       passengers: riders?.length ? riders : undefined,
+      suppression: e.suppression ? Math.round(e.suppression * 100) / 100 : undefined,
+      pinned: e.pinned || undefined,
+      morale: e.unit || !this.rules.morale ? undefined : Math.round(e.morale * 100) / 100,
+      moraleState: e.unit || !this.rules.morale || e.moraleState === 'steady' ? undefined : e.moraleState,
+      fuel: e.type.endurance && this.rules.fuel ? Math.round(e.fuel * 1000) / 1000 : undefined,
+      supplies: e.type.supply ? Math.round(e.supplies * 100) / 100 : undefined,
+      prepared: e.prepared,
     };
   }
 
@@ -1146,6 +1517,13 @@ export class Engine {
       if (list) list.push(e.id);
       else passengers.set(e.embarkedIn, [e.id]);
     }
+    const children = new Map<string, string[]>();
+    for (const u of this.units.values()) {
+      if (!u.parentId) continue;
+      const list = children.get(u.parentId);
+      if (list) list.push(u.id);
+      else children.set(u.parentId, [u.id]);
+    }
     const units: UnitSnapshot[] = [...this.units.values()].map((u) => {
       const c = u.centroid();
       const leaderTask = u.leader?.task;
@@ -1155,6 +1533,8 @@ export class Engine {
         force: u.force,
         echelon: u.echelon,
         formation: u.formation,
+        parentId: u.parentId,
+        childIds: children.get(u.id),
         leaderId: u.leader?.id,
         memberIds: u.memberList.map((m) => m.id),
         x: c.x,
@@ -1163,6 +1543,8 @@ export class Engine {
         plan: u.plan?.describe(this),
         reactions: Object.keys(u.reactions).length ? u.reactions : undefined,
         withdrawn: u.withdrawn || undefined,
+        morale: this.rules.morale ? Math.round(u.morale * 100) / 100 : undefined,
+        moraleState: this.rules.morale ? u.moraleState : undefined,
       };
     });
     return {
@@ -1173,7 +1555,32 @@ export class Engine {
       entities: [...this.entities.values()].map((e) => this.snapshotEntity(e, passengers)),
       units,
       graphics: [...this.graphics.values()],
+      smoke: this.smoke.clouds.length ? this.smoke.clouds : undefined,
+      environment: this.env,
+      orders: this.pendingOrders.length
+        ? this.pendingOrders.map((o) => ({ targetId: o.targetId, text: this.describeOrder(o), due: o.due }))
+        : undefined,
+      schedule: this.schedule(),
     };
+  }
+
+  /** Plan steps that wait for a simulation time still to come, with what follows them. */
+  private schedule(): SimState['schedule'] {
+    const out: NonNullable<SimState['schedule']> = [];
+    const owners: (Unit | Entity)[] = [...this.units.values(), ...[...this.entities.values()].filter((e) => !e.unit)];
+    for (const o of owners) {
+      const p = o.plan;
+      if (!p || p.finished) continue;
+      const sts = p.plan.statements;
+      for (let i = p.index; i < sts.length; i++) {
+        const st = sts[i];
+        if (st.kind !== 'waitUntil' || st.condition.type !== 'simTime' || st.condition.time <= this.time) continue;
+        const next = sts[i + 1];
+        out.push({ targetId: o.id, time: st.condition.time, text: `${this.nameOf(o.id)}: ${next ? describeStatement(next, this) : 'plan continues'}` });
+      }
+    }
+    out.sort((a, b) => a.time - b.time);
+    return out.length ? out.slice(0, 200) : undefined;
   }
 
   /** Planned path for an entity's current move, for display. */

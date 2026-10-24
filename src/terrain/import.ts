@@ -8,7 +8,9 @@ import proj4 from 'proj4';
 import { LocalFrame } from '../dis/geodesy.js';
 import { pointInPolygon } from '../shared/math.js';
 import { bytesToBase64 } from '../shared/terrainGrid.js';
-import type { TerrainDataset, TerrainSpec, Town, Vec2 } from '../shared/types.js';
+import { LAND_COVER } from '../shared/terrainGrid.js';
+import type { Building, TerrainDataset, TerrainSpec, Town, Vec2 } from '../shared/types.js';
+import { type BBox, type LandCoverSampler, majorityClass, WORLDCOVER_CLASSES } from './landcover.js';
 import { simplifyPolyline } from '../sim/pathfinding.js';
 import { Terrain } from '../sim/terrain.js';
 
@@ -17,6 +19,10 @@ export interface ImportOptions {
   dem: ArrayBuffer;
   /** GeoJSON FeatureCollection (WGS-84 lon/lat), e.g. from OpenStreetMap. */
   features?: GeoJsonCollection;
+  /** More features, fetched for the extent once it is known (e.g. from the Overpass API). */
+  fetchFeatures?: (bbox: BBox) => Promise<GeoJsonCollection>;
+  /** Land cover classes (ESA WorldCover codes) for the extent. */
+  landCover?: (bbox: BBox) => Promise<LandCoverSampler>;
   /** Dataset name: letters, digits, - and _. */
   name: string;
   title?: string;
@@ -166,6 +172,16 @@ export async function importTerrain(opts: ImportOptions): Promise<TerrainDataset
   }
   if (missing > n * 0.5) throw new Error('most of the extent has no elevation data; check the centre and size');
 
+  // The extent in WGS-84, for fetching data.
+  const bboxCorners = [toLonLat(0, 0), toLonLat(extent, 0), toLonLat(0, extent), toLonLat(extent, extent)];
+  const bbox: BBox = {
+    west: Math.min(...bboxCorners.map((c) => c[0])),
+    east: Math.max(...bboxCorners.map((c) => c[0])),
+    south: Math.min(...bboxCorners.map((c) => c[1])),
+    north: Math.max(...bboxCorners.map((c) => c[1])),
+  };
+  const features = [...(opts.features?.features ?? []), ...(opts.fetchFeatures ? (await opts.fetchFeatures(bbox)).features : [])];
+
   // Features.
   const forest = new Uint8Array(n);
   const water = new Uint8Array(n);
@@ -260,10 +276,21 @@ export async function importTerrain(opts: ImportOptions): Promise<TerrainDataset
   const polygons = (g: Geometry): LonLat[][][] => (g.type === 'Polygon' ? [g.coordinates as LonLat[][]] : g.type === 'MultiPolygon' ? (g.coordinates as LonLat[][][]) : []);
   const lines = (g: Geometry): LonLat[][] => (g.type === 'LineString' ? [g.coordinates as LonLat[]] : g.type === 'MultiLineString' ? (g.coordinates as LonLat[][]) : []);
 
-  for (const f of opts.features?.features ?? []) {
+  const buildings: Building[] = [];
+  for (const f of features) {
     const g = f.geometry;
     if (!g) continue;
     const p = f.properties ?? {};
+    if (p.building !== undefined && p.building !== 'no') {
+      for (const poly of polygons(g)) {
+        const pts = (poly[0] ?? []).map(toLocal);
+        if (pts.length < 3 || !pts.some(inside)) continue;
+        // Drop the closing point; keep decimetre precision.
+        const ring = pts[0].x === pts[pts.length - 1].x && pts[0].y === pts[pts.length - 1].y ? pts.slice(0, -1) : pts;
+        buildings.push({ pts: ring.flatMap((q) => [Math.round(q.x * 10) / 10, Math.round(q.y * 10) / 10]), h: buildingHeight(p) });
+      }
+      continue;
+    }
     const kind = String(p.kind ?? '');
     const isWater = kind === 'water' || p.natural === 'water' || p.water !== undefined || p.landuse === 'reservoir' || p.landuse === 'basin' || p.waterway === 'riverbank';
     const isForest = kind === 'forest' || p.natural === 'wood' || p.landuse === 'forest';
@@ -280,6 +307,25 @@ export async function importTerrain(opts: ImportOptions): Promise<TerrainDataset
   const roadPosts = new Uint8Array(n);
   for (const road of roads) traceLine(road.map((q) => toLonLat(q.x, q.y)), roadPosts);
   for (let i = 0; i < n; i++) if (river[i] && !roadPosts[i]) water[i] = 1;
+  // Land cover: the most common class over a few samples in each post's cell.
+  let landCover: Uint8Array | null = null;
+  if (opts.landCover) {
+    const sample = await opts.landCover(bbox);
+    landCover = new Uint8Array(n);
+    const k = Math.max(1, Math.min(5, Math.round(cellSize / 10)));
+    for (let r = 0; r < cols; r++) {
+      for (let c = 0; c < cols; c++) {
+        const pts: [number, number][] = [];
+        for (let a = 0; a < k; a++) for (let b = 0; b < k; b++) pts.push(toLonLat((c - 0.5 + (b + 0.5) / k) * cellSize, (r - 0.5 + (a + 0.5) / k) * cellSize));
+        const code = majorityClass(sample, pts);
+        const cls = code === null ? LAND_COVER.none : (WORLDCOVER_CLASSES[code] ?? LAND_COVER.none);
+        const i = r * cols + c;
+        landCover[i] = cls;
+        if (cls === LAND_COVER.forest) forest[i] = 1;
+        if (cls === LAND_COVER.water && heights[i] >= 0) water[i] = 1;
+      }
+    }
+  }
   // No forest on water or roads.
   for (let i = 0; i < n; i++) if (water[i] || roadPosts[i] || heights[i] < 0) forest[i] = 0;
 
@@ -304,7 +350,7 @@ export async function importTerrain(opts: ImportOptions): Promise<TerrainDataset
     towns: towns.length,
     dataset: opts.name,
   };
-  const terrain = new Terrain(spec, heights, forest, roads, towns, water.some((v) => v) ? water : null);
+  const terrain = new Terrain(spec, heights, forest, roads, towns, water.some((v) => v) ? water : null, { landCover, buildings });
   const data = terrain.toData();
   return {
     format: 'werforces-terrain',
@@ -315,4 +361,18 @@ export async function importTerrain(opts: ImportOptions): Promise<TerrainDataset
     ...data,
     waterB64: terrain.water ? bytesToBase64(terrain.water) : undefined,
   };
+}
+
+/** Height of an OpenStreetMap building: its height tag, else its levels, else a typical height for its type. */
+export function buildingHeight(p: Record<string, unknown>): number {
+  const metres = parseFloat(String(p.height ?? p['building:height'] ?? '').replace(',', '.'));
+  if (Number.isFinite(metres) && metres > 0) return Math.min(250, Math.round(metres));
+  const levels = parseFloat(String(p['building:levels'] ?? ''));
+  if (Number.isFinite(levels) && levels > 0) return Math.min(250, Math.round(levels * 3 + 1));
+  const type = String(p.building);
+  if (['garage', 'garages', 'shed', 'hut', 'carport', 'roof', 'kiosk'].includes(type)) return 3;
+  if (['house', 'detached', 'semidetached_house', 'terrace', 'bungalow', 'farm', 'residential'].includes(type)) return 7;
+  if (['apartments', 'hotel', 'office', 'hospital', 'dormitory'].includes(type)) return 15;
+  if (['church', 'cathedral', 'tower'].includes(type)) return 20;
+  return 8;
 }

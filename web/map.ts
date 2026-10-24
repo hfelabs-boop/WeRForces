@@ -1,6 +1,6 @@
 // 2D tactical map: terrain, tactical graphics, entities/units, effects and editing tools.
 
-import { FORCE_NAMES, type EntitySnapshot, type Graphic, type GraphicKind, type SimEvent, type SimState, type TerrainData, type UnitSnapshot, type Vec2 } from '../src/shared/types.js';
+import { FORCE_NAMES, type Building, type EntitySnapshot, type Graphic, type GraphicKind, type SimEvent, type SimState, type TerrainData, type UnitSnapshot, type Vec2 } from '../src/shared/types.js';
 import { TerrainGrid } from '../src/shared/terrainGrid.js';
 import { drawSymbol, FORCE_COLORS } from './symbols.js';
 import { renderTerrain } from './terrainRender.js';
@@ -10,10 +10,16 @@ export type MapMode =
   | { kind: 'place'; label: string; onPlace: (p: Vec2) => void }
   | { kind: 'draw'; graphic: GraphicKind; points: Vec2[]; onDone: (pts: Vec2[]) => void }
   | { kind: 'pickPoint'; label: string; onPick: (p: Vec2) => void }
-  | { kind: 'pickEntity'; label: string; onPick: (id: string) => void };
+  | { kind: 'pickEntity'; label: string; onPick: (id: string) => void }
+  /** Distance and bearing along clicked points; with two points, line of sight between them. */
+  | { kind: 'measure'; points: Vec2[]; los?: boolean | null };
 
 export interface MapCallbacks {
   select(id: string | null): void;
+  /** Shift-click: add to or remove from the selection. */
+  toggleSelect(id: string): void;
+  /** Shift-drag box: select these (added to the selection). */
+  selectMany(ids: string[]): void;
   contextMenu(world: Vec2, client: { x: number; y: number }, hitId: string | null): void;
   hover(world: Vec2 | null): void;
   dragEntity(id: string, world: Vec2): void;
@@ -52,6 +58,8 @@ export class MapView {
   private entityById = new Map<string, EntitySnapshot>();
   private unitById = new Map<string, UnitSnapshot>();
   selectedId: string | null = null;
+  /** Everything selected (multi-selection), including selectedId. */
+  selectedIds = new Set<string>();
   selectedPath: Vec2[] = [];
   mode: MapMode = { kind: 'select' };
   layers: MapLayers = { labels: true, grid: true, contacts: true, ranges: false, paths: true, aggregate: 'auto' };
@@ -68,7 +76,7 @@ export class MapView {
   private effects: Effect[] = [];
   private dirty = true;
   private mouse: { x: number; y: number } | null = null;
-  private drag: { startX: number; startY: number; cx: number; cy: number; entityId?: string; moved: boolean; button: number } | null = null;
+  private drag: { startX: number; startY: number; cx: number; cy: number; entityId?: string; moved: boolean; button: number; box?: boolean } | null = null;
 
   constructor(
     readonly container: HTMLElement,
@@ -94,7 +102,44 @@ export class MapView {
     this.terrain = data;
     this.grid = TerrainGrid.fromData(data);
     this.terrainImage = renderTerrain(this.grid);
+    this.buildingBuckets = bucketBuildings(data.buildings ?? []);
     this.fit();
+  }
+
+  /** Line of sight between two ground points, eyes 2 m up (set by the app). */
+  losCheck: (a: Vec2, b: Vec2) => Promise<boolean | null> = async () => null;
+
+  /** The entity type's 2525 SIDC pattern (set by the app from the catalog). */
+  sidcOf: (typeId: string) => string | undefined = () => undefined;
+
+  /** Buildings grouped into square buckets, for drawing only those in view. */
+  private buildingBuckets = new Map<string, Building[]>();
+
+  private drawBuildings(): void {
+    // Footprints are only legible when zoomed in.
+    if (!this.buildingBuckets.size || this.scale < 0.25) return;
+    const ctx = this.ctx;
+    const a = this.toWorld(0, this.height);
+    const b = this.toWorld(this.width, 0);
+    ctx.fillStyle = 'rgba(96,86,80,0.85)';
+    ctx.strokeStyle = 'rgba(40,34,30,0.9)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    // One bucket of margin: a building is filed under its first corner.
+    for (let by = Math.floor(a.y / BUCKET) - 1; by <= Math.floor(b.y / BUCKET) + 1; by++) {
+      for (let bx = Math.floor(a.x / BUCKET) - 1; bx <= Math.floor(b.x / BUCKET) + 1; bx++) {
+        for (const bld of this.buildingBuckets.get(`${bx},${by}`) ?? []) {
+          for (let i = 0; i < bld.pts.length; i += 2) {
+            const s = this.toScreen({ x: bld.pts[i], y: bld.pts[i + 1] });
+            if (i === 0) ctx.moveTo(s.x, s.y);
+            else ctx.lineTo(s.x, s.y);
+          }
+          ctx.closePath();
+        }
+      }
+    }
+    ctx.fill();
+    if (this.scale >= 0.8) ctx.stroke();
   }
 
   setState(state: SimState): void {
@@ -219,7 +264,7 @@ export class MapView {
       const pts = g.points.map((p) => this.toScreen(p));
       for (let i = 0; i < pts.length; i++) {
         if (Math.hypot(pts[i].x - sx, pts[i].y - sy) < 8) return g.id;
-        const j = g.kind === 'area' ? (i + 1) % pts.length : i + 1;
+        const j = g.kind === 'area' || g.kind === 'minefield' ? (i + 1) % pts.length : i + 1;
         if (j < pts.length && distToSeg(sx, sy, pts[i], pts[j]) < 5) return g.id;
       }
     }
@@ -287,6 +332,21 @@ export class MapView {
         }
         return;
       }
+      if (m.kind === 'measure') {
+        m.points.push(world);
+        m.los = undefined;
+        if (m.points.length === 2) {
+          const [a, b] = m.points;
+          void this.losCheck(a, b).then((v) => {
+            if (this.mode === m && m.points.length === 2) {
+              m.los = v;
+              this.dirty = true;
+            }
+          });
+        }
+        this.dirty = true;
+        return;
+      }
       if (m.kind === 'draw') {
         if (m.graphic === 'point') {
           this.setMode({ kind: 'select' });
@@ -298,6 +358,12 @@ export class MapView {
         return;
       }
       const hit = this.hitTest(sx, sy);
+      if (e.shiftKey) {
+        // Shift: toggle what was clicked, or drag a box to select everything inside it.
+        if (hit) this.cb.toggleSelect(hit);
+        else this.drag = { startX: sx, startY: sy, cx: this.cx, cy: this.cy, moved: false, button: 0, box: true };
+        return;
+      }
       this.cb.select(hit);
       const ent = hit ? this.entityById.get(hit) : undefined;
       this.drag = {
@@ -320,7 +386,7 @@ export class MapView {
       const d = this.drag;
       if (d) {
         if (Math.hypot(sx - d.startX, sy - d.startY) > 3) d.moved = true;
-        if (d.moved && !d.entityId) {
+        if (d.moved && !d.entityId && !d.box) {
           this.cx = d.cx - (sx - d.startX) / this.scale;
           this.cy = d.cy + (sy - d.startY) / this.scale;
         }
@@ -334,6 +400,17 @@ export class MapView {
       if (d?.entityId && d.moved) {
         const r = c.getBoundingClientRect();
         this.cb.dragEntity(d.entityId, this.toWorld(e.clientX - r.left, e.clientY - r.top));
+      }
+      if (d?.box && d.moved) {
+        const r = c.getBoundingClientRect();
+        const a = this.toWorld(Math.min(d.startX, e.clientX - r.left), Math.max(d.startY, e.clientY - r.top));
+        const b = this.toWorld(Math.max(d.startX, e.clientX - r.left), Math.min(d.startY, e.clientY - r.top));
+        const ids = this.visibleSymbols()
+          .filter((s) => s.pos.x >= a.x && s.pos.x <= b.x && s.pos.y >= a.y && s.pos.y <= b.y)
+          .filter((s) => !s.entity || (s.entity.damage !== 'destroyed' && s.entity.contactAge === undefined))
+          .map((s) => s.id);
+        if (ids.length) this.cb.selectMany(ids);
+        this.dirty = true;
       }
     });
 
@@ -351,8 +428,9 @@ export class MapView {
       if ((e.target as HTMLElement)?.closest('input, textarea, select')) return;
       if (e.key === 'Escape') this.setMode({ kind: 'select' });
       if (e.key === 'Enter' && this.mode.kind === 'draw') this.finishDraw();
-      if (e.key === 'Backspace' && this.mode.kind === 'draw') {
+      if (e.key === 'Backspace' && (this.mode.kind === 'draw' || this.mode.kind === 'measure')) {
         this.mode.points.pop();
+        if (this.mode.kind === 'measure') this.mode.los = undefined;
         this.dirty = true;
       }
     });
@@ -362,7 +440,7 @@ export class MapView {
     const m = this.mode;
     if (m.kind !== 'draw') return;
     const pts = dedupe(m.points);
-    const min = m.graphic === 'area' ? 3 : m.graphic === 'point' ? 1 : 2;
+    const min = m.graphic === 'area' || m.graphic === 'minefield' ? 3 : m.graphic === 'point' ? 1 : 2;
     this.setMode({ kind: 'select' });
     if (pts.length >= min) m.onDone(pts);
   }
@@ -394,6 +472,9 @@ export class MapView {
     if (this.layers.grid) this.drawGrid(size);
     this.drawRoads();
     this.drawTowns();
+    this.drawBuildings();
+    this.drawNight();
+    this.drawSmoke();
     this.drawGraphics();
     this.drawSelectionOverlays();
     this.drawSymbols();
@@ -487,13 +568,23 @@ export class MapView {
       ctx.setLineDash(g.kind === 'phaseLine' ? [10, 5] : []);
       ctx.beginPath();
       pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
-      if (g.kind === 'area') {
+      if (g.kind === 'area' || g.kind === 'minefield') {
         ctx.closePath();
-        ctx.fillStyle = hexAlpha(col, 0.16);
+        ctx.fillStyle = hexAlpha(col, g.kind === 'minefield' ? 0.22 : 0.16);
         ctx.fill();
       }
       ctx.stroke();
       ctx.setLineDash([]);
+      if (g.kind === 'minefield') this.drawMines(g, pts);
+      if (g.kind === 'obstacle') {
+        // Teeth along the line.
+        for (let i = 1; i < pts.length; i++) teeth(ctx, pts[i - 1], pts[i]);
+      }
+      if (g.lanes?.length) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        for (const l of g.lanes) laneMarker(ctx, this.toScreen(l.from), this.toScreen(l.to), Math.max(4, 15 * this.scale));
+      }
       if (g.kind === 'route') {
         for (let i = 1; i < pts.length; i++) arrow(ctx, pts[i - 1], pts[i]);
         for (const p of pts) {
@@ -516,9 +607,57 @@ export class MapView {
         ctx.stroke();
       }
       if (this.layers.labels) {
-        const anchor = g.kind === 'area' ? centroid(pts) : pts[0];
+        const anchor = g.kind === 'area' || g.kind === 'minefield' ? centroid(pts) : pts[0];
         label(ctx, g.name, anchor.x + 6, anchor.y - (g.kind === 'point' ? 16 : 4), '#fff', 'bold 11px system-ui');
       }
+    }
+  }
+
+  /** Mine symbols scattered inside a minefield (a fixed pattern, so they don't move as you pan). */
+  private drawMines(g: Graphic, pts: Vec2[]): void {
+    const ctx = this.ctx;
+    const xs = g.points.map((p) => p.x);
+    const ys = g.points.map((p) => p.y);
+    const step = Math.max(40, 18 / this.scale);
+    const snap = (v: number) => Math.ceil(v / step) * step;
+    ctx.save();
+    ctx.beginPath();
+    pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.closePath();
+    ctx.clip();
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    let n = 0;
+    for (let y = snap(Math.min(...ys)); y <= Math.max(...ys) && n < 400; y += step) {
+      for (let x = snap(Math.min(...xs)) + ((y / step) % 2 ? step / 2 : 0); x <= Math.max(...xs) && n < 400; x += step, n++) {
+        const s = this.toScreen({ x, y });
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  /** Shade the map at night and in twilight (graphics and symbols stay bright). */
+  private drawNight(): void {
+    const light = this.state?.environment?.light ?? 1;
+    if (light >= 1) return;
+    this.ctx.fillStyle = `rgba(8, 14, 36, ${(0.55 * (1 - light)).toFixed(3)})`;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+  }
+
+  private drawSmoke(): void {
+    const ctx = this.ctx;
+    for (const c of this.state?.smoke ?? []) {
+      const s = this.toScreen(c);
+      const r = c.radius * this.scale;
+      const grad = ctx.createRadialGradient(s.x, s.y, r * 0.2, s.x, s.y, r);
+      grad.addColorStop(0, 'rgba(225,225,225,0.75)');
+      grad.addColorStop(1, 'rgba(225,225,225,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
@@ -588,11 +727,20 @@ export class MapView {
           ctx.stroke();
         }
         const inSelUnit = (selUnit && e.unitId === selUnit.id) || (selEntityUnit && e.unitId === selEntityUnit && e.id !== this.selectedId);
+        if (e.suppression && e.suppression >= 0.15 && e.damage !== 'destroyed') {
+          // Red halo: how hard the entity is being suppressed.
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, symSize * 1.35, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255,70,50,${Math.min(0.9, e.suppression)})`;
+          ctx.lineWidth = e.pinned ? 3 : 2;
+          ctx.stroke();
+        }
         drawSymbol(ctx, p.x, p.y, symSize, e.force, e.domain, e.symbol, {
-          selected: e.id === this.selectedId,
+          selected: e.id === this.selectedId || this.selectedIds.has(e.id) || (this.selectedIds.size > 1 && !!e.unitId && this.selectedIds.has(e.unitId)),
           destroyed: e.damage === 'destroyed',
           damaged: e.damage === 'mobility' || e.damage === 'firepower',
           remote: e.remote,
+          sidc: this.sidcOf(e.typeId),
           // Fog of war: contacts fade as they go stale.
           alpha: e.contactAge !== undefined ? (e.contactAge > 5 ? 0.45 : 0.8) : inSelUnit || !selUnit ? 1 : 0.9,
         });
@@ -612,9 +760,10 @@ export class MapView {
         const leader = u.leaderId ? this.entityById.get(u.leaderId) : undefined;
         const alive = u.memberIds.filter((id) => this.entityById.get(id)?.damage !== 'destroyed').length;
         drawSymbol(ctx, p.x, p.y, symSize * 1.25, u.force, leader?.domain ?? 'ground', leader?.symbol ?? 'generic', {
-          selected: u.id === this.selectedId,
+          selected: u.id === this.selectedId || this.selectedIds.has(u.id),
           destroyed: alive === 0,
           echelon: u.echelon,
+          sidc: leader ? this.sidcOf(leader.typeId) : undefined,
         });
         if (leader && leader.speed > 0.5) {
           const len = symSize * 2 + Math.min(40, leader.speed * 0.6);
@@ -668,9 +817,59 @@ export class MapView {
     }
   }
 
+  private drawMeasure(m: Extract<MapMode, { kind: 'measure' }>): void {
+    const ctx = this.ctx;
+    const pts = [...m.points];
+    if (this.mouse) pts.push(this.toWorld(this.mouse.x, this.mouse.y));
+    if (!pts.length) return;
+    ctx.strokeStyle = m.los === false ? '#ff6060' : m.los === true ? '#70ff90' : '#ffe070';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 5]);
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const s = this.toScreen(p);
+      if (i === 0) ctx.moveTo(s.x, s.y);
+      else ctx.lineTo(s.x, s.y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+    let total = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      const d = Math.hypot(b.x - a.x, b.y - a.y);
+      total += d;
+      const brg = ((Math.atan2(b.x - a.x, b.y - a.y) * 180) / Math.PI + 360) % 360;
+      const sa = this.toScreen(a);
+      const sb = this.toScreen(b);
+      label(ctx, `${d >= 1000 ? `${(d / 1000).toFixed(2)} km` : `${Math.round(d)} m`}  ${String(Math.round(brg) % 360).padStart(3, '0')}°`, (sa.x + sb.x) / 2 + 6, (sa.y + sb.y) / 2 - 6, '#fff', 'bold 11px system-ui');
+    }
+    for (const p of m.points) {
+      const s = this.toScreen(p);
+      ctx.fillStyle = '#ffe070';
+      ctx.fillRect(s.x - 3, s.y - 3, 6, 6);
+    }
+    const end = this.toScreen(pts[pts.length - 1]);
+    const lines = [pts.length > 2 ? `total ${(total / 1000).toFixed(2)} km` : ''];
+    if (this.grid) lines.push(`elev ${Math.round(Math.max(0, this.grid.elevation(pts[pts.length - 1].x, pts[pts.length - 1].y)))} m`);
+    if (m.points.length === 2) lines.push(m.los === undefined ? 'line of sight…' : m.los === null ? '' : m.los ? 'line of sight: clear' : 'line of sight: blocked');
+    lines.filter(Boolean).forEach((t, i) => label(ctx, t, end.x + 10, end.y + 16 + i * 13, '#ffe070', '11px system-ui'));
+  }
+
   private drawModeOverlay(): void {
     const ctx = this.ctx;
     const m = this.mode;
+    if (m.kind === 'measure') this.drawMeasure(m);
+    const d = this.drag;
+    if (d?.box && d.moved && this.mouse) {
+      ctx.strokeStyle = '#fff';
+      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = 1;
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(d.startX, d.startY, this.mouse.x - d.startX, this.mouse.y - d.startY);
+      ctx.strokeRect(d.startX, d.startY, this.mouse.x - d.startX, this.mouse.y - d.startY);
+      ctx.setLineDash([]);
+    }
     if (m.kind === 'draw' && m.points.length) {
       ctx.beginPath();
       m.points.forEach((p, i) => {
@@ -679,7 +878,7 @@ export class MapView {
         else ctx.lineTo(s.x, s.y);
       });
       if (this.mouse) ctx.lineTo(this.mouse.x, this.mouse.y);
-      if (m.graphic === 'area') ctx.closePath();
+      if (m.graphic === 'area' || m.graphic === 'minefield') ctx.closePath();
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 4]);
@@ -697,7 +896,9 @@ export class MapView {
           ? `Drawing ${m.graphic}: click to add points, double-click/Enter/right-click to finish, Backspace to undo, Esc to cancel`
           : m.kind === 'place'
             ? `Click to place ${m.label} (Shift+click to keep placing, Esc to cancel)`
-            : `${m.label} (Esc to cancel)`;
+            : m.kind === 'measure'
+              ? 'Measuring: click points for distance and bearing (two points: line of sight), Backspace to undo, Esc to finish'
+              : `${m.label} (Esc to cancel)`;
       ctx.font = '12px system-ui';
       const w = ctx.measureText(text).width + 16;
       ctx.fillStyle = 'rgba(10,14,20,0.8)';
@@ -802,3 +1003,47 @@ export function forceName(f: number): string {
 }
 
 export type { Graphic };
+
+/** Obstacle teeth along a segment. */
+function teeth(ctx: CanvasRenderingContext2D, a: Vec2, b: Vec2): void {
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (len < 4) return;
+  const ux = (b.x - a.x) / len;
+  const uy = (b.y - a.y) / len;
+  ctx.beginPath();
+  for (let d = 6; d < len; d += 12) {
+    const x = a.x + ux * d;
+    const y = a.y + uy * d;
+    ctx.moveTo(x - ux * 4, y - uy * 4);
+    ctx.lineTo(x - uy * 7, y + ux * 7);
+    ctx.lineTo(x + ux * 4, y + uy * 4);
+  }
+  ctx.stroke();
+}
+
+/** A breached lane: two edge lines with arrows through. */
+function laneMarker(ctx: CanvasRenderingContext2D, a: Vec2, b: Vec2, half: number): void {
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const nx = (-(b.y - a.y) / len) * half;
+  const ny = ((b.x - a.x) / len) * half;
+  ctx.beginPath();
+  ctx.moveTo(a.x + nx, a.y + ny);
+  ctx.lineTo(b.x + nx, b.y + ny);
+  ctx.moveTo(a.x - nx, a.y - ny);
+  ctx.lineTo(b.x - nx, b.y - ny);
+  ctx.stroke();
+  arrow(ctx, a, b);
+}
+
+const BUCKET = 250;
+
+function bucketBuildings(list: Building[]): Map<string, Building[]> {
+  const out = new Map<string, Building[]>();
+  for (const b of list) {
+    const key = `${Math.floor(b.pts[0] / BUCKET)},${Math.floor(b.pts[1] / BUCKET)}`;
+    const l = out.get(key);
+    if (l) l.push(b);
+    else out.set(key, [b]);
+  }
+  return out;
+}

@@ -7,8 +7,10 @@ DIS simulation so each sees, and can engage, the other's entities.
 battlespace over UDP. VR-Forces, VBS, Bohemia's tools, many trainers and
 open-source viewers all speak it. WeRForces:
 
-- sends *Entity State*, *Fire* and *Detonation* PDUs for its own entities;
-- turns other simulations' PDUs into **remote entities**.
+- sends *Entity State*, *Fire* and *Detonation* PDUs for its own entities, and
+  radio (*Transmitter*, *Signal*) PDUs for its units' radio messages;
+- turns other simulations' PDUs into **remote entities**;
+- follows *Start/Resume* and *Stop/Freeze* from a simulation manager.
 
 Details are in the [DIS reference](../reference/dis.md).
 
@@ -31,10 +33,10 @@ npm start -- -s lakeside-patrol --port 8081 --dis --dis-address 127.255.255.255 
 Both print `DIS enabled: exercise 1, site …, app 3001, udp 127.255.255.255:3000`.
 
 Open **http://127.0.0.1:8080**. Within a second, Lakeside's boats, infantry,
-BRDMs and Hind appear around the southern lake. They have **dashed yellow
-outlines**, which mark them as remote. The Objects tree lists them with
-*(remote)*, and the toolbar pill reads something like
-*DIS ex 1 · 1:3001 · tx 150 rx 300 · 15 remote*.
+BRDMs and Hind appear around the southern lake. They have a **dashed yellow
+ring** around the symbol, which marks them as remote. The Objects tree lists
+them with *(remote)*, and the toolbar pill reads something like *DIS ex 1 ·
+1:3001 · tx 150 rx 300 · 15 remote*.
 
 Click a remote entity. The inspector shows its position and damage, and notes
 that it is simulated by another application. You cannot task it, but your forces
@@ -50,6 +52,7 @@ appear there as remote entities.
 | A moving entity | An Entity State PDU whenever the receiver's dead-reckoned estimate would be more than 1 m or 3° off. Between PDUs the receiver extrapolates, so the remote entity moves smoothly |
 | A stationary entity | One PDU every 5 s (heartbeat). If an entity is silent for 12 s, receivers remove it |
 | A shot | A Fire PDU, then a Detonation PDU when the round lands. If the target is remote, **its own simulation decides the damage** from the detonation |
+| A radio message (contact report, call for fire, order acknowledged) | A Signal PDU carrying the text. The receiver logs it as a `radio` event, e.g. *Viper Lead (DIS radio): Viper: contact, Mi-24V Hind at 1500 9000* (tick **radio** in the log header to see them) |
 
 ### Watch it: combat across simulations
 
@@ -120,9 +123,9 @@ WeRForces can therefore bridge a DIS exercise to TAK devices or GIS tools.
 
 ## Limitations
 
-- **No HLA.** The gateway is structured so an HLA/RPR-FOM binding can be added
-  alongside it.
-- Articulated parts, collisions, radio (Signal/Transmitter) and Simulation
-  Management PDUs are not handled.
+- **HLA** is not spoken directly. A separate bridge federate translates
+  between DIS and an HLA RPR FOM federation: see [HLA](../hla.md).
+- Articulated parts and collisions are not handled, and radios carry text
+  only (no voice).
 
 **Next:** [Tutorial 7: TAK, webhooks and GIS](07-tak-webhooks-and-gis.md).

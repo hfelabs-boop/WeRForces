@@ -9,6 +9,37 @@ import type { Engine } from '../sim/engine.js';
 import type { Entity } from '../sim/entity.js';
 import { ecefToEnuVector, ecefToGeodetic, enuToEcefVector, eulerToHeadingPitchRoll, headingPitchRollToEuler, LocalFrame } from './geodesy.js';
 import {
+  ACK_START_RESUME,
+  ACK_STOP_FREEZE,
+  ALL_ENTITIES,
+  clockTime,
+  DATUM_TEXT,
+  decodeComment,
+  decodeSignal,
+  decodeStartResume,
+  decodeStopFreeze,
+  decodeTransmitter,
+  encodeAcknowledge,
+  encodeComment,
+  encodeReceiver,
+  encodeSignal,
+  encodeStartResume,
+  encodeStopFreeze,
+  encodeTransmitter,
+  ENCODING_APPLICATION,
+  ENCODING_AUDIO,
+  ENCODING_RAW_BINARY,
+  PDU_ACKNOWLEDGE,
+  PDU_COMMENT,
+  PDU_RECEIVER,
+  PDU_SIGNAL,
+  PDU_START_RESUME,
+  PDU_STOP_FREEZE,
+  PDU_TRANSMITTER,
+  RECEIVER_ON_IDLE,
+  TRANSMIT_OFF,
+  TRANSMIT_ON_IDLE,
+  TRANSMIT_ON_TRANSMITTING,
   APPEARANCE_DAMAGE_MASK,
   APPEARANCE_DAMAGE_SHIFT,
   APPEARANCE_DEACTIVATED,
@@ -58,6 +89,12 @@ export interface DisConfig {
   orientationThreshold: number;
   /** Seconds without an update before a remote entity is removed. */
   timeout: number;
+  /** Radio net frequency (Hz) for each force's radios. */
+  radioNets: Record<ForceId, number>;
+  /** Run and pause when a simulation manager sends Start/Resume or Stop/Freeze PDUs. */
+  obeySimulationManager: boolean;
+  /** Send Start/Resume and Stop/Freeze PDUs when this simulation is run or paused (act as simulation manager). */
+  announceRunState: boolean;
 }
 
 export const DEFAULT_DIS_CONFIG: DisConfig = {
@@ -72,7 +109,15 @@ export const DEFAULT_DIS_CONFIG: DisConfig = {
   positionThreshold: 1,
   orientationThreshold: (3 * Math.PI) / 180,
   timeout: 12,
+  radioNets: { 0: 36_000_000, 1: 30_000_000, 2: 32_000_000, 3: 34_000_000 },
+  obeySimulationManager: true,
+  announceRunState: false,
 };
+
+/** What the gateway can do to the simulation it is attached to. */
+export interface SimulationControl {
+  setRunning(run: boolean): void;
+}
 
 /** Abstract datagram transport so the gateway can be tested without sockets. */
 export interface DisTransport {
@@ -140,6 +185,13 @@ export class DisGateway {
   private published = new Map<string, PublishedState>();
   private remotes = new Map<string, RemoteTrack>();
   private unsubscribe: (() => void)[] = [];
+  /** Local radios: last Transmitter PDU wall time. */
+  private radios = new Map<string, number>();
+  /** Remote radios heard: key -> last Transmitter PDU wall time. */
+  private remoteRadios = new Map<string, number>();
+  private requestId = 0;
+  /** Run/pause hook for simulation management PDUs. */
+  control: SimulationControl | null = null;
   pdusSent = 0;
   pdusReceived = 0;
   private running = true;
@@ -158,10 +210,16 @@ export class DisGateway {
       engine.on('fire', (s) => this.sendFire(s)),
       engine.on('detonation', (d) => this.sendDetonation(d)),
       engine.on('removed', (e) => this.sendRemoval(e)),
+      engine.on('event', (ev) => {
+        if (ev.kind !== 'radio' || !ev.entityId) return;
+        const e = engine.entities.get(ev.entityId);
+        if (e && this.hasRadio(e)) this.transmitText(e, ev.text);
+      }),
       engine.on('reset', () => {
         this.frame = this.makeFrame();
         this.published.clear();
         this.remotes.clear();
+        this.radios.clear();
       }),
     );
   }
@@ -187,6 +245,8 @@ export class DisGateway {
       pdusSent: this.pdusSent,
       pdusReceived: this.pdusReceived,
       remoteEntities: this.remotes.size,
+      radios: this.radios.size,
+      remoteRadios: this.remoteRadios.size,
     };
   }
 
@@ -255,6 +315,7 @@ export class DisGateway {
   update(running: boolean, timeScale: number): void {
     const wall = this.now();
     const pausedChanged = running !== this.running || timeScale !== this.timeScale;
+    if (running !== this.running && this.config.announceRunState) this.sendRunState(running);
     this.running = running;
     this.timeScale = timeScale;
     for (const e of this.engine.entities.values()) {
@@ -284,6 +345,8 @@ export class DisGateway {
       this.published.set(e.id, { wall, position: e.position, velocity: apparent, heading: e.heading, pitch: e.pitch, roll: e.roll, appearance });
     }
 
+    this.updateRadios(wall);
+
     for (const [id, track] of this.remotes) {
       const e = this.engine.entities.get(id);
       const dt = wall - track.wall;
@@ -304,6 +367,10 @@ export class DisGateway {
   }
 
   private sendRemoval(e: Entity): void {
+    if (this.radios.has(e.id)) {
+      this.radios.delete(e.id);
+      this.sendTransmitter(e, TRANSMIT_OFF);
+    }
     if (e.remote) {
       this.remotes.delete(e.id);
       return;
@@ -313,6 +380,106 @@ export class DisGateway {
     const pdu = this.buildEntityState(e, ZERO3, DisGateway.appearanceOf(e) | APPEARANCE_DEACTIVATED);
     pdu.deadReckoning.algorithm = DR_STATIC;
     this.send(encodeEntityState(pdu));
+  }
+
+  // ------------------------------------------------------------ radio
+
+  /** Unit leaders, and entities not in a unit, carry a radio on their force's net. */
+  hasRadio(e: Entity): boolean {
+    return !e.remote && e.alive && !e.embarkedIn && (!e.unit || e.unit.leader === e);
+  }
+
+  private radioType(e: Entity) {
+    return { kind: 7, domain: e.type.dis.domain, country: e.type.dis.country, category: 0, nomenclatureVersion: 0, nomenclature: 0 };
+  }
+
+  private sendTransmitter(e: Entity, state: number): void {
+    this.send(
+      encodeTransmitter({
+        header: this.header(),
+        radioReferenceId: this.localId(e),
+        radioNumber: 1,
+        radioType: this.radioType(e),
+        transmitState: state,
+        inputSource: 1, // pilot / commander
+        antennaLocation: this.frame.toEcef({ x: e.x, y: e.y, z: e.z + 3 }),
+        relativeAntennaLocation: { x: 0, y: 0, z: 3 },
+        frequency: this.config.radioNets[e.force],
+        bandwidth: 25_000,
+        power: 40, // dBm (10 W)
+        modulation: { spreadSpectrum: 0, majorModulation: 1, detail: 2, radioSystem: 1 }, // amplitude, AM; generic radio
+        cryptoSystem: 0,
+        cryptoKeyId: 0,
+      }),
+    );
+  }
+
+  /** Keep each radio's Transmitter (and Receiver) PDU fresh; turn off radios that are gone. */
+  private updateRadios(wall: number): void {
+    for (const e of this.engine.entities.values()) {
+      if (!this.hasRadio(e)) continue;
+      const last = this.radios.get(e.id);
+      if (last !== undefined && wall - last < this.config.heartbeat) continue;
+      this.radios.set(e.id, wall);
+      this.sendTransmitter(e, TRANSMIT_ON_IDLE);
+      this.send(encodeReceiver({ header: this.header(), radioReferenceId: this.localId(e), radioNumber: 1, receiverState: RECEIVER_ON_IDLE, receivedPower: 0, transmitterEntityId: NO_ENTITY, transmitterRadioId: 0 }));
+    }
+    for (const id of [...this.radios.keys()]) {
+      const e = this.engine.entities.get(id);
+      if (e && this.hasRadio(e)) continue;
+      this.radios.delete(id);
+      if (e) this.sendTransmitter(e, TRANSMIT_OFF);
+    }
+    for (const [key, last] of this.remoteRadios) if (wall - last > this.config.timeout) this.remoteRadios.delete(key);
+  }
+
+  /** A text message on the radio: key up, send it as raw binary data, key down. */
+  transmitText(e: Entity, text: string): void {
+    const data = new TextEncoder().encode(text.slice(0, 1000));
+    this.sendTransmitter(e, TRANSMIT_ON_TRANSMITTING);
+    this.send(
+      encodeSignal({
+        header: this.header(),
+        radioReferenceId: this.localId(e),
+        radioNumber: 1,
+        encodingScheme: (ENCODING_RAW_BINARY << 14) | 1, // one message
+        tdlType: 0,
+        sampleRate: 0,
+        samples: 1,
+        data,
+      }),
+    );
+    this.sendTransmitter(e, TRANSMIT_ON_IDLE);
+    this.radios.set(e.id, this.now());
+  }
+
+  // ------------------------------------------------------------ simulation management
+
+  private sendRunState(running: boolean): void {
+    const base = { header: this.header(), originatingId: { site: this.config.site, application: this.config.application, entity: 0 }, receivingId: ALL_ENTITIES, realWorldTime: clockTime(), requestId: ++this.requestId };
+    if (running) {
+      const t = this.engine.time;
+      this.send(encodeStartResume({ ...base, simulationTime: { hour: Math.floor(t / 3600), timePastHour: Math.floor(((t % 3600) / 3600) * 0x7fffffff) << 1 } }));
+    } else {
+      this.send(encodeStopFreeze({ ...base, reason: 1, frozenBehavior: 0 }));
+    }
+  }
+
+  /** Send a free-text Comment PDU to every simulation. */
+  sendComment(text: string): void {
+    this.send(
+      encodeComment({
+        header: this.header(),
+        originatingId: { site: this.config.site, application: this.config.application, entity: 0 },
+        receivingId: ALL_ENTITIES,
+        texts: [{ datumId: DATUM_TEXT, text }],
+      }),
+    );
+  }
+
+  /** True if a simulation management PDU is addressed to this application. */
+  private addressedToUs(id: EntityId): boolean {
+    return (id.site === 0xffff || id.site === this.config.site) && (id.application === 0xffff || id.application === this.config.application);
   }
 
   private entityIdFor(id: string | undefined): EntityId {
@@ -382,6 +549,11 @@ export class DisGateway {
       if (h.pduType === PDU_ENTITY_STATE) this.receiveEntityState(buf);
       else if (h.pduType === PDU_FIRE) this.receiveFire(buf);
       else if (h.pduType === PDU_DETONATION) this.receiveDetonation(buf);
+      else if (h.pduType === PDU_START_RESUME || h.pduType === PDU_STOP_FREEZE) this.receiveRunState(buf, h.pduType === PDU_START_RESUME);
+      else if (h.pduType === PDU_COMMENT) this.receiveComment(buf);
+      else if (h.pduType === PDU_TRANSMITTER) this.receiveTransmitter(buf);
+      else if (h.pduType === PDU_SIGNAL) this.receiveSignal(buf);
+      else if (h.pduType === PDU_RECEIVER || h.pduType === PDU_ACKNOWLEDGE) this.pdusReceived++;
       else return;
     } catch {
       return; // malformed PDU
@@ -437,6 +609,57 @@ export class DisGateway {
     this.remotes.set(id, { wall: this.now(), position, velocity, acceleration, algorithm: pdu.deadReckoning.algorithm });
   }
 
+  private receiveRunState(buf: Uint8Array, start: boolean): void {
+    const pdu = start ? decodeStartResume(buf) : decodeStopFreeze(buf);
+    if (this.isOwn(pdu.originatingId) || !this.addressedToUs(pdu.receivingId)) return;
+    this.pdusReceived++;
+    const from = `${pdu.originatingId.site}:${pdu.originatingId.application}`;
+    const comply = this.config.obeySimulationManager && !!this.control;
+    if (comply) this.control!.setRunning(start);
+    this.engine.log('info', `DIS simulation manager ${from}: ${start ? 'start/resume' : 'stop/freeze'}${comply ? '' : ' (ignored)'}`);
+    this.send(
+      encodeAcknowledge({
+        header: this.header(),
+        originatingId: { site: this.config.site, application: this.config.application, entity: 0 },
+        receivingId: pdu.originatingId,
+        acknowledgeFlag: start ? ACK_START_RESUME : ACK_STOP_FREEZE,
+        responseFlag: comply ? 1 : 2,
+        requestId: pdu.requestId,
+      }),
+    );
+  }
+
+  private receiveComment(buf: Uint8Array): void {
+    const pdu = decodeComment(buf);
+    if (this.isOwn(pdu.originatingId) || !this.addressedToUs(pdu.receivingId)) return;
+    this.pdusReceived++;
+    const text = pdu.texts.map((t) => printable(t.text)).filter(Boolean).join(' / ');
+    if (text) this.engine.log('info', `DIS comment from ${pdu.originatingId.site}:${pdu.originatingId.application}: ${text}`);
+  }
+
+  private receiveTransmitter(buf: Uint8Array): void {
+    const pdu = decodeTransmitter(buf);
+    if (this.isOwn(pdu.radioReferenceId)) return;
+    this.pdusReceived++;
+    const key = `${remoteKey(pdu.radioReferenceId)}/${pdu.radioNumber}`;
+    if (pdu.transmitState === TRANSMIT_OFF) this.remoteRadios.delete(key);
+    else this.remoteRadios.set(key, this.now());
+  }
+
+  private receiveSignal(buf: Uint8Array): void {
+    const pdu = decodeSignal(buf);
+    if (this.isOwn(pdu.radioReferenceId)) return;
+    this.pdusReceived++;
+    const cls = pdu.encodingScheme >> 14;
+    if (cls === ENCODING_AUDIO) return; // voice: nothing to show
+    if (cls !== ENCODING_RAW_BINARY && cls !== ENCODING_APPLICATION) return;
+    const text = printable(new TextDecoder('utf-8', { fatal: false }).decode(pdu.data));
+    if (!text) return;
+    const sender = this.resolveEntity(pdu.radioReferenceId);
+    const name = sender ? this.engine.entities.get(sender)!.name : `${pdu.radioReferenceId.site}:${pdu.radioReferenceId.application}:${pdu.radioReferenceId.entity}`;
+    this.engine.log('radio', `${name} (DIS radio): ${text}`, sender);
+  }
+
   private receiveFire(buf: Uint8Array): void {
     const pdu = decodeFire(buf);
     if (this.isOwn(pdu.firingEntityId)) return;
@@ -469,4 +692,11 @@ export class DisGateway {
     if (!targetId && this.engine.applyExternalAreaDetonation(pdu.burst.munition, location, shooterId)) return;
     this.engine.log('detonation', 'remote detonation (DIS)', shooterId, targetId, { to: location, hit: pdu.result === DETONATION_ENTITY_IMPACT });
   }
+}
+
+/** Text with control characters removed, or '' if it does not look like text. */
+function printable(s: string): string {
+  const t = s.replace(/\0+$/, '');
+  if (!t || /[\u0000-\u0008\u000e-\u001f\ufffd]/.test(t)) return '';
+  return t.trim().slice(0, 500);
 }

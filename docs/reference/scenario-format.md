@@ -14,8 +14,12 @@ A scenario saved at time 0 is a clean starting point. Saved while running
 (time > 0) it is a full **checkpoint**: entities also carry a `state` with
 damage, ammunition, contacts and plan/task progress, units carry their leader
 and plan progress, and the file adds munitions in flight (`shots`) and the
-random generator state (`rngState`). Loading a checkpoint continues the run
-exactly as it would have gone on. Destroyed entities are kept as wrecks.
+random generator state (`rngState`), smoke clouds (`smoke`) and orders still
+on their way (`orders`). Loading a checkpoint continues the run from that
+state. Moving entities plan their route again from where they are, so the run
+soon drifts from the one that was saved: two loads of the same checkpoint play
+out identically, but not necessarily like the original run. Destroyed entities
+are kept as wrecks.
 
 The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
 
@@ -33,6 +37,8 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
   "entities": [ ... ],
   "units": [ ... ],
   "graphics": [ ... ],
+  "rules": { "suppression": true, "morale": true, "fuel": true, "orderDelay": false },
+  "environment": { "date": "2026-11-02", "time": 5.5, "visibility": 3000, "precipitation": "rain", "windSpeed": 4, "windFrom": 250 },
   "shots": [ ... ],
   "rngState": 1234567890
 }
@@ -47,8 +53,25 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
 | `hostilities` | | Pairs of hostile forces (default `[[1,2]]`) |
 | `startTime` | | Initial simulation time in seconds (default 0) |
 | `entities`, `units`, `graphics` | yes | May be empty arrays |
+| `rules` | | Optional models, for comparison runs: `suppression`, `morale`, `fuel` (missing means on) and `orderDelay` (missing means off) ([Concepts](../concepts.md#optional-models)) |
+| `environment` | | Time of day and weather at the start (below). Missing fields keep their defaults |
 | `shots` | | Checkpoints: munitions in flight (`shooterId`, `targetId`, `weaponId`, `from`, `to`, `fireTime`, `impactTime`, `range`) |
+| `smoke` | | Checkpoints: smoke clouds (`id`, `x`, `y`, `radius`, `until`: the simulation time it is gone) |
+| `orders` | | Checkpoints: orders on their way down the chain of command (`targetId`, `task` or `plan`, `due`) |
 | `rngState` | | Checkpoints: random number generator state, so the run continues identically |
+
+## `environment`
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `date` | `2026-06-21` | Date at the start, `YYYY-MM-DD`. With the terrain's latitude it sets sunrise and sunset |
+| `time` | `12` | Local solar time at the start, in hours (0–24). `5.5` is 05:30 |
+| `visibility` | `20000` | Meteorological visibility in metres: fog is a few hundred, haze a few thousand |
+| `precipitation` | `none` | `none`, `rain`, `heavyRain` or `snow`: shorter sight, slower going off-road |
+| `windSpeed` | `0` | Metres per second. Drifts smoke |
+| `windFrom` | `270` | Direction the wind blows from, degrees clockwise from north |
+
+See [Concepts → Night and weather](../concepts.md#night-and-weather).
 
 ## `terrain`
 
@@ -108,7 +131,7 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
 | `roe` | `fireAtWill` (default), `returnFire`, `holdFire` |
 | `plan` / `task` | Optional. Assigned when the scenario loads. If both are given, the plan wins |
 | `reactions` | Optional: `onContact`, `withdrawBelow`, `withdrawTo`, `callForFire` ([Concepts](../concepts.md#reactions)) |
-| `state` | Optional. At time 0 only `destroyed`, `mobilityKill`, `firepowerKill` and `embarkedIn` (carrier id: starts mounted) are used. Checkpoints add `speed`, `z`, `ammo`, `weaponReadyAt`, `contacts`, `attackers`, `underFireUntil`, `lastFiredAt`, `sensorDue`, `speedOverride`, `altitudeOverride`, `planIndex`, `taskState` (a task spec that resumes the running task), `taskDone`, `withdrawn`, `callForFireAt` |
+| `state` | Optional. Saved at time 0 it holds only `destroyed`, `mobilityKill`, `firepowerKill` and `embarkedIn` (carrier id: starts mounted). Fields added by hand are applied on load too, for example `fuel` (litres), `ammo` (rounds by weapon id), `supplies` (supply loads left) or `prepared` (`dugIn` or `hullDown`: starts in a prepared position). Checkpoints add `speed`, `z`, `ammo`, `weaponReadyAt`, `contacts`, `attackers`, `underFireUntil`, `lastFiredAt`, `sensorDue`, `speedOverride`, `altitudeOverride`, `planIndex`, `taskState` (a task spec that resumes the running task), `taskDone`, `withdrawn`, `callForFireAt`, `smokeLeft`, `suppression`, `morale`, `moraleState` |
 
 Ground and dismounted entities must be on land, and surface vessels on water.
 Otherwise loading fails and the previous scenario stays loaded.
@@ -124,15 +147,22 @@ Otherwise loading fails and the previous scenario stays loaded.
   "formation": "wedge",
   "spacing": 80,
   "echelon": "platoon",
+  "parentId": "U10",
   "plan": { ... }
 }
 ```
 
-The first member is the initial leader. Units also take `reactions` and, in
-checkpoints, a `state` with `planIndex`, `taskState`, `taskDone`, `leaderId`
-and `withdrawn`. `echelon` is one of `team`, `section`,
-`platoon`, `company`, `flight` or `group`, and only affects the symbol. Members
+The first member is the initial leader. Units also take a `task`, `reactions`
+and, in checkpoints, a `state` with `planIndex`, `taskState`, `taskDone`,
+`leaderId`, `withdrawn`, `morale`, `moraleState` and `lossesSeen`. `echelon` is
+one of `team`, `section`, `platoon`, `company`, `flight` or `group`: it sets the
+symbol and, with `rules.orderDelay`, how long orders take to arrive. Members
 must be listed in `entities` and share the unit's force.
+
+`parentId` is the unit's superior in the chain of command, for example the
+company a platoon belongs to. It must be another unit of the same force, and
+the chain may not loop. A company's orders are split among its subordinate
+units ([Concepts](../concepts.md#chain-of-command)).
 
 ## `graphics[]`
 
@@ -141,7 +171,18 @@ must be listed in `entities` and share the unit's force.
 ```
 
 `kind` is `route` (two or more points), `area` (three or more), `phaseLine`
-(two or more) or `point` (one).
+(two or more), `point` (one), `minefield` (three or more) or `obstacle` (two or
+more: an anti-tank ditch or wire line).
+
+```json
+{ "id": "G7", "kind": "minefield", "name": "MF 1", "force": 2, "points": [ ... ], "density": 0.8, "knownBy": [2], "lanes": [{ "from": {"x": 8100, "y": 6020}, "to": {"x": 8180, "y": 6240} }] }
+```
+
+| Field | Kinds | Meaning |
+| --- | --- | --- |
+| `density` | minefield | Roughly mines per metre of front: 0.1 sparse to 1.5 dense (default 0.5) |
+| `knownBy` | minefield | Forces that know where it is. Its own force always does. Other forces learn of it when one of their entities strikes a mine |
+| `lanes` | minefield, obstacle | Breached lanes, each a centreline 30 m wide. Engineers add them; routes pass through them |
 
 ## Tasks and plans
 

@@ -39,8 +39,9 @@ Then organise them:
 
 - **Rename** units to fit your story. Select one and click the name in the
   inspector. For example *1st Plt*, *Recon*, *Hind 21*.
-- **Group loose entities into a unit.** Only through the API:
-  `POST /api/v1/units {"entityIds": [...]}`; see [Tutorial 4](04-scripting-with-the-rest-api.md).
+- **Group loose entities into a unit.** Shift+click them (or Shift+drag a box
+  around them) and press **Group into a unit** in the inspector. Through the
+  API: `POST /api/v1/units {"entityIds": [...]}`; see [Tutorial 4](04-scripting-with-the-rest-api.md).
 - **Draw graphics.** An **Area** for the objective, a **Route** for the Red
   recon to **Patrol**, and a **Phase line** along the river.
 - **Set ROE.** For example, Red recon on *Return fire* so it observes rather
@@ -83,13 +84,17 @@ itself, so it is small (a few KB) and recreates the identical map anywhere.
 
 > Saving mid-run writes a full **checkpoint** of the current state:
 >
-> - positions, damage, ammunition and contacts (destroyed entities are kept as
->   wrecks);
+> - positions, damage, ammunition, fuel, suppression, morale and contacts
+>   (destroyed entities are kept as wrecks);
 > - the assigned tasks and plans, and how far each has got;
-> - munitions in flight and the random number state;
+> - munitions in flight, smoke clouds, orders still on their way, and the
+>   random number state;
 > - the current time, as `startTime`.
 >
-> Loading the file continues the run exactly as it would have gone on.
+> Loading the file continues the run from that point, and loading the same
+> file again always gives the same continuation. Positions are rounded to
+> 10 cm in the file, so after a while the continuation can differ in detail
+> from the run you saved.
 
 ## 6. Edit the file by hand
 

@@ -1,6 +1,6 @@
 // Remote-control command dispatcher shared by the REST and WebSocket APIs.
 
-import type { Command, CommandResult, Condition, ForceId, Formation, Plan, PlanStatement, Reactions, Roe, TaskSpec, Vec2 } from '../shared/types.js';
+import type { Command, CommandResult, Condition, Environment, ForceId, Formation, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
 import type { SimRunner } from './runner.js';
 
 const FORCES = new Set([0, 1, 2, 3]);
@@ -46,7 +46,7 @@ export function validateTask(v: unknown): TaskSpec {
   const speed = t.speed === undefined ? undefined : num(t.speed, 'speed');
   switch (t.type) {
     case 'moveTo':
-      return { type: 'moveTo', target: vec(t.target, 'target'), speed };
+      return { type: 'moveTo', target: vec(t.target, 'target'), speed, covered: t.covered === true || undefined };
     case 'followRoute':
       return {
         type: 'followRoute',
@@ -79,7 +79,40 @@ export function validateTask(v: unknown): TaskSpec {
       if (rounds !== undefined && (rounds < 1 || rounds > 100)) throw new ValidationError('rounds must be between 1 and 100');
       const radius = t.radius === undefined ? undefined : num(t.radius, 'radius');
       if (radius !== undefined && (radius < 0 || radius > 1000)) throw new ValidationError('radius must be between 0 and 1000 m');
-      return { type: 'fireMission', target: vec(t.target, 'target'), rounds, radius, weaponId: t.weaponId === undefined ? undefined : str(t.weaponId, 'weaponId') };
+      return {
+        type: 'fireMission',
+        target: vec(t.target, 'target'),
+        rounds,
+        radius,
+        weaponId: t.weaponId === undefined ? undefined : str(t.weaponId, 'weaponId'),
+        smoke: t.smoke === true || undefined,
+      };
+    }
+    case 'breach':
+      return { type: 'breach', graphicId: str(t.graphicId, 'graphicId') };
+    case 'resupply':
+      return t.supplierId === undefined ? { type: 'resupply' } : { type: 'resupply', supplierId: str(t.supplierId, 'supplierId') };
+    case 'overwatch':
+    case 'defend':
+    case 'ambush':
+    case 'screen': {
+      const opt = (k: string, min: number, max: number) => {
+        if (t[k] === undefined) return undefined;
+        const x = num(t[k], k);
+        if (x < min || x > max) throw new ValidationError(`${k} must be between ${min} and ${max}`);
+        return x;
+      };
+      const base = { position: vec(t.position, 'position'), facing: opt('facing', 0, 360) };
+      if (t.type === 'overwatch') return { type: 'overwatch', ...base, duration: opt('duration', 0, 1e7) };
+      const width = opt('width', 0, 10000);
+      if (t.type === 'defend') return { type: 'defend', ...base, width };
+      if (t.type === 'ambush') return { type: 'ambush', ...base, width, killZoneId: str(t.killZoneId, 'killZoneId'), sprung: t.sprung === true || undefined };
+      return { type: 'screen', ...base, width, fallback: t.fallback === undefined ? undefined : vec(t.fallback, 'fallback'), breakContact: opt('breakContact', 100, 20000) };
+    }
+    case 'search': {
+      const spacing = t.spacing === undefined ? undefined : num(t.spacing, 'spacing');
+      if (spacing !== undefined && (spacing < 20 || spacing > 10000)) throw new ValidationError('spacing must be between 20 and 10000 m');
+      return { type: 'search', areaId: str(t.areaId, 'areaId'), spacing, speed, startIndex: t.startIndex === undefined ? undefined : Math.max(0, Math.floor(num(t.startIndex, 'startIndex'))) };
     }
     default:
       throw new ValidationError(`unknown task type ${String(t.type)}`);
@@ -102,10 +135,12 @@ function validateCondition(v: unknown): Condition {
       return { type: 'entityDestroyed', entityId: str(c.entityId, 'entityId') };
     case 'enemyInArea':
       return { type: 'enemyInArea', areaId: str(c.areaId, 'areaId') };
-    case 'strengthBelow': {
+    case 'strengthBelow':
+    case 'fuelBelow':
+    case 'ammoBelow': {
       const fraction = num(c.fraction, 'fraction');
       if (fraction <= 0 || fraction > 1) throw new ValidationError('fraction must be in (0, 1]');
-      return { type: 'strengthBelow', fraction };
+      return { type: c.type, fraction };
     }
     default:
       throw new ValidationError(`unknown condition ${String(c.type)}`);
@@ -161,8 +196,14 @@ export function validatePlan(v: unknown): Plan {
   return { name: typeof p.name === 'string' ? p.name.slice(0, 80) : undefined, statements, loop: p.loop === true };
 }
 
+/** Commands that do not change the scenario, so are not undone. */
+const NOT_EDITS = new Set(['run', 'pause', 'step', 'setTimeScale', 'undo', 'redo']);
+
 export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
+  const cmd = raw && typeof raw === 'object' ? (raw as { cmd?: unknown }).cmd : undefined;
+  const before = typeof cmd === 'string' && !NOT_EDITS.has(cmd) && runner.undoLimit > 0 ? runner.engine.toScenario() : null;
   const result = runCommand(runner, raw);
+  if (result.ok && before) runner.pushUndo(before);
   // Keep the recording's current frame in step with edits made while paused.
   if (result.ok) runner.recorder?.touch();
   return result;
@@ -185,6 +226,12 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         return;
       case 'setTimeScale':
         runner.setTimeScale(num(c.scale, 'scale'));
+        return;
+      case 'undo':
+        if (!runner.undo()) throw new ValidationError('nothing to undo');
+        return;
+      case 'redo':
+        if (!runner.redo()) throw new ValidationError('nothing to redo');
         return;
       case 'rewind':
         runner.setRunning(false);
@@ -249,11 +296,27 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         e.z = e.domain === 'air' ? engine.terrain.surfaceHeight(x, y) + agl : e.domain === 'surface' ? 0 : engine.terrain.elevation(x, y);
         return;
       }
-      case 'assignTask':
-        engine.assignTask(str(c.targetId, 'targetId'), validateTask(c.task));
+      case 'assignTask': {
+        const targetId = str(c.targetId, 'targetId');
+        const task = validateTask(c.task);
+        if (task.type === 'fireMission') {
+          // Refuse up front rather than fail later in the event log.
+          // A unit's order passes down to its subordinates: their guns count too.
+          const unit = engine.units.get(targetId);
+          const units = unit ? [unit] : [];
+          for (let i = 0; i < units.length; i++) units.push(...engine.subordinatesOf(units[i]).filter((s) => !units.includes(s)));
+          const members = unit ? units.flatMap((u) => u.memberList) : [engine.entities.get(targetId)].filter((e) => !!e);
+          const tubes = members.filter((m) => m.alive && m.type.weapons.some((w) => engine.catalog.weapon(w).indirect && (!task.weaponId || w === task.weaponId)));
+          if (members.length && !tubes.length) throw new ValidationError(`${engine.nameOf(targetId)} has no ${task.weaponId ? `weapon ${task.weaponId}` : 'artillery or mortars'} for a fire mission`);
+        }
+        engine.issueOrder(targetId, { task });
         return;
+      }
       case 'assignPlan':
-        engine.assignPlan(str(c.targetId, 'targetId'), validatePlan(c.plan));
+        engine.issueOrder(str(c.targetId, 'targetId'), { plan: validatePlan(c.plan) });
+        return;
+      case 'setSuperior':
+        engine.setSuperior(str(c.unitId, 'unitId'), c.superiorId === null || c.superiorId === undefined ? null : str(c.superiorId, 'superiorId'));
         return;
       case 'stop':
         engine.stop(str(c.targetId, 'targetId'));
@@ -264,6 +327,16 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
       case 'setReactions':
         engine.setReactions(str(c.targetId, 'targetId'), validateReactions(c.reactions));
         return;
+      case 'setRules': {
+        const r = (c.rules ?? {}) as Record<string, unknown>;
+        if (typeof r !== 'object' || Object.values(r).some((v) => typeof v !== 'boolean')) throw new ValidationError('rules must be an object of booleans');
+        engine.setRules(r as SimulationRules);
+        return;
+      }
+      case 'setEnvironment': {
+        engine.setEnvironment(validateEnvironment(c.environment));
+        return;
+      }
       case 'embark': {
         engine.embarkNow(str(c.passengerId, 'passengerId'), str(c.carrierId, 'carrierId'));
         return;
@@ -290,14 +363,21 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
       }
       case 'createGraphic': {
         if (!Array.isArray(c.points)) throw new ValidationError('points must be an array');
-        const kinds = ['route', 'area', 'point', 'phaseLine'];
+        const kinds = ['route', 'area', 'point', 'phaseLine', 'minefield', 'obstacle'];
         if (!kinds.includes(c.kind as string)) throw new ValidationError('invalid graphic kind');
-        return engine.addGraphic(
+        const g = engine.addGraphic(
           c.kind,
           c.points.map((p, i) => vec(p, `points[${i}]`)),
           c.name === undefined ? undefined : str(c.name, 'name'),
           c.force === undefined ? 1 : force(c.force),
-        ).id;
+        );
+        const density = (c as { density?: unknown }).density;
+        if (density !== undefined && g.kind === 'minefield') {
+          const d = num(density, 'density');
+          if (d <= 0 || d > 3) throw new ValidationError('density must be in (0, 3]');
+          g.density = d;
+        }
+        return g.id;
       }
       case 'updateGraphic': {
         const g = engine.graphics.get(str(c.id, 'id'));
@@ -307,10 +387,43 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
           if (!Array.isArray(c.points) || c.points.length === 0) throw new ValidationError('points must be a non-empty array');
           g.points = c.points.map((p, i) => vec(p, `points[${i}]`));
         }
+        if (c.density !== undefined) {
+          const d = num(c.density, 'density');
+          if (d <= 0 || d > 3) throw new ValidationError('density must be in (0, 3]');
+          g.density = d;
+        }
+        engine.obstacles.changed();
         return;
       }
       default:
         throw new ValidationError(`unknown command ${String((c as { cmd?: unknown }).cmd)}`);
     }
   });
+}
+
+const PRECIPITATION = new Set(['none', 'rain', 'heavyRain', 'snow']);
+
+function validateEnvironment(v: unknown): Environment {
+  if (!v || typeof v !== 'object') throw new ValidationError('environment must be an object');
+  const e = v as Record<string, unknown>;
+  const out: Environment = {};
+  if (e.date !== undefined) {
+    if (typeof e.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(e.date) || Number.isNaN(Date.parse(e.date))) throw new ValidationError('date must be YYYY-MM-DD');
+    out.date = e.date;
+  }
+  const n = (k: 'time' | 'visibility' | 'windSpeed' | 'windFrom', min: number, max: number) => {
+    if (e[k] === undefined) return;
+    const x = e[k];
+    if (typeof x !== 'number' || !Number.isFinite(x) || x < min || x > max) throw new ValidationError(`${k} must be a number from ${min} to ${max}`);
+    out[k] = x;
+  };
+  n('time', 0, 24);
+  n('visibility', 50, 100000);
+  n('windSpeed', 0, 40);
+  n('windFrom', 0, 360);
+  if (e.precipitation !== undefined) {
+    if (!PRECIPITATION.has(e.precipitation as string)) throw new ValidationError('precipitation must be none, rain, heavyRain or snow');
+    out.precipitation = e.precipitation as Environment['precipitation'];
+  }
+  return out;
 }

@@ -26,7 +26,7 @@ export interface Webhook extends Required<Omit<WebhookInput, 'secret'>> {
   lastDelivery?: string;
 }
 
-const ALL_KINDS: SimEventKind[] = ['fire', 'detonation', 'damaged', 'destroyed', 'detected', 'task', 'created', 'deleted', 'info'];
+const ALL_KINDS: SimEventKind[] = ['fire', 'detonation', 'damaged', 'destroyed', 'detected', 'task', 'created', 'deleted', 'info', 'radio'];
 const DEFAULT_KINDS: SimEventKind[] = ['damaged', 'destroyed', 'task', 'info'];
 const MAX_BATCH = 100;
 

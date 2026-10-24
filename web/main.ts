@@ -8,12 +8,14 @@ import type {
   CommandResult,
   EntitySnapshot,
   EntityTypeDef,
+  EnvironmentState,
   ForceId,
   Formation,
   Graphic,
   GraphicKind,
   Plan,
   PlanStatement,
+  Precipitation,
   Roe,
   Role,
   SimEvent,
@@ -25,12 +27,13 @@ import type {
   Vec2,
 } from '../src/shared/types.js';
 import { FORCE_NAMES } from '../src/shared/types.js';
-import { Api } from './api.js';
+import { Api, BASE } from './api.js';
 import { $, clear, fmtDeg, fmtGrid, fmtLatLon, fmtTime, h } from './dom.js';
 import { MapView } from './map.js';
-import { symbolCanvas } from './symbols.js';
+import { setSymbolStyle, type SymbolStyle, symbolCanvas } from './symbols.js';
 import type { View3D } from './view3d.js';
 import { AarPlayer } from './aar.js';
+import { Timeline } from './timeline.js';
 import type { CotStatus as CotView } from '../src/integrations/cot.js';
 import type { Webhook as WebhookView } from '../src/integrations/webhooks.js';
 
@@ -42,6 +45,29 @@ function paletteForce(country: number): ForceId {
   return country === 222 ? 2 : country === 0 ? 3 : 1;
 }
 const LOG_LIMIT = 600;
+
+/** A small bar for suppression (0..1). */
+function suppressionBar(v: number): HTMLElement {
+  return h(
+    'span',
+    { class: 'meter', title: `${Math.round(v * 100)}%` },
+    h('span', { style: `width:${Math.round(v * 100)}%;background:${v >= 0.6 ? 'var(--bad)' : v >= 0.3 ? 'var(--warn)' : 'var(--accent)'}` }),
+  );
+}
+
+/** A fuel-gauge style meter: green when full, red when nearly empty. */
+function levelBar(v: number): HTMLElement {
+  return h(
+    'span',
+    { class: 'meter', title: `${Math.round(v * 100)}%` },
+    h('span', { style: `width:${Math.round(v * 100)}%;background:${v <= 0.2 ? 'var(--bad)' : v <= 0.4 ? 'var(--warn)' : 'var(--good, #3fb950)'}` }),
+  );
+}
+
+function moraleText(m: number | undefined, state: string | undefined): string {
+  if (m === undefined) return 'off';
+  return `${Math.round(m * 100)}% · ${state ?? 'steady'}`;
+}
 
 type PlanStepKind =
   | 'moveTo'
@@ -61,6 +87,9 @@ type PlanStepKind =
   | 'waitDestroyed'
   | 'waitEnemyInArea'
   | 'waitStrength'
+  | 'waitFuel'
+  | 'waitAmmo'
+  | 'resupply'
   | 'setReaction'
   | 'fireMission'
   | 'setCallForFire'
@@ -80,6 +109,10 @@ class App {
   view3d: View3D | null = null;
   view: '2d' | '3d' | 'split' = '2d';
   selectedId: string | null = null;
+  private timeline!: Timeline;
+  private timelineDrawn = 0;
+  /** Everything selected; more than one for group orders. */
+  selection = new Set<string>();
   force: ForceId = 1;
   /** Exercise control, or a player limited to one force. */
   role: Role = { kind: 'controller' };
@@ -109,12 +142,21 @@ class App {
     });
     this.map = new MapView($('#map'), {
       select: (id) => this.select(id),
+      toggleSelect: (id) => this.toggleSelect(id),
+      selectMany: (ids) => this.selectMany(ids),
       contextMenu: (w, c, hit) => this.contextMenu(w, c, hit),
       hover: (w) => this.hover(w),
       dragEntity: (id, w) => (this.aar.active ? undefined : this.cmd({ cmd: 'moveEntity', id, x: w.x, y: w.y })),
       modeChanged: (m) => {
         if (m.kind !== 'place') this.disarm();
       },
+    });
+    this.timeline = new Timeline($('#timeline-strip'), {
+      review: async (t) => {
+        if (!this.aar.active) await this.enterReplay();
+        if (this.aar.active) this.aar.seek(t);
+      },
+      select: (id) => this.exists(id) && this.select(id),
     });
     this.aar = new AarPlayer(
       {
@@ -134,7 +176,14 @@ class App {
     this.bindLog();
     this.bindViews();
     setInterval(() => this.refreshPath(), 1000);
-    void this.api.ensureAuth().then(() => this.api.connect());
+    void this.api.ensureAuth().then(() => {
+      if (this.api.user) {
+        const u = $('#user-name');
+        u.textContent = `${this.api.user.name} · sign out`;
+        u.classList.remove('hidden');
+      }
+      this.api.connect();
+    });
   }
 
   // ------------------------------------------------------------ server messages
@@ -154,6 +203,20 @@ class App {
     }
     this.catalog = catalog;
     this.types = new Map(catalog.entityTypes.map((t) => [t.id, t]));
+    this.map.sidcOf = (id) => this.types.get(id)?.sidc;
+    if (BASE) {
+      const pill = $('#session-name');
+      pill.textContent = `session ${decodeURIComponent(BASE.slice(3))}`;
+      pill.classList.remove('hidden');
+    }
+    this.map.losCheck = async (a, b) => {
+      try {
+        const r = await this.api.v1<{ visible: boolean }>('POST', '/terrain/line-of-sight', { from: { x: a.x, y: a.y }, to: { x: b.x, y: b.y } });
+        return r.visible;
+      } catch {
+        return null;
+      }
+    };
     this.renderPalette();
     if (terrainVersion !== this.terrainVersion) this.loadTerrain(terrainVersion);
   }
@@ -172,9 +235,20 @@ class App {
     this.liveState = s;
     if (this.aar.active) return;
     this.state = s;
+    const wall = performance.now();
+    if (wall - this.timelineDrawn > 500) {
+      this.timelineDrawn = wall;
+      this.timeline.update(s, this.events);
+    }
     this.map.setState(s);
     this.view3d?.setState(s);
-    $('#sim-time').textContent = fmtTime(s.time);
+    const clock = $('#sim-time');
+    clock.textContent = fmtTime(s.time);
+    // The server cannot keep up with the time scale: say so.
+    const behind = s.running && (s.load ?? 0) > 0.9;
+    clock.classList.toggle('behind', behind);
+    clock.title = behind ? `The server is busy ${Math.round((s.load ?? 0) * 100)}% of the time: the simulation runs slower than ${s.timeScale}x` : 'Simulation time';
+    this.renderEnvironment(s.environment);
     $('#scenario-name').textContent = s.scenarioName;
     const run = $('#btn-run');
     run.textContent = s.running ? '⏸ Pause' : '▶ Run';
@@ -199,7 +273,8 @@ class App {
       .filter(Boolean)
       .join(' · ');
     $('#score').textContent = score;
-    if (this.selectedId && !this.exists(this.selectedId)) this.select(null);
+    for (const id of [...this.selection]) if (!this.exists(id)) this.selection.delete(id);
+    if (this.selectedId && !this.exists(this.selectedId)) this.select(this.selection.size ? [...this.selection][0] : null);
     this.updateInspector();
     const now = performance.now();
     if (now - this.lastTree > 500) {
@@ -269,6 +344,11 @@ class App {
     return (this.state?.graphics ?? []).filter((g) => g.kind === 'area');
   }
 
+  /** An entity type's 2525 SIDC pattern, if the catalog gives one. */
+  sidc(typeId: string | undefined): string | undefined {
+    return typeId ? this.types.get(typeId)?.sidc : undefined;
+  }
+
   /** True if the entity, or any member of the unit, has an indirect-fire weapon. */
   hasIndirect(id: string): boolean {
     const u = this.unit(id);
@@ -277,6 +357,23 @@ class App {
       const t = this.types.get(this.entity(m)?.typeId ?? '');
       return !!t?.weapons.some((w) => this.catalog?.weapons.find((x) => x.id === w)?.indirect);
     });
+  }
+
+  /** Entity types of the entity, or of every member of the unit. */
+  private memberTypes(id: string): EntityTypeDef[] {
+    const u = this.unit(id);
+    return (u ? u.memberIds : [id]).map((m) => this.types.get(this.entity(m)?.typeId ?? '')).filter((t): t is EntityTypeDef => !!t);
+  }
+
+  /** True if the entity (or the unit's leader) is an engineer. */
+  canBreach(id: string): boolean {
+    const lead = this.unit(id)?.leaderId ?? id;
+    return !!this.types.get(this.entity(lead)?.typeId ?? '')?.breachTime;
+  }
+
+  /** True if the entity or a member of the unit has a weapon that fires smoke rounds. */
+  hasSmoke(id: string): boolean {
+    return this.memberTypes(id).some((t) => t.weapons.some((w) => this.catalog?.weapons.find((x) => x.id === w)?.smoke));
   }
 
   /** Seats of an entity type (0 for non-carriers). */
@@ -331,6 +428,10 @@ class App {
       if (action === 'export') this.exportScenario();
       if (action === 'save-server') this.saveOnServer();
       if (action === 'review-recording') void this.reviewRecordingDialog();
+      if (action === 'settings') void this.settingsDialog();
+      if (action === 'undo' || action === 'redo') void this.undoRedo(action);
+      if (action === 'batch') void this.batchDialog();
+      if (action === 'sessions') void this.sessionsDialog();
     });
     ($('#file-input') as HTMLInputElement).addEventListener('change', async (e) => {
       const input = e.target as HTMLInputElement;
@@ -346,14 +447,16 @@ class App {
       }
     });
     $('#btn-run').addEventListener('click', () => this.cmd({ cmd: this.state?.running ? 'pause' : 'run' }));
+    $('#env-chip').addEventListener('click', () => void this.settingsDialog());
     $('#btn-step').addEventListener('click', () => this.cmd({ cmd: 'step', seconds: 1 }));
     $('#btn-rewind').addEventListener('click', () => {
       if (confirm('Rewind to the scenario as it was last loaded or saved? Changes since then will be lost.')) this.cmd({ cmd: 'rewind' });
     });
     ($('#sel-speed') as HTMLSelectElement).addEventListener('change', (e) => this.cmd({ cmd: 'setTimeScale', scale: Number((e.target as HTMLSelectElement).value) }));
-    document.querySelectorAll<HTMLButtonElement>('#draw-tools button').forEach((b) =>
+    document.querySelectorAll<HTMLButtonElement>('#draw-tools button[data-draw]').forEach((b) =>
       b.addEventListener('click', () => this.startDraw(b.dataset.draw as GraphicKind)),
     );
+    $('#btn-measure').addEventListener('click', () => this.map.setMode({ kind: 'measure', points: [] }));
     document.querySelectorAll<HTMLInputElement>('[data-layer]').forEach((cb) =>
       cb.addEventListener('change', () => {
         (this.map.layers as unknown as Record<string, boolean>)[cb.dataset.layer!] = cb.checked;
@@ -361,6 +464,26 @@ class App {
         this.map.invalidate();
       }),
     );
+    const symSel = $('#sel-symbols') as HTMLSelectElement;
+    try {
+      symSel.value = localStorage.getItem('werforces.symbols') === 'simple' ? 'simple' : '2525';
+    } catch {
+      // storage unavailable
+    }
+    setSymbolStyle(symSel.value as SymbolStyle);
+    symSel.addEventListener('change', () => {
+      setSymbolStyle(symSel.value as SymbolStyle);
+      try {
+        localStorage.setItem('werforces.symbols', symSel.value);
+      } catch {
+        // storage unavailable
+      }
+      this.map.invalidate();
+      this.renderPalette();
+      this.renderTree(true);
+      this.inspectorFor = null;
+      this.updateInspector();
+    });
     ($('#sel-aggregate') as HTMLSelectElement).addEventListener('change', (e) => {
       this.map.layers.aggregate = (e.target as HTMLSelectElement).value as 'auto';
       this.map.invalidate();
@@ -372,7 +495,12 @@ class App {
         this.cmd({ cmd: this.state?.running ? 'pause' : 'run' });
       }
       if (e.key === 'Delete' && this.selectedId) this.deleteSelected();
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z' || e.key === 'y')) {
+        e.preventDefault();
+        void this.undoRedo(e.key === 'y' || e.shiftKey ? 'redo' : 'undo');
+      }
       if (e.key === 'f' && this.selectedId) this.centerOn(this.selectedId);
+      if (e.key === 'm' && !e.ctrlKey && !e.metaKey) this.map.setMode({ kind: 'measure', points: [] });
     });
   }
 
@@ -413,9 +541,89 @@ class App {
       this.events = log.length ? log.slice(-LOG_LIMIT) : this.events;
       this.renderLog();
     }
-    if (this.selectedId && !this.exists(this.selectedId)) this.select(null);
+    for (const id of [...this.selection]) if (!this.exists(id)) this.selection.delete(id);
+    if (this.selectedId && !this.exists(this.selectedId)) this.select(this.selection.size ? [...this.selection][0] : null);
     this.updateInspector();
     this.renderTree();
+  }
+
+  private renderEnvironment(env: EnvironmentState | undefined): void {
+    const chip = $('#env-chip');
+    chip.classList.toggle('hidden', !env);
+    if (!env) return;
+    const icon = env.period === 'day' ? '☀' : env.period === 'twilight' ? '◐' : '☾';
+    const wx = (env.visibility < 5000 ? ' ≋' : '') + (env.precipitation === 'snow' ? ' ❄' : env.precipitation !== 'none' ? ' ☂' : '');
+    chip.textContent = `${icon} ${env.localTime}${wx}`;
+    chip.classList.toggle('night', env.period !== 'day');
+    chip.title = `${env.localDate} ${env.localTime} local · ${env.period}${env.precipitation !== 'none' ? ` · ${PRECIPITATION_LABELS[env.precipitation]}` : ''} · sun ${env.sunAltitude}° · light ${Math.round(env.light * 100)}% · visibility ${env.visibility >= 1000 ? `${env.visibility / 1000} km` : `${env.visibility} m`}${env.windSpeed ? ` · wind ${env.windSpeed} m/s from ${env.windFrom}°` : ''}. Click to change.`;
+  }
+
+  /** Optional model parts and the environment for the current scenario. */
+  private async settingsDialog(): Promise<void> {
+    const rules = await this.api.v1<Record<string, boolean>>('GET', '/simulation/rules');
+    const env = await this.api.v1<EnvironmentState>('GET', '/simulation/environment');
+    const hh = Math.floor(env.time);
+    const mm = Math.round((env.time - hh) * 60);
+    const field = (label: string, input: HTMLElement) => [h('label', { text: label }), input];
+    const date = h('input', { type: 'date', value: env.date }) as HTMLInputElement;
+    const time = h('input', { type: 'time', value: `${String(hh).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}` }) as HTMLInputElement;
+    const visibility = h('input', { type: 'number', min: '50', max: '100000', step: '50', value: String(env.visibility) }) as HTMLInputElement;
+    const precipitation = h('select', {}, Object.entries(PRECIPITATION_LABELS).map(([v, t]) => h('option', { value: v, text: t || 'None', selected: v === env.precipitation }))) as HTMLSelectElement;
+    const windSpeed = h('input', { type: 'number', min: '0', max: '40', step: '1', value: String(env.windSpeed) }) as HTMLInputElement;
+    const windFrom = h('input', { type: 'number', min: '0', max: '360', step: '10', value: String(env.windFrom) }) as HTMLInputElement;
+    const box = (key: string, label: string, hint: string) =>
+      h('label', { class: 'setting' }, h('input', { type: 'checkbox', checked: rules[key] !== false, 'data-rule': key }), h('span', {}, h('strong', { text: label }), h('small', { text: hint })));
+    let close = () => {};
+    const body = h(
+      'div',
+      { class: 'settings' },
+      h('h3', { text: 'Simulation settings' }),
+      h('h4', { text: 'Models' }),
+      box('suppression', 'Suppression', 'Incoming fire makes targets less accurate, slower to fire and spot; infantry get pinned down'),
+      box('morale', 'Morale', 'Units become shaken and break under losses and fire, then rally'),
+      box('orderDelay', 'Order delay', 'Orders take time to reach units: about 5 s for an entity, 15 s a section, 30 s a platoon, 60 s a company; orders to a superior pass down level by level'),
+      box('fuel', 'Fuel', 'Vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down. Supply trucks refuel and rearm.'),
+      h('h4', { text: 'Time and weather (at the scenario start)' }),
+      h(
+        'div',
+        { class: 'env-grid' },
+        ...field('Date', date),
+        ...field('Time of day', time),
+        ...field('Visibility (m)', visibility),
+        ...field('Precipitation', precipitation),
+        ...field('Wind (m/s)', windSpeed),
+        ...field('Wind from (°)', windFrom),
+      ),
+      h('small', { class: 'hint', text: `Now ${env.localTime} on ${env.localDate}. Night cuts eyes and binoculars to under 10% of their range; night-vision goggles keep 60%; thermal sights are unaffected by darkness. Fog cuts every optical sensor (thermals see about 3× further); rain and snow slow vehicles off roads; wind drifts smoke.` }),
+      h(
+        'div',
+        { class: 'row' },
+        h('button', {
+          class: 'primary',
+          text: 'Apply',
+          onclick: async () => {
+            const next: Record<string, boolean> = {};
+            for (const el of body.querySelectorAll<HTMLInputElement>('[data-rule]')) next[el.dataset.rule!] = el.checked;
+            const r = await this.cmd({ cmd: 'setRules', rules: next });
+            const [th, tm] = time.value.split(':').map(Number);
+            const e = await this.cmd({
+              cmd: 'setEnvironment',
+              environment: {
+                date: date.value || env.date,
+                time: Number.isFinite(th) ? th + (tm || 0) / 60 : env.time,
+                visibility: Number(visibility.value),
+                precipitation: precipitation.value as Precipitation,
+                windSpeed: Number(windSpeed.value),
+                windFrom: Number(windFrom.value) % 360,
+              },
+            });
+            if (r.ok && e.ok) close();
+          },
+        }),
+        h('button', { text: 'Cancel', onclick: () => close() }),
+      ),
+    );
+    close = this.modal(body);
   }
 
   private async reviewRecordingDialog(): Promise<void> {
@@ -469,7 +677,7 @@ class App {
     const u = this.unit(id);
     if (e) {
       el.append(
-        h('h3', {}, symbolCanvas(e.force, e.domain, e.symbol, 24), ` ${e.name}`),
+        h('h3', {}, symbolCanvas(e.force, e.domain, e.symbol, 24, undefined, this.sidc(e.typeId)), ` ${e.name}`),
         h('div', { class: 'sub', text: `${this.types.get(e.typeId)?.name ?? e.typeId} · ${FORCE_NAMES[e.force]} · ${e.id} · ${this.aar.active ? 'replay' : 'contact'}` }),
         h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Altitude', this.bind('alt'), 'Heading', this.bind('heading'), 'Speed', this.bind('speed'), 'Damage', this.bind('damage')),
         h('div', { class: 'section' }, h('h4', { text: 'Status' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
@@ -625,7 +833,8 @@ class App {
 
   private async integrationsDialog(): Promise<void> {
     let close = () => {};
-    const origin = location.origin;
+    // The REST and MCP endpoints of this session (sessions other than main live under /s/{id}).
+    const origin = location.origin + BASE;
     const keyArg = this.api.key ? ` --header "Authorization: Bearer ${this.api.key}"` : '';
     const snippet = (text: string) => h('pre', { class: 'snippet', text });
     const status = await this.api.v1<{ cot: CotView; webhooks: WebhookView[] }>('GET', '/integrations').catch((e: Error) => {
@@ -686,7 +895,7 @@ class App {
       if (/hooks\.slack\.com/.test(hookUrl.value)) hookFormat.value = 'slack';
       else if (/discord(app)?\.com\/api\/webhooks/.test(hookUrl.value)) hookFormat.value = 'discord';
     });
-    const kindNames = ['detonation', 'damaged', 'destroyed', 'detected', 'task', 'info', 'fire', 'created', 'deleted'];
+    const kindNames = ['detonation', 'damaged', 'destroyed', 'detected', 'task', 'info', 'radio', 'fire', 'created', 'deleted'];
     const defaultKinds = new Set(['damaged', 'destroyed', 'task', 'info']);
     const kindBoxes = kindNames.map((k) => [k, h('input', { type: 'checkbox', checked: defaultKinds.has(k) }) as HTMLInputElement] as const);
 
@@ -826,7 +1035,7 @@ class App {
             const counts = new Map<string, number>();
             for (const m of u.members) counts.set(m, (counts.get(m) ?? 0) + 1);
             const desc = [...counts].map(([t, n]) => `${n}× ${this.types.get(t)?.name ?? t}`).join(', ');
-            return this.paletteItem(`unit:${u.id}`, symbolCanvas(this.force, lead.domain, lead.symbol, 26, u.echelon), u.name, desc);
+            return this.paletteItem(`unit:${u.id}`, symbolCanvas(this.force, lead.domain, lead.symbol, 26, u.echelon, this.sidc(u.members[0])), u.name, desc);
           }),
         ),
       );
@@ -839,7 +1048,7 @@ class App {
           'div',
           { class: 'palette-group' },
           h('h4', { text: DOMAIN_LABELS[domain] }),
-          types.map((t) => this.paletteItem(`type:${t.id}`, symbolCanvas(this.force, t.domain, t.symbol, 26), t.name, t.description)),
+          types.map((t) => this.paletteItem(`type:${t.id}`, symbolCanvas(this.force, t.domain, t.symbol, 26, undefined, t.sidc), t.name, t.description)),
         ),
       );
     }
@@ -893,7 +1102,7 @@ class App {
       '|' +
       this.selectedId +
       '|' +
-      st.units.map((u) => u.id + u.name + u.memberIds.join()).join() +
+      st.units.map((u) => u.id + u.name + u.memberIds.join() + (u.parentId ?? '')).join() +
       '|' +
       st.entities.map((e) => e.id + e.name + e.damage).join() +
       '|' +
@@ -910,16 +1119,25 @@ class App {
       const loose = st.entities.filter((e) => e.force === f && !e.unitId);
       if (!units.length && !loose.length) continue;
       el.append(h('div', { class: 'tree-head', text: `${FORCE_NAMES[f]} force` }));
-      for (const u of units) {
-        const members = u.memberIds.map((id) => this.entity(id)).filter((e): e is EntitySnapshot => !!e);
-        if (!match(u.name) && !members.some((m) => match(m.name))) continue;
+      const byId = new Map(units.map((u) => [u.id, u]));
+      const subsOf = (u: UnitSnapshot) => (u.childIds ?? []).map((id) => byId.get(id)).filter((x): x is UnitSnapshot => !!x);
+      const membersOf = (u: UnitSnapshot) => u.memberIds.map((id) => this.entity(id)).filter((e): e is EntitySnapshot => !!e);
+      const matches = (u: UnitSnapshot): boolean => match(u.name) || membersOf(u).some((m) => match(m.name)) || subsOf(u).some(matches);
+      // Units nest under their superiors; members follow their subordinate units.
+      const renderUnit = (u: UnitSnapshot, into: HTMLElement) => {
+        if (!matches(u)) return;
+        const members = membersOf(u);
         const lead = members[0];
-        el.append(item(u.id, `${u.name}`, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon) : null));
-        el.append(h('div', { class: 'tree-children' }, members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolCanvas(f, m.domain, m.symbol, 16), m.damage === 'destroyed'))));
-      }
+        into.append(item(u.id, `${u.name}`, lead ? symbolCanvas(f, lead.domain, lead.symbol, 18, u.echelon, this.sidc(lead.typeId)) : null));
+        const kids = h('div', { class: 'tree-children' });
+        for (const sub of subsOf(u)) renderUnit(sub, kids);
+        kids.append(...members.filter((m) => match(m.name) || match(u.name)).map((m) => item(m.id, m.name, symbolCanvas(f, m.domain, m.symbol, 16, undefined, this.sidc(m.typeId)), m.damage === 'destroyed')));
+        into.append(kids);
+      };
+      for (const u of units) if (!u.parentId || !byId.has(u.parentId)) renderUnit(u, el);
       for (const e of loose) {
         if (!match(e.name)) continue;
-        el.append(item(e.id, `${e.name}${e.remote ? ' (remote)' : ''}`, symbolCanvas(f, e.domain, e.symbol, 16), e.damage === 'destroyed'));
+        el.append(item(e.id, `${e.name}${e.remote ? ' (remote)' : ''}`, symbolCanvas(f, e.domain, e.symbol, 16, undefined, this.sidc(e.typeId)), e.damage === 'destroyed'));
       }
     }
     const graphics = st.graphics.filter((g) => match(g.name));
@@ -932,6 +1150,24 @@ class App {
   // ------------------------------------------------------------ selection
 
   select(id: string | null): void {
+    this.selection = new Set(id ? [id] : []);
+    this.selectionChanged(id);
+  }
+
+  /** Add to or remove from a multi-selection. */
+  toggleSelect(id: string): void {
+    if (this.selection.has(id)) this.selection.delete(id);
+    else this.selection.add(id);
+    this.selectionChanged(this.selection.has(id) ? id : ([...this.selection][0] ?? null));
+  }
+
+  selectMany(ids: string[]): void {
+    for (const id of ids) this.selection.add(id);
+    this.selectionChanged(this.selectedId && this.selection.has(this.selectedId) ? this.selectedId : (ids[0] ?? null));
+  }
+
+  private selectionChanged(id: string | null): void {
+    this.map.selectedIds = this.selection;
     this.selectedId = id;
     this.map.selectedId = id;
     this.view3d?.setSelected(id);
@@ -1024,13 +1260,32 @@ class App {
     const hitEntity = this.entity(hit) ?? this.entity(this.unit(hit)?.leaderId);
     const hitGraphic = this.graphic(hit);
 
-    if (selTaskable && hit !== sel) {
+    const group = this.selection.size > 1 && !(hit && this.selection.has(hit)) ? this.orderable() : [];
+    if (group.length > 1) {
+      items.push(h('div', { class: 'title', text: `${group.length} selected` }));
+      const selForces = new Set(group.map((id) => this.entity(id)?.force ?? this.unit(id)?.force));
+      if (hitEntity && hit && !selForces.has(hitEntity.force) && hitEntity.damage !== 'destroyed') {
+        add(`All attack ${hitEntity.name}`, () => this.groupOrder((id) => this.task(id, { type: 'attack', targetId: hitEntity.id })));
+      } else if (this.unit(hit) && selForces.has(this.unit(hit)!.force) && group.every((id) => this.unit(id))) {
+        add(`Put under ${this.unit(hit)!.name}`, () => this.groupOrder((id) => this.cmd({ cmd: 'setSuperior', unitId: id, superiorId: hit! })));
+      } else {
+        add('Move here (keep formation)', () => this.groupTaskAt(world, (t) => ({ type: 'moveTo', target: t }), false));
+        add('Move here by a covered route', () => this.groupTaskAt(world, (t) => ({ type: 'moveTo', target: t, covered: true }), false));
+        add('Defend here (in line)', () => this.groupTaskAt(world, (t, f) => ({ type: 'defend', position: t, facing: f }), true));
+        add('Overwatch here (in line)', () => this.groupTaskAt(world, (t, f) => ({ type: 'overwatch', position: t, facing: f }), true));
+        const guns = group.filter((id) => this.hasIndirect(id));
+        if (guns.length) add(`Fire mission here (${guns.length} firing)`, () => void Promise.all(guns.map((id) => this.task(id, { type: 'fireMission', target: world, rounds: 3, radius: this.unit(id) ? 50 : 0 }))));
+      }
+      add('Stop all', () => this.groupOrder((id) => this.cmd({ cmd: 'stop', targetId: id })));
+      sep();
+    } else if (selTaskable && hit !== sel) {
       items.push(h('div', { class: 'title', text: selName ?? '' }));
       if (hitEntity && hit) {
         const selForce = this.entity(sel)?.force ?? this.unit(sel)?.force;
         if (hitEntity.force !== selForce && hitEntity.damage !== 'destroyed') add(`Attack ${hitEntity.name}`, () => this.task(sel, { type: 'attack', targetId: hitEntity.id }));
         if (hitEntity.force !== selForce && this.hasIndirect(sel)) add(`Fire mission on ${hitEntity.name}`, () => this.task(sel, { type: 'fireMission', target: { x: Math.round(hitEntity.x), y: Math.round(hitEntity.y) }, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
         add(`Follow ${hitEntity.name}`, () => this.task(sel, { type: 'follow', targetId: hitEntity.id }));
+        if (hitEntity.force === selForce && hitEntity.supplies !== undefined && hitEntity.id !== sel) add(`Resupply from ${hitEntity.name}`, () => this.task(sel, { type: 'resupply', supplierId: hitEntity.id }));
         const carrierId = this.unit(hit) ? hit : hitEntity.id;
         if (hitEntity.force === selForce && this.domainOf(sel) === 'lifeform' && this.isCarrier(carrierId)) {
           const cname = this.unit(hit)?.name ?? hitEntity.name;
@@ -1040,8 +1295,22 @@ class App {
       } else if (hitGraphic && (hitGraphic.kind === 'route' || hitGraphic.kind === 'phaseLine')) {
         add(`Follow route ${hitGraphic.name}`, () => this.task(sel, { type: 'followRoute', routeId: hitGraphic.id }));
         add(`Patrol route ${hitGraphic.name}`, () => this.task(sel, { type: 'patrol', routeId: hitGraphic.id }));
-      } else {
+      } else if (hitGraphic && (hitGraphic.kind === 'minefield' || hitGraphic.kind === 'obstacle') && this.canBreach(sel)) {
+        add(`Breach a lane through ${hitGraphic.name}`, () => this.task(sel, { type: 'breach', graphicId: hitGraphic.id }));
         add('Move here', () => this.task(sel, { type: 'moveTo', target: world }));
+      } else {
+        if (hitGraphic?.kind === 'area') {
+          add(`Search ${hitGraphic.name}`, () => this.task(sel, { type: 'search', areaId: hitGraphic.id }));
+          const here = this.entity(sel) ?? this.entity(this.unit(sel)?.leaderId);
+          if (here && this.domainOf(sel) !== 'air') add(`Ambush ${hitGraphic.name} from here`, () => this.task(sel, { type: 'ambush', position: { x: Math.round(here.x), y: Math.round(here.y) }, killZoneId: hitGraphic.id }));
+        }
+        add('Move here', () => this.task(sel, { type: 'moveTo', target: world }));
+        if (this.domainOf(sel) !== 'air') {
+          add('Move here by a covered route', () => this.task(sel, { type: 'moveTo', target: world, covered: true }));
+          add('Overwatch here', () => this.task(sel, { type: 'overwatch', position: world }));
+          add('Defend here', () => this.task(sel, { type: 'defend', position: world }));
+          add('Screen here', () => this.task(sel, { type: 'screen', position: world }));
+        }
         if (this.passengerCount(sel) > 0) {
           add('Move here and dismount', () => {
             this.planDrafts.set(sel, { name: 'Move and dismount', statements: [{ kind: 'task', task: { type: 'moveTo', target: world } }, { kind: 'task', task: { type: 'dismount' } }] });
@@ -1049,6 +1318,7 @@ class App {
           });
         }
         if (this.hasIndirect(sel)) add('Fire mission here (3 rounds)', () => this.task(sel, { type: 'fireMission', target: world, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
+        if (this.hasSmoke(sel)) add('Smoke screen here (2 rounds)', () => this.task(sel, { type: 'fireMission', target: world, rounds: 2, radius: this.unit(sel) ? 60 : 0, smoke: true }));
         if (this.domainOf(sel) === 'air') add('Orbit here (2 km)', () => this.task(sel, { type: 'orbit', center: world, radius: 2000 }));
         add('Add "move here" to plan', () => this.addPlanStep(sel, { kind: 'task', task: { type: 'moveTo', target: world } }));
       }
@@ -1082,6 +1352,15 @@ class App {
 
   private updateInspector(): void {
     const el = $('#inspector');
+    if (this.selection.size > 1) {
+      const key = `multi:${[...this.selection].sort().join(',')}`;
+      if (key !== this.inspectorFor) {
+        this.inspectorFor = key;
+        clear(el);
+        this.buildMultiInspector(el);
+      }
+      return;
+    }
     const id = this.selectedId;
     // An object can be selected before the state that contains it arrives; build its panel then.
     if (id && id !== this.inspectorFor && !this.exists(id)) return;
@@ -1131,7 +1410,7 @@ class App {
   private buildEntityInspector(el: HTMLElement, e: EntitySnapshot): void {
     const t = this.types.get(e.typeId);
     el.append(
-      this.nameEditor(e.id, e.name, symbolCanvas(e.force, e.domain, e.symbol, 24)),
+      this.nameEditor(e.id, e.name, symbolCanvas(e.force, e.domain, e.symbol, 24, undefined, this.sidc(e.typeId))),
       h('div', { class: 'sub', text: `${t?.name ?? e.typeId} · ${FORCE_NAMES[e.force]} · ${e.id}${e.remote ? ' · remote (DIS)' : ''}` }),
       h(
         'div',
@@ -1148,6 +1427,14 @@ class App {
         this.bind('speed'),
         'Damage',
         this.bind('damage'),
+        'Suppression',
+        this.bind('suppression'),
+        e.unitId ? null : 'Morale',
+        e.unitId ? null : this.bind('morale'),
+        e.fuel === undefined ? null : 'Fuel',
+        e.fuel === undefined ? null : this.bind('fuel'),
+        e.supplies === undefined ? null : 'Supplies',
+        e.supplies === undefined ? null : this.bind('supplies'),
         e.unitId ? 'Unit' : null,
         e.unitId ? h('a', { href: '#', text: this.unit(e.unitId)?.name ?? e.unitId, onclick: (ev: Event) => (ev.preventDefault(), this.select(e.unitId!)) }) : null,
       ),
@@ -1169,13 +1456,45 @@ class App {
     );
   }
 
+  private pendingOrderText(id: string): string {
+    const o = this.state?.orders?.find((x) => x.targetId === id);
+    return o ? `ORDER IN ${Math.max(0, Math.ceil(o.due - (this.state?.time ?? 0)))} s: ${o.text}` : '';
+  }
+
+  /** Chooser for a unit's superior: same-force units that are not under it. */
+  private superiorSelect(u: UnitSnapshot): HTMLElement {
+    const units = this.state?.units ?? [];
+    const under = new Set<string>([u.id]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const x of units) if (x.parentId && under.has(x.parentId) && !under.has(x.id)) (under.add(x.id), (grew = true));
+    }
+    const options = units.filter((x) => x.force === u.force && !under.has(x.id));
+    return h(
+      'select',
+      { onchange: (ev: Event) => this.cmd({ cmd: 'setSuperior', unitId: u.id, superiorId: (ev.target as HTMLSelectElement).value || null }) },
+      h('option', { value: '', text: '(none)' }),
+      options.map((x) => h('option', { value: x.id, text: x.name, selected: x.id === u.parentId })),
+    );
+  }
+
   private buildUnitInspector(el: HTMLElement, u: UnitSnapshot): void {
     const lead = this.entity(u.leaderId) ?? this.entity(u.memberIds[0]);
     const formation = h('select', { onchange: (ev: Event) => this.cmd({ cmd: 'setFormation', unitId: u.id, formation: (ev.target as HTMLSelectElement).value as Formation }) }, FORMATIONS.map((f) => h('option', { value: f, text: f, selected: f === u.formation })));
     el.append(
-      this.nameEditor(u.id, u.name, lead ? symbolCanvas(u.force, lead.domain, lead.symbol, 24, u.echelon) : null),
+      this.nameEditor(u.id, u.name, lead ? symbolCanvas(u.force, lead.domain, lead.symbol, 24, u.echelon, this.sidc(lead.typeId)) : null),
       h('div', { class: 'sub', text: `${u.echelon} · ${FORCE_NAMES[u.force]} · ${u.id}` }),
-      h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Strength', this.bind('strength'), 'Leader', this.bind('leader'), 'Formation', formation),
+      h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Strength', this.bind('strength'), 'Morale', this.bind('morale'), 'Leader', this.bind('leader'), 'Formation', formation, 'Superior', this.superiorSelect(u)),
+      ...(u.childIds?.length
+        ? [
+            h(
+              'div',
+              { class: 'kv' },
+              'Subordinates',
+              h('span', {}, ...u.childIds.flatMap((id, i) => [i ? ', ' : '', h('a', { href: '#', text: this.unit(id)?.name ?? id, onclick: (ev: Event) => (ev.preventDefault(), this.select(id)) })])),
+            ),
+          ]
+        : []),
       h('div', { class: 'section' }, h('h4', { text: 'Current activity' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
       this.roeSection(u.id),
       this.reactionsSection(u.id, true),
@@ -1184,6 +1503,266 @@ class App {
       h('div', { class: 'section' }, h('h4', { text: 'Members' }), h('div', { 'data-bind': 'members' })),
       h('div', { class: 'section row' }, h('button', { text: 'Center', onclick: () => this.centerOn(u.id) }), h('button', { class: 'danger', text: 'Delete unit', onclick: () => this.deleteSelected() })),
     );
+  }
+
+  /** Other exercises running on the same server, each in its own session. */
+  private async sessionsDialog(): Promise<void> {
+    type S = { id: string; path: string; scenario: string; time: number; running: boolean; entities: number; clients: number };
+    const stored = await this.api.v1<{ name: string; title?: string }[]>('GET', '/scenarios').catch(() => []);
+    const list = h('div', {});
+    const render = async () => {
+      // Sessions are listed by the server as a whole, whichever session this page is in.
+      const r = await fetch('/api/v1/sessions', { headers: this.api.headers() });
+      const sessions = r.ok ? ((await r.json()) as S[]) : [];
+      clear(list);
+      list.append(
+        h(
+          'table',
+          { class: 'aar-table' },
+          h('thead', {}, h('tr', {}, ['Session', 'Scenario', 'Time', 'Entities', 'Viewers', ''].map((c) => h('th', { text: c })))),
+          h(
+            'tbody',
+            {},
+            sessions.map((s) =>
+              h(
+                'tr',
+                {},
+                h('td', { text: s.id === 'main' ? 'main' : s.id }),
+                h('td', { text: s.scenario }),
+                h('td', { text: `${fmtTime(s.time)}${s.running ? ' ▶' : ''}` }),
+                h('td', { text: String(s.entities) }),
+                h('td', { text: String(s.clients) }),
+                h(
+                  'td',
+                  {},
+                  (s.path === '/' ? BASE === '' : BASE === s.path.slice(0, -1)) ? h('span', { class: 'hint', text: 'this page' }) : h('a', { href: this.api.link(s.path), text: 'Open' }),
+                  s.id === 'main'
+                    ? null
+                    : h('button', {
+                        class: 'danger',
+                        text: 'Delete',
+                        onclick: async () => {
+                          if (!confirm(`Stop and delete session ${s.id}?`)) return;
+                          await fetch(`/api/v1/sessions/${encodeURIComponent(s.id)}`, { method: 'DELETE', headers: this.api.headers() });
+                          void render();
+                        },
+                      }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    };
+    const id = h('input', { type: 'text', placeholder: 'e.g. red-cell', maxlength: '32' }) as HTMLInputElement;
+    const scenario = h('select', {}, h('option', { value: '', text: 'Empty scenario' }), stored.map((s) => h('option', { value: s.name, text: s.title ?? s.name }))) as HTMLSelectElement;
+    let close = () => {};
+    close = this.modal(
+      h(
+        'div',
+        { class: 'settings' },
+        h('h3', { text: 'Sessions' }),
+        h('p', { class: 'hint', text: 'Each session is a separate exercise with its own scenario, clock, recording, REST API (/s/{id}/api/v1) and MCP endpoint (/s/{id}/mcp). DIS and CoT run in the main session only.' }),
+        list,
+        h('h4', { text: 'New session' }),
+        h('div', { class: 'env-grid' }, h('label', { text: 'Name' }), id, h('label', { text: 'Scenario' }), scenario),
+        h(
+          'div',
+          { class: 'row' },
+          h('button', {
+            class: 'primary',
+            text: 'Create and open',
+            onclick: async () => {
+              const r = await fetch('/api/v1/sessions', { method: 'POST', headers: this.api.headers(true), body: JSON.stringify({ id: id.value.trim().toLowerCase() || undefined, scenario: scenario.value || undefined }) });
+              const j = (await r.json()) as S & { error?: { message: string } };
+              if (!r.ok) return this.toast(j.error?.message ?? 'could not create the session');
+              location.href = this.api.link(j.path);
+            },
+          }),
+          h('button', { text: 'Close', onclick: () => close() }),
+        ),
+      ),
+    );
+    await render();
+  }
+
+  /** Monte Carlo runs of a scenario in the background, with the outcome statistics. */
+  private async batchDialog(): Promise<void> {
+    const stored = await this.api.v1<{ name: string; title?: string }[]>('GET', '/scenarios').catch(() => []);
+    const scenario = h('select', {}, h('option', { value: '', text: 'The current state' }), stored.map((s) => h('option', { value: s.name, text: s.title ?? s.name }))) as HTMLSelectElement;
+    const runs = h('input', { type: 'number', min: '1', max: '1000', value: '20' }) as HTMLInputElement;
+    const minutes = h('input', { type: 'number', min: '1', max: '1440', value: '30' }) as HTMLInputElement;
+    const seed = h('input', { type: 'number', value: '1000' }) as HTMLInputElement;
+    const early = h('input', { type: 'checkbox', checked: true }) as HTMLInputElement;
+    const out = h('div', { class: 'batch-out' });
+    const startBtn = h('button', { class: 'primary', text: 'Run' }) as HTMLButtonElement;
+    let jobId: string | null = null;
+    let timer = 0;
+    let close = () => {};
+    const stop = () => window.clearInterval(timer);
+    const cancelBtn = h('button', {
+      text: 'Close',
+      onclick: () => {
+        stop();
+        if (jobId && cancelBtn.textContent === 'Cancel run') void this.api.v1('DELETE', `/batch/${jobId}`).catch(() => undefined);
+        close();
+      },
+    }) as HTMLButtonElement;
+    type Job = { id: string; status: string; done: number; runs: number; error?: string; thread: string; summary?: BatchView };
+    const poll = async () => {
+      if (!jobId) return;
+      const j = await this.api.v1<Job>('GET', `/batch/${jobId}`).catch(() => null);
+      if (!j) return;
+      clear(out);
+      if (j.status === 'running') {
+        out.append(h('p', { text: `Running ${j.done}/${j.runs}…` }), h('span', { class: 'meter wide' }, h('span', { style: `width:${Math.round((j.done / j.runs) * 100)}%;background:var(--accent)` })));
+        return;
+      }
+      stop();
+      cancelBtn.textContent = 'Close';
+      startBtn.disabled = false;
+      if (j.status !== 'done' || !j.summary) {
+        out.append(h('p', { class: 'hint', text: `Batch ${j.status}${j.error ? `: ${j.error}` : ''}` }));
+        return;
+      }
+      out.append(batchResults(j.summary), h('div', { class: 'row' }, h('button', { text: 'Download runs (CSV)', onclick: () => this.api.download(`/batch/${j.id}/runs.csv`, `batch-${j.id}.csv`).catch((e) => this.toast(String(e.message))) })));
+    };
+    startBtn.addEventListener('click', async () => {
+      try {
+        const j = await this.api.v1<Job>('POST', '/batch', {
+          scenario: scenario.value || undefined,
+          runs: Number(runs.value),
+          duration: Number(minutes.value) * 60,
+          seed: Number(seed.value),
+          stopWhenDestroyed: early.checked,
+        });
+        jobId = j.id;
+        startBtn.disabled = true;
+        cancelBtn.textContent = 'Cancel run';
+        stop();
+        timer = window.setInterval(() => void poll(), 1000);
+        void poll();
+      } catch (err) {
+        this.toast(String((err as Error).message));
+      }
+    });
+    const field = (label: string, input: HTMLElement) => [h('label', { text: label }), input];
+    close = this.modal(
+      h(
+        'div',
+        { class: 'settings batch' },
+        h('h3', { text: 'Batch analysis' }),
+        h('p', { class: 'hint', text: 'Run the scenario many times with different random seeds, on the server in the background, and compare the outcomes.' }),
+        h('div', { class: 'env-grid' }, ...field('Scenario', scenario), ...field('Runs', runs), ...field('Minutes per run', minutes), ...field('First seed', seed), ...field('Stop when a side is wiped out', early)),
+        h('div', { class: 'row' }, startBtn, cancelBtn),
+        out,
+      ),
+    );
+    document.getElementById('modal-body')?.classList.add('wide');
+  }
+
+  private async undoRedo(which: 'undo' | 'redo'): Promise<void> {
+    if (this.aar.active) return this.toast('Replaying: exit the AAR to edit', true);
+    const r = await this.cmd({ cmd: which });
+    if (r.ok) this.toast(which === 'undo' ? 'Undone' : 'Redone', true);
+  }
+
+  /** Several things selected: list them; right-click the map to order them all. */
+  private buildMultiInspector(el: HTMLElement): void {
+    const ids = [...this.selection];
+    const loose = ids.filter((id) => this.entity(id) && !this.entity(id)!.unitId && !this.entity(id)!.remote);
+    const forces = new Set(loose.map((id) => this.entity(id)!.force));
+    el.append(
+      h('h3', { text: `${ids.length} selected` }),
+      h('p', { class: 'hint', text: 'Right-click the map to give them all an order: they keep their positions relative to each other. Shift+click adds or removes; Shift+drag selects a box.' }),
+      h(
+        'div',
+        { class: 'section' },
+        ids.map((id) => {
+          const e = this.entity(id);
+          const u = this.unit(id);
+          const lead = e ?? this.entity(u?.leaderId);
+          const name = e?.name ?? u?.name ?? this.graphic(id)?.name ?? id;
+          return h(
+            'div',
+            { class: 'tree-item', onclick: () => this.select(id) },
+            lead ? symbolCanvas(lead.force, lead.domain, lead.symbol, 16, u?.echelon, this.sidc(lead.typeId)) : null,
+            name,
+          );
+        }),
+      ),
+      h(
+        'div',
+        { class: 'section row' },
+        loose.length >= 2 && forces.size === 1 ? h('button', { text: 'Group into a unit', onclick: () => this.cmd({ cmd: 'groupUnit', entityIds: loose }).then((r) => r.ok && r.id && this.select(r.id)) }) : null,
+        h('button', { text: 'Stop all', onclick: () => this.groupOrder((id) => this.cmd({ cmd: 'stop', targetId: id })) }),
+        h('button', { text: 'Clear selection', onclick: () => this.select(null) }),
+        h('button', {
+          class: 'danger',
+          text: 'Delete all',
+          onclick: async () => {
+            if (!confirm(`Delete ${ids.length} objects?`)) return;
+            for (const id of ids) if (this.exists(id)) await this.cmd({ cmd: 'deleteObject', id });
+            this.select(null);
+          },
+        }),
+      ),
+    );
+  }
+
+  /** The selected things that take orders: units, and entities not in a selected unit. */
+  private orderable(): string[] {
+    const ids = [...this.selection];
+    return ids.filter((id) => {
+      const e = this.entity(id);
+      if (e) return !e.remote && e.damage !== 'destroyed' && !(e.unitId && this.selection.has(e.unitId));
+      return !!this.unit(id);
+    });
+  }
+
+  private async groupOrder(fn: (id: string) => Promise<unknown>): Promise<void> {
+    for (const id of this.orderable()) await fn(id);
+    this.refreshPath();
+  }
+
+  /** Where a selected thing is: entity position or unit centre. */
+  private positionOf(id: string): Vec2 | undefined {
+    const e = this.entity(id);
+    if (e) return { x: e.x, y: e.y };
+    const u = this.unit(id);
+    return u ? { x: u.x, y: u.y } : undefined;
+  }
+
+  /**
+   * Order the whole selection to a point: moves keep their offsets from the group's
+   * centre; positional tasks spread them in a line across the direction of the move.
+   */
+  private groupTaskAt(world: Vec2, make: (target: Vec2, facing: number) => TaskSpec, line: boolean): void {
+    const ids = this.orderable();
+    const pos = ids.map((id) => this.positionOf(id)!).filter(Boolean);
+    if (!pos.length) return;
+    const c = { x: pos.reduce((s, p) => s + p.x, 0) / pos.length, y: pos.reduce((s, p) => s + p.y, 0) / pos.length };
+    const facing = ((Math.atan2(world.x - c.x, world.y - c.y) * 180) / Math.PI + 360) % 360;
+    const h = (facing * Math.PI) / 180;
+    const size = this.terrainData?.spec.size ?? Infinity;
+    const clamp = (p: Vec2) => ({ x: Math.round(Math.max(0, Math.min(size, p.x))), y: Math.round(Math.max(0, Math.min(size, p.y))) });
+    let targets: Vec2[];
+    if (line) {
+      const side = (p: Vec2) => (p.x - c.x) * Math.cos(h) - (p.y - c.y) * Math.sin(h);
+      const order = ids.map((id, i) => ({ id, i, s: side(pos[i]) })).sort((a, b) => a.s - b.s);
+      const gap = ids.some((id) => this.unit(id)) ? 300 : 60;
+      targets = new Array(ids.length);
+      order.forEach((o, k) => {
+        const off = (k - (order.length - 1) / 2) * gap;
+        targets[o.i] = clamp({ x: world.x + Math.cos(h) * off, y: world.y - Math.sin(h) * off });
+      });
+    } else {
+      targets = pos.map((p) => clamp({ x: world.x + p.x - c.x, y: world.y + p.y - c.y }));
+    }
+    void (async () => {
+      for (let i = 0; i < ids.length; i++) await this.cmd({ cmd: 'assignTask', targetId: ids[i], task: make(targets[i], Math.round(facing)) });
+      this.refreshPath();
+    })();
   }
 
   private buildGraphicInspector(el: HTMLElement, g: Graphic): void {
@@ -1204,14 +1783,25 @@ class App {
       h(
         'div',
         { class: 'kv' },
+        // Values in their own elements: two text nodes in a row would merge into one grid cell.
         'Points',
-        String(g.points.length),
+        h('span', { text: String(g.points.length) }),
         g.kind === 'area' ? 'Area' : g.kind === 'point' ? 'Location' : 'Length',
-        g.kind === 'area' ? `${(area / 1e6).toFixed(2)} km²` : g.kind === 'point' ? fmtGrid(g.points[0].x, g.points[0].y) : `${(len / 1000).toFixed(2)} km`,
+        h('span', { text: g.kind === 'area' ? `${(area / 1e6).toFixed(2)} km²` : g.kind === 'point' ? fmtGrid(g.points[0].x, g.points[0].y) : `${(len / 1000).toFixed(2)} km` }),
       ),
-      h('p', { class: 'hint', text: g.kind === 'route' || g.kind === 'phaseLine' ? 'Select an entity or unit, then right-click this route to follow or patrol it.' : g.kind === 'area' ? 'Areas can be used in plans: "wait until in area".' : '' }),
+      ...(g.kind === 'minefield' ? [this.densityEditor(g)] : []),
+      ...(g.kind === 'minefield' || g.kind === 'obstacle'
+        ? [h('div', { class: 'kv' }, 'Lanes', h('span', { text: String(g.lanes?.length ?? 0) }), 'Known to', h('span', { text: [g.force, ...(g.knownBy ?? [])].map((f) => FORCE_NAMES[f]).join(', ') }))]
+        : []),
+      h('p', { class: 'hint', text: GRAPHIC_HINTS[g.kind] }),
       h('div', { class: 'section row' }, h('button', { text: 'Center', onclick: () => this.centerOn(g.id) }), h('button', { class: 'danger', text: 'Delete', onclick: () => this.deleteSelected() })),
     );
+  }
+
+  private densityEditor(g: Graphic): HTMLElement {
+    const input = h('input', { type: 'number', min: '0.05', max: '3', step: '0.05', value: String(g.density ?? 0.5) }) as HTMLInputElement;
+    input.addEventListener('change', () => this.cmd({ cmd: 'updateGraphic', id: g.id, density: Number(input.value) }));
+    return h('div', { class: 'kv' }, 'Density', input);
   }
 
   private reactionsSection(id: string, isUnit: boolean): HTMLElement {
@@ -1346,6 +1936,18 @@ class App {
             return `Mount ${this.unit(t.carrierId)?.name ?? name(t.carrierId)}`;
           case 'dismount':
             return 'Dismount passengers';
+          case 'breach':
+            return `Breach ${name(t.graphicId)}`;
+          case 'resupply':
+            return t.supplierId ? `Resupply from ${name(t.supplierId)}` : 'Resupply';
+          case 'overwatch':
+          case 'defend':
+          case 'screen':
+            return `${t.type[0].toUpperCase()}${t.type.slice(1)} ${fmtGrid(t.position.x, t.position.y)}`;
+          case 'ambush':
+            return `Ambush ${name(t.killZoneId)}`;
+          case 'search':
+            return `Search ${name(t.areaId)}`;
           default:
             return t.type;
         }
@@ -1366,6 +1968,8 @@ class App {
         if (c.type === 'underFire') return 'Wait until under fire';
         if (c.type === 'enemyInArea') return `Wait until enemy in ${name(c.areaId)}`;
         if (c.type === 'strengthBelow') return `Wait until strength below ${Math.round(c.fraction * 100)}%`;
+        if (c.type === 'fuelBelow') return `Wait until fuel below ${Math.round(c.fraction * 100)}%`;
+        if (c.type === 'ammoBelow') return `Wait until ammunition below ${Math.round(c.fraction * 100)}%`;
         return `Wait until ${name(c.entityId)} destroyed`;
       }
       case 'setReactions':
@@ -1393,6 +1997,9 @@ class App {
       ['waitDestroyed', 'Wait until destroyed (pick)'],
       ['waitEnemyInArea', 'Wait until enemy in area'],
       ['waitStrength', 'Wait until strength below (%)'],
+      ['waitFuel', 'Wait until fuel below (%)'],
+      ['waitAmmo', 'Wait until ammunition below (%)'],
+      ['resupply', 'Resupply at the nearest supply vehicle'],
       ['setReaction', 'Set reaction on contact'],
       ['setCallForFire', 'Set call for fire'],
       ...(this.domainOf(id) === 'lifeform' ? ([['mount', 'Mount carrier (pick)']] as [PlanStepKind, string][]) : []),
@@ -1431,8 +2038,8 @@ class App {
         const s = h('select', {}, h('option', { value: 'yes', text: 'Call for fire' }), h('option', { value: 'no', text: 'Stop calling for fire' })) as HTMLSelectElement;
         param.append(s);
         getParam = () => s.value;
-      } else if (['wait', 'setSpeed', 'setAltitude', 'waitTime', 'orbit', 'waitStrength', 'fireMission'].includes(k)) {
-        const defaults: Record<string, string> = { wait: '60', setSpeed: '30', setAltitude: '150', waitTime: String(Math.round((this.state?.time ?? 0) + 120)), orbit: '2000', waitStrength: '50', fireMission: '3' };
+      } else if (['wait', 'setSpeed', 'setAltitude', 'waitTime', 'orbit', 'waitStrength', 'waitFuel', 'waitAmmo', 'fireMission'].includes(k)) {
+        const defaults: Record<string, string> = { wait: '60', setSpeed: '30', setAltitude: '150', waitTime: String(Math.round((this.state?.time ?? 0) + 120)), orbit: '2000', waitStrength: '50', waitFuel: '25', waitAmmo: '30', fireMission: '3' };
         const n = h('input', { type: 'number', value: defaults[k], style: 'width:80px', title: k === 'orbit' ? 'radius (m)' : '' }) as HTMLInputElement;
         param.append(n);
         getParam = () => Number(n.value);
@@ -1484,6 +2091,11 @@ class App {
             return push({ kind: 'waitUntil', condition: { type: 'enemyInArea', areaId: String(v) } });
           case 'waitStrength':
             return push({ kind: 'waitUntil', condition: { type: 'strengthBelow', fraction: Math.min(100, Math.max(1, Number(v) || 50)) / 100 } });
+          case 'waitFuel':
+          case 'waitAmmo':
+            return push({ kind: 'waitUntil', condition: { type: k === 'waitFuel' ? 'fuelBelow' : 'ammoBelow', fraction: Math.min(100, Math.max(1, Number(v) || 25)) / 100 } });
+          case 'resupply':
+            return push({ kind: 'task', task: { type: 'resupply' } });
           case 'setReaction':
             return push({ kind: 'setReactions', reactions: { onContact: v === 'halt' ? 'halt' : 'continue' } });
           case 'mount':
@@ -1625,9 +2237,25 @@ class App {
       set('damage', e.damage === 'none' ? 'operational' : e.damage === 'destroyed' ? 'destroyed' : `${e.damage} kill`, `damage-${e.damage}`);
       set(
         'activity',
-        [e.embarkedIn ? `MOUNTED in ${this.entity(e.embarkedIn)?.name ?? e.embarkedIn}` : '', e.withdrawn ? 'WITHDRAWING' : '', e.halted ? 'HALTED (contact)' : '', e.plan, e.task].filter(Boolean).join(' — ') ||
+        [
+          e.embarkedIn ? `MOUNTED in ${this.entity(e.embarkedIn)?.name ?? e.embarkedIn}` : '',
+          e.moraleState === 'broken' || this.unit(e.unitId)?.moraleState === 'broken' ? 'BROKEN' : '',
+          e.pinned ? 'PINNED' : '',
+          e.withdrawn ? 'WITHDRAWING' : '',
+          this.pendingOrderText(e.id),
+          e.halted ? 'HALTED (contact)' : '',
+          e.prepared === 'dugIn' ? 'DUG IN' : e.prepared === 'hullDown' ? 'HULL-DOWN' : '',
+          e.plan,
+          e.task,
+        ]
+          .filter(Boolean)
+          .join(' — ') ||
           (e.damage === 'destroyed' ? 'destroyed' : 'idle'),
       );
+      set('suppression', suppressionBar(e.suppression ?? 0));
+      if (!e.unitId) set('morale', moraleText(e.morale, e.moraleState));
+      if (e.fuel !== undefined) set('fuel', levelBar(e.fuel));
+      if (e.supplies !== undefined) set('supplies', `${e.supplies.toFixed(1)} vehicle loads`);
       const cap = this.capacityOf(e.id);
       if (cap) set('passengers', `Passengers ${e.passengers?.length ?? 0}/${cap}`);
       syncReactions(e.reactions);
@@ -1655,7 +2283,7 @@ class App {
               {},
               e.contacts.map((cid) => {
                 const c = this.entity(cid);
-                return h('div', { class: 'tree-item', onclick: () => this.select(cid) }, c ? symbolCanvas(c.force, c.domain, c.symbol, 14) : null, `${c?.name ?? cid}${cid === e.engagingId ? '  ◎ engaging' : ''}${c ? ` · ${(Math.hypot(c.x - e.x, c.y - e.y) / 1000).toFixed(1)} km` : ''}`);
+                return h('div', { class: 'tree-item', onclick: () => this.select(cid) }, c ? symbolCanvas(c.force, c.domain, c.symbol, 14, undefined, this.sidc(c.typeId)) : null, `${c?.name ?? cid}${cid === e.engagingId ? '  ◎ engaging' : ''}${c ? ` · ${(Math.hypot(c.x - e.x, c.y - e.y) / 1000).toFixed(1)} km` : ''}`);
               }),
             )
           : h('span', { class: 'hint', text: 'none' }),
@@ -1668,7 +2296,22 @@ class App {
       set('strength', `${alive.length}/${members.length}`);
       set('leader', lead?.name ?? '—');
       const mounted = alive.filter((m) => m.embarkedIn).length;
-      set('activity', [mounted ? `MOUNTED ${mounted}/${alive.length}` : '', u.withdrawn ? 'WITHDRAWING' : '', lead?.halted ? 'HALTED (contact)' : '', u.plan, u.task].filter(Boolean).join(' — ') || 'idle (in formation)');
+      set(
+        'activity',
+        [
+          mounted ? `MOUNTED ${mounted}/${alive.length}` : '',
+          u.moraleState === 'broken' ? 'BROKEN' : '',
+          alive.some((m) => m.pinned) ? `PINNED ${alive.filter((m) => m.pinned).length}/${alive.length}` : '',
+          u.withdrawn ? 'WITHDRAWING' : '',
+          this.pendingOrderText(u.id),
+          lead?.halted ? 'HALTED (contact)' : '',
+          u.plan,
+          u.task,
+        ]
+          .filter(Boolean)
+          .join(' — ') || 'idle (in formation)',
+      );
+      set('morale', moraleText(u.morale, u.moraleState));
       const seats = u.memberIds.reduce((n, m) => n + this.capacityOf(m), 0);
       if (seats) set('passengers', `Passengers ${this.passengerCount(u.id)}/${seats}`);
       syncReactions(u.reactions);
@@ -1682,7 +2325,7 @@ class App {
             h(
               'div',
               { class: `tree-item${m.damage === 'destroyed' ? ' dead' : ''}`, onclick: () => this.select(m.id) },
-              symbolCanvas(m.force, m.domain, m.symbol, 14),
+              symbolCanvas(m.force, m.domain, m.symbol, 14, undefined, this.sidc(m.typeId)),
               `${m.name}${m.id === u.leaderId ? ' ★' : ''} · ${m.damage === 'none' ? 'ok' : m.damage}${m.engagingId ? ' · engaging' : ''}`,
             ),
           ),
@@ -1735,3 +2378,82 @@ declare global {
 window.werforces = new App();
 
 export type { UnitTemplate };
+
+const GRAPHIC_HINTS: Record<GraphicKind, string> = {
+  route: 'Select an entity or unit, then right-click this route to follow or patrol it.',
+  phaseLine: 'Select an entity or unit, then right-click this line to follow or patrol it.',
+  area: 'Areas can be used in plans: "wait until in area".',
+  point: '',
+  minefield: 'Vehicles and troops crossing it may set off mines (density: chance per 100 m driven). Forces avoid it once they know it is there. Select engineers, then right-click it to breach a lane.',
+  obstacle: 'Vehicles cannot cross it; infantry climb through slowly. Select engineers, then right-click it to breach a lane.',
+};
+
+const PRECIPITATION_LABELS: Record<Precipitation, string> = { none: '', rain: 'rain', heavyRain: 'heavy rain', snow: 'snow' };
+
+interface BatchView {
+  scenario: string;
+  runs: number;
+  duration: number;
+  losses: { force: ForceId; total: number; stats: { mean: number; sd: number; min: number; max: number; ci95: [number, number] }; histogram: number[] }[];
+  exchangeRatio?: number;
+  areas: { id: string; name: string; held: Partial<Record<ForceId, number>> }[];
+  shots: { mean: number };
+  endTime: { mean: number };
+  wallSeconds: number;
+}
+
+/** Batch outcome tables and a loss histogram per force. */
+function batchResults(s: BatchView): HTMLElement {
+  const colors: Record<number, string> = { 0: '#e0d060', 1: '#4fa3ff', 2: '#ff5a5a', 3: '#5ad06a' };
+  const hist = (hgram: number[], color: string) => {
+    const max = Math.max(1, ...hgram);
+    const w = 220;
+    const bw = w / hgram.length;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', String(w));
+    svg.setAttribute('height', '40');
+    hgram.forEach((n, i) => {
+      const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      const hh = (n / max) * 34;
+      r.setAttribute('x', String(i * bw + 0.5));
+      r.setAttribute('y', String(36 - hh));
+      r.setAttribute('width', String(Math.max(1, bw - 1)));
+      r.setAttribute('height', String(hh));
+      r.setAttribute('fill', color);
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      t.textContent = `${n} run${n === 1 ? '' : 's'} lost ${i}`;
+      r.append(t);
+      svg.append(r);
+    });
+    return svg;
+  };
+  return h(
+    'div',
+    {},
+    h('p', { class: 'hint', text: `${s.scenario}: ${s.runs} runs of ${Math.round(s.duration / 60)} min in ${s.wallSeconds} s · runs ended at ${Math.round(s.endTime.mean / 60)} min on average · ${s.shots.mean} rounds fired per run` }),
+    h(
+      'table',
+      { class: 'aar-table' },
+      h('thead', {}, h('tr', {}, ['Force', 'Losses (mean ± sd)', '95% CI', 'Range', 'Distribution of losses'].map((c) => h('th', { text: c })))),
+      h(
+        'tbody',
+        {},
+        s.losses.map((l) =>
+          h(
+            'tr',
+            {},
+            h('td', { text: FORCE_NAMES[l.force] }),
+            h('td', { text: `${l.stats.mean} ± ${l.stats.sd} of ${l.total}` }),
+            h('td', { text: `${l.stats.ci95[0]} – ${l.stats.ci95[1]}` }),
+            h('td', { text: `${l.stats.min} – ${l.stats.max}` }),
+            h('td', {}, hist(l.histogram, colors[l.force] ?? '#aaa')),
+          ),
+        ),
+      ),
+    ),
+    s.exchangeRatio !== undefined ? h('p', { text: `Loss exchange ratio (Red lost per Blue lost): ${s.exchangeRatio}` }) : null,
+    ...s.areas.map((a) =>
+      h('p', { text: `${a.name} held at the end: ${Object.entries(a.held).map(([f, p]) => `${FORCE_NAMES[Number(f) as ForceId]} ${Math.round((p ?? 0) * 100)}%`).join(', ') || 'by nobody'}` }),
+    ),
+  );
+}

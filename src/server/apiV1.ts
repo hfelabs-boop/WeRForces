@@ -5,7 +5,10 @@ import path from 'node:path';
 import { entitiesGeoJSON, frameFor, graphicsGeoJSON, liveKML, sceneKML } from '../integrations/gis.js';
 import type { IntegrationHub } from '../integrations/hub.js';
 import { dist2d } from '../shared/math.js';
-import type { Command, CommandResult, EntitySnapshot, ForceId, Role, SimEventKind, SimState, TerrainDataset, UnitSnapshot, Vec2 } from '../shared/types.js';
+import type { Command, CommandResult, EntitySnapshot, ForceId, Role, ScenarioFile, SimEventKind, SimState, TerrainData, TerrainDataset, UnitSnapshot, Vec2 } from '../shared/types.js';
+import { outcomesCsv } from '../sim/batch.js';
+import type { BatchManager } from './batch.js';
+import { attachment, eventsCsv, killsCsv, reportPdf, strengthCsv } from './reports.js';
 import { DATASET_NAME, listDatasets } from '../terrain/store.js';
 import { Terrain } from '../sim/terrain.js';
 import { CONTROLLER, canSee, checkCommand, filterEvents, filterState, ForbiddenError } from './fog.js';
@@ -23,6 +26,8 @@ export interface ApiContext {
   recordingDir?: string;
   /** Imported terrain datasets (default: a "terrains" folder next to scenarioDir). */
   terrainDir?: string;
+  /** Batch (Monte Carlo) jobs. */
+  batch?: BatchManager;
 }
 
 const SCENARIO_NAME = /^[A-Za-z0-9_-]{1,64}$/;
@@ -83,7 +88,7 @@ export class ApiV1 {
       throw err;
     }
     const r = executeCommand(this.ctx.runner, c);
-    if (!r.ok) throw new HttpError(/^unknown (entity|unit|object|local entity|graphic)/.test(r.error ?? '') ? 404 : 400, r.error ?? 'command failed');
+    if (!r.ok) throw new HttpError(/^unknown (entity|unit|object|local entity|graphic)\b(?! type)/.test(r.error ?? '') ? 404 : 400, r.error ?? 'command failed');
     return r;
   }
 
@@ -143,6 +148,14 @@ export class ApiV1 {
     return u;
   }
 
+  private weaponName(id: string): string {
+    return this.engine.catalog.weapons.get(id)?.name ?? id;
+  }
+
+  private history() {
+    return { undo: this.ctx.runner.undoStack.length, redo: this.ctx.runner.redoStack.length, time: this.engine.time };
+  }
+
   simulationSummary() {
     const s = this.state();
     const strength = ([1, 2, 3, 0] as ForceId[])
@@ -158,6 +171,8 @@ export class ApiV1 {
       time: s.time,
       running: s.running,
       timeScale: s.timeScale,
+      /** Share of wall-clock time spent simulating (near 1: the server cannot keep up with the time scale). */
+      load: this.ctx.runner.load,
       strength,
       entities: s.entities.length,
       units: s.units.length,
@@ -168,6 +183,7 @@ export class ApiV1 {
         note: 'Local coordinates are metres: x east, y north, from the south-west corner (0,0) to (size,size).',
         towns: t.towns,
       },
+      environment: { localTime: this.engine.env.localTime, period: this.engine.env.period, light: this.engine.env.light, visibility: this.engine.env.visibility, precipitation: this.engine.env.precipitation },
       dis: s.dis ?? { enabled: false },
       lastEventSeq: this.engine.eventsSince(0).at(-1)?.seq ?? 0,
     };
@@ -194,6 +210,16 @@ export class ApiV1 {
       for (let left = seconds; left > 1e-9; left -= 600) this.run({ cmd: 'step', seconds: Math.min(600, left) });
       return { json: this.simulationSummary() };
     });
+    r.get(`${P}/simulation/rules`, () => ({ json: this.engine.rules }));
+    r.put(`${P}/simulation/rules`, (req) => {
+      this.run({ cmd: 'setRules', rules: obj(req.body) as never });
+      return { json: this.engine.rules };
+    });
+    r.get(`${P}/simulation/environment`, () => ({ json: this.engine.env }));
+    r.put(`${P}/simulation/environment`, (req) => {
+      this.run({ cmd: 'setEnvironment', environment: obj(req.body) as never });
+      return { json: this.engine.env };
+    });
     r.put(`${P}/simulation/time-scale`, (req) => {
       this.run({ cmd: 'setTimeScale', scale: num(obj(req.body).scale, 'scale') });
       return { json: this.simulationSummary() };
@@ -207,7 +233,50 @@ export class ApiV1 {
       this.run({ cmd: 'newScenario', name: typeof b.name === 'string' ? b.name : 'Untitled', terrain: b.terrain as never });
       return { status: 201, json: this.simulationSummary() };
     });
+    r.post(`${P}/scenario/undo`, () => (this.run({ cmd: 'undo' }), { json: this.history() }));
+    r.post(`${P}/scenario/redo`, () => (this.run({ cmd: 'redo' }), { json: this.history() }));
     r.get(`${P}/scenarios`, () => ({ json: this.listScenarios() }));
+
+    // ---------------------------------------------------------------- batch runs
+    const batch = () => {
+      if (!this.ctx.batch) throw new HttpError(409, 'batch runs are not available here');
+      return this.ctx.batch;
+    };
+    const job = (id: string) => {
+      const j = batch().get(id);
+      if (!j) throw new HttpError(404, `unknown batch job ${id}`);
+      return j;
+    };
+    r.get(`${P}/batch`, () => ({ json: batch().list() }));
+    r.post(`${P}/batch`, (req) => {
+      const b = obj(req.body);
+      const runs = b.runs === undefined ? 10 : Math.floor(num(b.runs, 'runs'));
+      const duration = b.duration === undefined ? 1800 : num(b.duration, 'duration');
+      if (runs < 1 || runs > 1000) throw new HttpError(400, 'runs must be between 1 and 1000');
+      if (duration <= 0 || duration > 86400) throw new HttpError(400, 'duration must be in (0, 86400] seconds');
+      const scenario = (typeof b.scenario === 'string' ? this.readScenario(b.scenario) : b.scenario && typeof b.scenario === 'object' ? b.scenario : this.engine.toScenario()) as ScenarioFile;
+      if (scenario.format !== 'werforces-scenario') throw new HttpError(400, 'not a WeRForces scenario');
+      const terrains: Record<string, TerrainData> = {};
+      const ds = scenario.terrain?.dataset;
+      if (ds) terrains[ds] = this.engine.terrain.spec.dataset === ds ? this.engine.terrain.toData() : this.engine.terrainLoader!(ds);
+      const j = batch().start({
+        scenario,
+        options: { runs, duration, seed: b.seed === undefined ? 1000 : Math.floor(num(b.seed, 'seed')), stopWhenDestroyed: b.stopWhenDestroyed !== false },
+        catalog: this.engine.catalog.catalog,
+        terrains,
+      });
+      return { status: 202, json: { ...j, outcomes: undefined } };
+    });
+    r.get(`${P}/batch/{id}`, (req) => {
+      const j = job(req.params.id);
+      return { json: { ...j, outcomes: req.query.get('outcomes') === 'true' ? j.outcomes : undefined } };
+    });
+    r.get(`${P}/batch/{id}/runs.csv`, (req) => ({ text: outcomesCsv(job(req.params.id).outcomes), contentType: 'text/csv; charset=utf-8', headers: attachment(`batch-${req.params.id}.csv`) }));
+    r.delete(`${P}/batch/{id}`, (req) => {
+      job(req.params.id);
+      batch().cancel(req.params.id);
+      return { status: 204 };
+    });
     r.get(`${P}/scenarios/{name}`, (req) => ({ json: this.readScenario(req.params.name) }));
     r.post(`${P}/scenarios/{name}/load`, (req) => {
       this.run({ cmd: 'loadScenario', scenario: this.readScenario(req.params.name) as never });
@@ -248,6 +317,10 @@ export class ApiV1 {
     r.get(`${P}/recording`, () => ({ json: rec().summary() }));
     r.get(`${P}/recording/data`, () => ({ json: rec().toJSON() }));
     r.get(`${P}/recording/report`, () => ({ json: rec().report() }));
+    r.get(`${P}/recording/events.csv`, () => ({ text: eventsCsv(rec().report(), rec().toJSON().events), contentType: 'text/csv; charset=utf-8', headers: attachment('events.csv') }));
+    r.get(`${P}/recording/kills.csv`, () => ({ text: killsCsv(rec().report(), (w) => this.weaponName(w)), contentType: 'text/csv; charset=utf-8', headers: attachment('kills.csv') }));
+    r.get(`${P}/recording/strength.csv`, () => ({ text: strengthCsv(rec().report()), contentType: 'text/csv; charset=utf-8', headers: attachment('strength.csv') }));
+    r.get(`${P}/recording/report.pdf`, () => ({ bytes: reportPdf(rec().report(), (w) => this.weaponName(w)), contentType: 'application/pdf', headers: attachment('aar-report.pdf') }));
     r.get(`${P}/recording/state`, (req) => {
       const s = rec().summary();
       const t = req.query.get('time') === null ? s.end : num(req.query.get('time'), 'time');
@@ -257,7 +330,10 @@ export class ApiV1 {
     r.post(`${P}/recording/bookmarks`, (req) => {
       const b = obj(req.body);
       if (typeof b.text !== 'string' || !b.text.trim()) throw new HttpError(400, 'text is required');
-      return { status: 201, json: rec().addBookmark(b.text.trim(), b.time === undefined ? undefined : num(b.time, 'time')) };
+      const mark = rec().addBookmark(b.text.trim(), b.time === undefined ? undefined : num(b.time, 'time'));
+      // Other simulations on the DIS network see it as a Comment PDU.
+      this.ctx.runner.gateway?.sendComment(`Bookmark: ${mark.text}`);
+      return { status: 201, json: mark };
     });
     r.delete(`${P}/recording/bookmarks/{id}`, (req) => {
       if (!rec().removeBookmark(req.params.id)) throw new HttpError(404, `unknown bookmark ${req.params.id}`);
@@ -423,6 +499,7 @@ export class ApiV1 {
       if (b.formation !== undefined) this.run({ cmd: 'setFormation', unitId: id, formation: b.formation as never });
       if (b.roe !== undefined) this.run({ cmd: 'setRoe', targetId: id, roe: b.roe as never });
       if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
+      if (b.superiorId !== undefined) this.run({ cmd: 'setSuperior', unitId: id, superiorId: b.superiorId as string | null });
       return { json: this.unitView(this.unit(id)) };
     });
     r.delete(`${P}/units/{id}`, (req) => {
@@ -442,7 +519,8 @@ export class ApiV1 {
         name: b.name as string | undefined,
         points: b.points.map((p, i) => this.point(p, `points[${i}]`)),
         force: b.force as ForceId | undefined,
-      });
+        density: b.density as number | undefined,
+      } as Command);
       return { status: 201, json: this.engine.graphics.get(res.id!) };
     });
     r.get(`${P}/graphics/{id}`, (req) => {
@@ -457,7 +535,8 @@ export class ApiV1 {
         id: req.params.id,
         name: b.name as string | undefined,
         points: Array.isArray(b.points) ? b.points.map((p, i) => this.point(p, `points[${i}]`)) : undefined,
-      });
+        density: b.density as number | undefined,
+      } as Command);
       return { json: this.engine.graphics.get(req.params.id) };
     });
     r.delete(`${P}/graphics/{id}`, (req) => {
@@ -505,7 +584,7 @@ export class ApiV1 {
       const b = obj(req.body);
       const a = this.endpoint(b.from, 'from');
       const c = this.endpoint(b.to, 'to');
-      return { json: { visible: this.engine.terrain.lineOfSight(a, c), distance: Math.round(Math.hypot(c.x - a.x, c.y - a.y, c.z - a.z)), from: a, to: c } };
+      return { json: { visible: this.engine.lineOfSight(a, c, b.radar === true), distance: Math.round(Math.hypot(c.x - a.x, c.y - a.y, c.z - a.z)), from: a, to: c } };
     });
     r.post(`${P}/terrain/route`, (req) => {
       const b = obj(req.body);
@@ -513,7 +592,11 @@ export class ApiV1 {
       const to = this.point(b.to, 'to');
       const domain = (b.domain as string) ?? 'ground';
       if (!['ground', 'lifeform', 'surface', 'air'].includes(domain)) throw new HttpError(400, 'invalid domain');
-      const route = this.engine.terrain.planRoute(from, to, domain as never, typeof b.offroadFactor === 'number' ? b.offroadFactor : 0.6);
+      const offroad = typeof b.offroadFactor === 'number' ? b.offroadFactor : 0.6;
+      let force = typeof b.force === 'number' ? (b.force as ForceId) : undefined;
+      // Players plan as their own force.
+      if (this.role.kind === 'player') force = this.role.force;
+      const route = force === undefined ? this.engine.terrain.planRoute(from, to, domain as never, offroad) : this.engine.planRoute(from, to, domain as never, offroad, force, b.covered === true);
       if (!route) throw new HttpError(422, 'no route found');
       const pts = [from, ...route];
       let length = 0;
@@ -597,6 +680,8 @@ export class ApiV1 {
     const t = { ...obj(body) };
     if (t.target && typeof t.target === 'object') t.target = this.point(t.target, 'target');
     if (t.center && typeof t.center === 'object') t.center = this.point(t.center, 'center');
+    if (t.position && typeof t.position === 'object') t.position = this.point(t.position, 'position');
+    if (t.fallback && typeof t.fallback === 'object') t.fallback = this.point(t.fallback, 'fallback');
     return t;
   }
 

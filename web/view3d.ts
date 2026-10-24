@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { TerrainGrid } from '../src/shared/terrainGrid.js';
-import type { EntitySnapshot, ForceId, Graphic, SimEvent, SimState, SymbolKind, TerrainData, Vec2 } from '../src/shared/types.js';
+import type { EntitySnapshot, ForceId, EnvironmentState, Graphic, SimEvent, SmokeCloud, SimState, SymbolKind, TerrainData, Vec2 } from '../src/shared/types.js';
 
 export interface View3DCallbacks {
   select(id: string | null): void;
@@ -196,10 +196,9 @@ export class View3D {
 
     const sky = 0xa9c8e8;
     this.scene.background = new THREE.Color(sky);
-    this.scene.add(new THREE.HemisphereLight(0xe8f2ff, 0x4f5b3c, 1.3));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.7);
-    sun.position.set(-1, 1.6, -0.8);
-    this.scene.add(sun, this.graphicsGroup, this.entityGroup);
+    this.scene.add(this.hemi);
+    this.sun.position.set(-1, 1.6, -0.8);
+    this.scene.add(this.sun, this.graphicsGroup, this.entityGroup);
 
     this.buildOverlay();
     this.bindPointer();
@@ -221,17 +220,46 @@ export class View3D {
     this.texCanvas = this.composeTexture(terrainImage);
     this.buildTerrain();
     this.graphicsKey = '';
+    this.smokeKey = '';
     for (const o of this.entities.values()) this.entityGroup.remove(o.group);
     this.entities.clear();
     this.resetCamera();
-    const fogFar = data.spec.size * 3;
-    this.scene.fog = new THREE.Fog(0xa9c8e8, data.spec.size * 0.9, fogFar);
+    this.scene.fog = new THREE.Fog(0xa9c8e8, data.spec.size * 0.9, data.spec.size * 3);
+    this.envKey = '';
+  }
+
+  private hemi = new THREE.HemisphereLight(0xe8f2ff, 0x4f5b3c, 1.3);
+  private sun = new THREE.DirectionalLight(0xffffff, 1.7);
+  private envKey = '';
+
+  /** Dim the scene at night and close in the fog for poor visibility. */
+  private syncEnvironment(env: EnvironmentState | undefined): void {
+    if (!this.data || !env) return;
+    const key = `${env.light}|${env.visibility}|${env.precipitation}`;
+    if (key === this.envKey) return;
+    this.envKey = key;
+    const size = this.data.spec.size;
+    // Keep night scenes readable: dim, but never black.
+    const l = 0.25 + 0.75 * env.light;
+    const day = new THREE.Color(env.precipitation === 'none' ? 0xa9c8e8 : 0x9aa6b2);
+    const sky = day.clone().lerp(new THREE.Color(0x0b1424), 1 - l);
+    (this.scene.background as THREE.Color).copy(sky);
+    this.hemi.intensity = 1.3 * l;
+    this.sun.intensity = 1.7 * Math.max(0.1, env.light);
+    // Haze in proportion to the visibility, but never so thick that the overview disappears.
+    const k = Math.max(0.2, Math.min(1, env.visibility / 10000));
+    const fog = this.scene.fog as THREE.Fog;
+    fog.color.copy(sky);
+    fog.far = size * (1.2 + 1.8 * k);
+    fog.near = fog.far * 0.3 * k;
   }
 
   setState(state: SimState): void {
     this.state = state;
     if (!this.data) return;
     this.syncGraphics(state.graphics);
+    this.syncSmoke(state.smoke ?? []);
+    this.syncEnvironment(state.environment);
     this.syncEntities(state.entities);
   }
 
@@ -378,6 +406,55 @@ export class View3D {
     water.position.y = 0.2;
     this.waterMesh = water;
     this.scene.add(water);
+    this.buildBuildings();
+  }
+
+  private buildingsMesh: THREE.Mesh | null = null;
+
+  /** All building footprints extruded into one mesh, standing on the ground. */
+  private buildBuildings(): void {
+    if (this.buildingsMesh) {
+      this.scene.remove(this.buildingsMesh);
+      this.buildingsMesh.geometry.dispose();
+      this.buildingsMesh = null;
+    }
+    const list = this.data?.buildings ?? [];
+    if (!list.length || !this.grid) return;
+    const pos: number[] = [];
+    const k = this.exaggeration;
+    for (const b of list.slice(0, 100000)) {
+      const n = b.pts.length / 2;
+      if (n < 3) continue;
+      const ring: THREE.Vector2[] = [];
+      let lowest = Infinity;
+      for (let i = 0; i < n; i++) {
+        ring.push(new THREE.Vector2(b.pts[2 * i], b.pts[2 * i + 1]));
+        lowest = Math.min(lowest, this.grid.surfaceHeight(b.pts[2 * i], b.pts[2 * i + 1]));
+      }
+      if (THREE.ShapeUtils.isClockWise(ring)) ring.reverse();
+      const base = lowest * k;
+      const top = (lowest + b.h) * k;
+      const half = this.data!.spec.size / 2;
+      const sx = (p: THREE.Vector2) => p.x - half;
+      const sz = (p: THREE.Vector2) => -(p.y - half);
+      // Walls.
+      for (let i = 0; i < n; i++) {
+        const a = ring[i];
+        const c = ring[(i + 1) % n];
+        pos.push(sx(a), base, sz(a), sx(c), base, sz(c), sx(c), top, sz(c));
+        pos.push(sx(a), base, sz(a), sx(c), top, sz(c), sx(a), top, sz(a));
+      }
+      // Roof.
+      for (const [i, j, l] of THREE.ShapeUtils.triangulateShape(ring, [])) {
+        for (const p of [ring[i], ring[j], ring[l]]) pos.push(sx(p), top, sz(p));
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    this.buildingsMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xb8aea4, roughness: 0.9, metalness: 0, side: THREE.DoubleSide }));
+    this.buildingsMesh.name = 'buildings';
+    this.scene.add(this.buildingsMesh);
   }
 
   // ------------------------------------------------------------ graphics
@@ -420,7 +497,8 @@ export class View3D {
         this.graphicsGroup.add(cone);
         continue;
       }
-      const pts = this.drape(g.points, g.kind === 'area');
+      const closed = g.kind === 'area' || g.kind === 'minefield';
+      const pts = this.drape(g.points, closed);
       const geom = new THREE.BufferGeometry().setFromPoints(pts);
       const mat =
         g.kind === 'phaseLine'
@@ -429,20 +507,24 @@ export class View3D {
       const line = new THREE.Line(geom, mat);
       if (g.kind === 'phaseLine') line.computeLineDistances();
       this.graphicsGroup.add(line);
-      if (g.kind === 'area') {
-        // Translucent "curtain" so objectives read in 3D.
+      if (closed || g.kind === 'obstacle') {
+        // Translucent "curtain" so objectives, minefields and obstacles read in 3D.
         const curtain: number[] = [];
+        const top = (g.kind === 'area' ? 120 : g.kind === 'minefield' ? 25 : 12) * this.exaggeration;
         for (let i = 0; i < pts.length - 1; i++) {
           const a = pts[i];
           const b = pts[i + 1];
-          const top = 120 * this.exaggeration;
           curtain.push(a.x, a.y, a.z, b.x, b.y, b.z, b.x, b.y + top, b.z, a.x, a.y, a.z, b.x, b.y + top, b.z, a.x, a.y + top, a.z);
         }
         const cg = new THREE.BufferGeometry();
         cg.setAttribute('position', new THREE.Float32BufferAttribute(curtain, 3));
-        this.graphicsGroup.add(new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false })));
+        this.graphicsGroup.add(new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: g.kind === 'area' ? 0.16 : 0.35, side: THREE.DoubleSide, depthWrite: false })));
       }
-      const anchor = g.kind === 'area' ? pts.reduce((s, p) => s.add(p), new THREE.Vector3()).divideScalar(pts.length) : pts[0];
+      for (const l of g.lanes ?? []) {
+        const lane = this.drape([l.from, l.to], false);
+        this.graphicsGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(lane), new THREE.LineBasicMaterial({ color: 0xffffff })));
+      }
+      const anchor = closed ? pts.reduce((s, p) => s.add(p), new THREE.Vector3()).divideScalar(pts.length) : pts[0];
       const { tex, aspect } = labelTexture(g.name, '#ffffff');
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, sizeAttenuation: false }));
       sprite.scale.set(0.03 * aspect, 0.03, 1);
@@ -451,6 +533,24 @@ export class View3D {
       sprite.visible = this.labels;
       sprite.userData.label = true;
       this.graphicsGroup.add(sprite);
+    }
+  }
+
+  private smokeKey = '';
+  private smokeGroup = new THREE.Group();
+
+  private syncSmoke(clouds: SmokeCloud[]): void {
+    const key = clouds.map((c) => c.id).join(',') + this.exaggeration;
+    if (key === this.smokeKey) return;
+    this.smokeKey = key;
+    if (!this.smokeGroup.parent) this.scene.add(this.smokeGroup);
+    this.smokeGroup.clear();
+    const mat = new THREE.MeshLambertMaterial({ color: 0xdddddd, transparent: true, opacity: 0.55, depthWrite: false });
+    for (const c of clouds) {
+      const puff = new THREE.Mesh(geo.sphere, mat);
+      puff.scale.set(c.radius * 2, 50 * this.exaggeration, c.radius * 2);
+      puff.position.copy(this.toScene(c.x, c.y, this.grid!.surfaceHeight(c.x, c.y) + 5));
+      this.smokeGroup.add(puff);
     }
   }
 

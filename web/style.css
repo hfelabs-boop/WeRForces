@@ -690,6 +690,11 @@ aside {
   color: #d0a080;
 }
 
+.log-line.k-radio {
+  color: #b9e3a8;
+  font-style: italic;
+}
+
 /* ------------------------------------------------ overlays */
 
 .context-menu {
@@ -1005,4 +1010,87 @@ body.player [data-controller-only] {
 .pill.force-3 {
   color: var(--neutral);
   border-color: var(--neutral);
+}
+
+/* ------------------------------------------------ suppression & settings */
+
+.meter {
+  display: inline-block;
+  width: 90px;
+  height: 7px;
+  background: var(--panel-2);
+  border-radius: 4px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+}
+
+.settings .setting {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 8px 0;
+}
+
+.settings .setting small {
+  display: block;
+  color: var(--muted);
+}
+
+.env-chip {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.env-chip.night {
+  background: #18223d;
+  border-color: #33437a;
+}
+.settings .env-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.timeline-strip {
+  position: relative;
+  border-bottom: 1px solid var(--border);
+}
+.timeline {
+  display: block;
+  width: 100%;
+  height: 30px;
+}
+.timeline-tip {
+  position: absolute;
+  bottom: 32px;
+  max-width: 420px;
+  padding: 3px 7px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.meter.wide {
+  width: 100%;
+}
+.batch .batch-out {
+  margin-top: 10px;
+}
+
+.sim-time.behind {
+  color: var(--warn);
 }

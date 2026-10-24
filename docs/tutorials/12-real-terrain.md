@@ -34,7 +34,8 @@ npm run terrain:import -- --dem Copernicus_DSM_COG_10_N50_00_E009_00_DEM.tif \
 ```
 Wrote terrains/fulda-exercise.json
   10.0 km square, 50 m grid (201x201), SW corner 50.50805, 9.60945
-  relief 250 m, water 0.0%, forest 2.7%, 1 roads, 2 towns
+  relief 250 m, water 0.0%, forest 2.7%, 1 roads, 2 towns, 0 buildings
+Use it: werforces with a scenario whose terrain is {"dataset": "fulda-exercise"}, or New scenario in the GUI.
 ```
 
 The tile is 3600 × 3600 posts; the importer cuts out a 10 km square centred on
@@ -141,11 +142,18 @@ The event log:
 00:02:29  Team TANK Lead detected Red Mech Lead
 00:02:29  Team TANK Lead detected Red Mech 3
 00:02:33  Red Mech Lead destroyed by Team TANK 3
-00:02:39  Red Mech 3 destroyed by Team TANK Lead
+00:02:34  Red Mech: Red Mech Lead lost, Red Mech 3 takes command
+00:02:34  Red Mech broke and is falling back
+…
+00:03:50  Team TANK 2 destroyed by Red Mech 3
+00:05:05  Red Mech rallied
+00:06:05  Red Mech 3 destroyed by Team TANK Lead
 ```
 
-The BMPs are only seen when the tanks come over the last rise, at short range,
-and the fight is over in fifteen seconds. Positions given as latitude/longitude
+The BMPs are seen when the tanks come over a rise about 2.7 km out, and two of
+them are destroyed within eight seconds. The third breaks and falls back. The
+tanks, still driving towards the objective, miss it again and again, and one of
+its Konkurs missiles destroys a tank before the platoon leader hits it at 6:05. Positions given as latitude/longitude
 land where you expect, and everything the simulator sends out (DIS, Cursor on
 Target, GeoJSON, KML) lines up with real maps: open
 `/api/v1/export/scene.kml` in Google Earth to check.
@@ -159,3 +167,5 @@ Target, GeoJSON, KML) lines up with real maps: open
   ground forces cross only at bridges.
 - Put the dataset on another server: `PUT /api/v1/terrains/fulda-exercise` with
   the JSON file as the body.
+
+**Next:** [Tutorial 13: Obstacles, smoke and breaching](13-obstacles-smoke-and-breaching.md).

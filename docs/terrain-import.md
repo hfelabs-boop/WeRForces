@@ -3,7 +3,9 @@
 WeRForces can run on real terrain. `werforces-terrain` takes:
 
 - an **elevation model** (DEM) as a GeoTIFF, and optionally
-- **map features** as GeoJSON (an OpenStreetMap export, or your own),
+- **map features**: GeoJSON (an OpenStreetMap export, or your own), an
+  OpenStreetMap XML file, or straight from the Overpass API;
+- **land cover**: an ESA WorldCover GeoTIFF, or the public WorldCover tiles,
 
 and writes a **terrain dataset** (`terrains/<name>.json`). Scenarios then refer
 to it by name, and everything else (mobility, line of sight, route planning, the
@@ -53,9 +55,52 @@ importer reads WGS-84 GeoJSON and recognises:
 | Rivers and canals | `waterway=river`/`canal` (lines) | `river` | Water one grid cell wide, **except where a road crosses** (a bridge) |
 | Forest | `natural=wood`, `landuse=forest` (polygons) | `forest` | Forest: slows vehicles, hides and protects troops, blocks sight after 150 m |
 | Towns | `place` = city, town, village, hamlet (points with a `name`) | `town` | Named towns (labels; `{"town": "Name"}` positions in the API) |
+| Buildings | `building=*` (polygons, not `building=no`) | – (use a `building` property) | Building footprints: they block sight and movement and give troops cover ([Concepts](concepts.md#terrain)) |
 
 Everything else is ignored, so a full OSM export is fine. Ground below sea level
 in the DEM is water too.
+
+A building's height is its `height` (or `building:height`) tag, else
+`building:levels` × 3 m + 1 m, else a typical height for its type: 3 m for
+garages and sheds, 7 m for houses, 15 m for apartments, offices and hotels,
+20 m for churches and towers, 8 m otherwise.
+
+There are three ways to bring in OpenStreetMap data:
+
+| Option | Source |
+| --- | --- |
+| `--features area.geojson` | A GeoJSON file (Overpass Turbo → *Export → GeoJSON*, QGIS, your own) |
+| `--osm area.osm` | OpenStreetMap XML: *Export* on openstreetmap.org, or saved from JOSM. Multipolygon relations become polygons |
+| `--overpass` | Queries the Overpass API for the roads, water, forest, towns and buildings in the extent. `--overpass-url` picks another server (for example a private Overpass instance). Big areas with many buildings can take a minute |
+
+## Get land cover
+
+[ESA WorldCover 2021](https://esa-worldcover.org/) is a free 10 m land cover map
+of the world. With land cover the importer knows shrub, built-up areas,
+wetland, bare ground and snow, and fills in forest and water the features
+don't have:
+
+| WorldCover class | Becomes |
+| --- | --- |
+| 10 tree cover | forest |
+| 20 shrubland | shrub |
+| 30 grassland, 40 cropland, 100 moss and lichen | open |
+| 50 built-up | built-up |
+| 60 bare / sparse vegetation | bare |
+| 70 snow and ice | snow |
+| 80 permanent water | water |
+| 90 herbaceous wetland, 95 mangroves | wetland |
+
+Each grid post takes the class most of its cell is covered by.
+
+- `--worldcover` reads the classes for the extent straight from the public
+  cloud-optimised tiles on AWS (only the part needed is downloaded) and adds
+  the WorldCover credit to the attribution.
+- `--landcover file.tif` reads a local raster with the same class codes in
+  EPSG:4326, for example a WorldCover tile you downloaded, or your own
+  classification.
+
+Land cover shows as a tint on the 2D map and the 3D ground.
 
 ## Run the import
 
@@ -74,8 +119,15 @@ Wrote terrains/fulda.json
   relief 250 m, water 0.0%, forest 0.0%, 0 roads, 0 towns
 ```
 
-Add `--features area.geojson` to bring in roads, water, forest and towns; the
-summary line then counts them.
+Add `--features area.geojson` (or `--osm`, `--overpass`) to bring in roads,
+water, forest, towns and buildings, and `--worldcover` for land cover; the
+summary line then counts them. For example:
+
+```bash
+npm run terrain:import -- --dem Copernicus_DSM_COG_10_N50_00_E009_00_DEM.tif \
+  --name fulda-town --center 50.553,9.68 --size 4000 --cell 25 --overpass --worldcover \
+  --attribution "Copernicus DEM GLO-30 © DLR e.V./Airbus; © OpenStreetMap contributors (ODbL)"
+```
 
 | Option | Default | Notes |
 | --- | --- | --- |
@@ -96,7 +148,8 @@ control only, up to 8 MB).
 
 Datasets are derived from your sources, so their licences apply. Copernicus DEM
 GLO-30 may be redistributed with its notice (see `terrains/README.md`);
-OpenStreetMap data is under the ODbL and needs "© OpenStreetMap contributors".
+OpenStreetMap data is under the ODbL and needs "© OpenStreetMap contributors";
+ESA WorldCover is CC BY 4.0 (the importer adds its credit with `--worldcover`).
 Put the credit in `--attribution`; it is stored in the dataset and listed by
 `GET /api/v1/terrains`.
 

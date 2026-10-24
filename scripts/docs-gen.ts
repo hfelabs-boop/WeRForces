@@ -67,7 +67,12 @@ export function catalogMarkdown(): string {
   for (const u of c.unitTemplates) {
     const counts = new Map<string, number>();
     for (const m of u.members) counts.set(m, (counts.get(m) ?? 0) + 1);
-    const members = [...counts].map(([id, n]) => `${n}× ${type(id).name}`).join(', ');
+    let members = [...counts].map(([id, n]) => `${n}× ${type(id).name}`).join(', ');
+    if (u.subunits?.length) {
+      const subs = new Map<string, number>();
+      for (const s of u.subunits) subs.set(s, (subs.get(s) ?? 0) + 1);
+      members = `HQ ${members}; ${[...subs].map(([id, n]) => `${n}× \`${id}\``).join(', ')}`;
+    }
     lines.push(`| \`${u.id}\` | ${esc(u.name)} | ${u.echelon} | ${members} | ${u.formation} | ${u.spacing} m |`);
   }
   lines.push('');

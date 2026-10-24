@@ -30,16 +30,22 @@ These pages are also served by a running server at **`/docs`** (toolbar → **He
 | 10 | [Fire support and mechanized infantry](tutorials/10-fire-support-and-mech-infantry.md) | Observers and call for fire, fire missions, carrying and dismounting infantry, halt on contact |
 | 11 | [Exercise control, players and the AAR](tutorials/11-exercise-control-and-aar.md) | Fog of war with player keys, replaying a run, bookmarks, the after-action report |
 | 12 | [Real terrain](tutorials/12-real-terrain.md) | Importing a real DEM and map features, terrain queries on real ground |
+| 13 | [Obstacles, smoke and breaching](tutorials/13-obstacles-smoke-and-breaching.md) | Minefields and obstacle lines, finding mines, breaching lanes with engineers, smoke screens |
+| 14 | [Night, weather and supply](tutorials/14-night-weather-and-supply.md) | Time of day and weather, night vision and thermals, muzzle flashes, fuel, resupply |
+| 15 | [Command, tactics and analysis](tutorials/15-command-tactics-and-analysis.md) | Companies and the chain of command, defend and other tactical tasks, order delay, group orders, undo, batch statistics, AAR export |
 
 ## Guides
 
 - [User guide](user-guide.md): every part of the GUI (2D map, 3D view, panels,
   menus, keyboard).
-- [Concepts](concepts.md): coordinates, forces, entities and units, tasks and
-  plans, sensors, combat and damage, and time.
-- [Terrain import](terrain-import.md): real elevation data and map features.
+- [Concepts](concepts.md): coordinates, terrain, forces, entities and units,
+  the chain of command, tasks and plans, sensors, combat and damage,
+  suppression and morale, night and weather, obstacles, supply, and time.
+- [Terrain import](terrain-import.md): real elevation data, map features,
+  buildings and land cover.
 - [Deployment](deployment.md): Docker, HTTPS, exercise-control and player keys,
-  sizing.
+  OpenID Connect sign-in, several sessions, sizing.
+- [HLA](hla.md): the HLA 1516e bridge federate.
 - [Architecture](architecture.md): how the code is organised, the simulation
   loop, and how to add features.
 - [FAQ and troubleshooting](faq.md)
@@ -52,7 +58,7 @@ These pages are also served by a running server at **`/docs`** (toolbar → **He
 - [MCP tools](reference/mcp-tools.md) *(generated)*
 - [Catalog: entity types, weapons, sensors, unit templates](reference/catalog.md) *(generated)*
 - [Scenario file format](reference/scenario-format.md)
-- [DIS](reference/dis.md)
+- [DIS](reference/dis.md): entity state, fire, detonation, radio and simulation management
 - [Integrations: CoT, webhooks, GIS](reference/integrations.md)
 
 ## Examples

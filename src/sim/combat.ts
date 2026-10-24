@@ -5,6 +5,7 @@ import { dist2d } from '../shared/math.js';
 import type { ArmorClass, Vec2, Vec3, WeaponDef } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
+import { accuracyFactor, exposureFactor, reloadFactor, suppress } from './morale.js';
 
 export interface Shot {
   eventNumber: number;
@@ -17,6 +18,8 @@ export interface Shot {
   fireTime: number;
   impactTime: number;
   range: number;
+  /** A smoke round: makes a cloud where it lands instead of a blast. */
+  smoke?: boolean;
 }
 
 export type DetonationOutcome = 'kill' | 'mobility' | 'firepower' | 'miss' | 'noEffect';
@@ -28,6 +31,8 @@ export interface Detonation {
   outcome: DetonationOutcome;
   /** A command-guided missile lost guidance (launcher killed or lost sight). */
   guidanceLost?: boolean;
+  /** A smoke round: it made a cloud. */
+  smoke?: boolean;
   /** Area-effect rounds: every local entity damaged by the blast. */
   effects?: { entityId: string; outcome: Exclude<DetonationOutcome, 'miss' | 'noEffect'> }[];
 }
@@ -41,6 +46,8 @@ export function effectivePk(engine: Engine, shooter: Entity | undefined, target:
     if (target.speed > 8) pk *= 0.8;
   }
   if ((target.domain === 'ground' || target.domain === 'lifeform') && engine.terrain.isForest(target.x, target.y)) pk *= 0.75;
+  if (shooter) pk *= accuracyFactor(engine, shooter);
+  pk *= exposureFactor(target, engine.terrain);
   return pk;
 }
 
@@ -48,7 +55,7 @@ function canEngage(engine: Engine, shooter: Entity, target: Entity, w: WeaponDef
   if (!w.targets.includes(target.domain)) return false;
   if (range < w.minRange || range > w.maxRange) return false;
   if ((w.pk[target.type.armor] ?? 0) < 0.02) return false;
-  return engine.terrain.lineOfSight(shooter.eye, { x: target.x, y: target.y, z: target.z + 1.5 });
+  return engine.losCached(shooter, target);
 }
 
 /** Choose and fire at most one weapon this tick, honouring ROE and explicit attack targets. */
@@ -120,7 +127,7 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
 function fire(engine: Engine, shooter: Entity, target: Entity, w: WeaponDef, range: number): void {
   const now = engine.time;
   shooter.ammo.set(w.id, (shooter.ammo.get(w.id) ?? 0) - 1);
-  shooter.weaponReadyAt.set(w.id, now + w.reloadTime * engine.rng.range(0.9, 1.1));
+  shooter.weaponReadyAt.set(w.id, now + w.reloadTime * engine.rng.range(0.9, 1.1) * reloadFactor(engine, shooter));
   shooter.lastFiredAt = now;
   shooter.engagingId = target.id;
   const shot: Shot = {
@@ -141,10 +148,10 @@ function fire(engine: Engine, shooter: Entity, target: Entity, w: WeaponDef, ran
 }
 
 /** Launch an indirect-fire round at a ground point. */
-export function fireIndirect(engine: Engine, shooter: Entity, w: WeaponDef, point: Vec2): void {
+export function fireIndirect(engine: Engine, shooter: Entity, w: WeaponDef, point: Vec2, smoke = false): void {
   const now = engine.time;
   shooter.ammo.set(w.id, (shooter.ammo.get(w.id) ?? 0) - 1);
-  shooter.weaponReadyAt.set(w.id, now + w.reloadTime * engine.rng.range(0.9, 1.1));
+  shooter.weaponReadyAt.set(w.id, now + w.reloadTime * engine.rng.range(0.9, 1.1) * reloadFactor(engine, shooter));
   shooter.lastFiredAt = now;
   const range = dist2d(shooter, point);
   engine.launch({
@@ -156,6 +163,7 @@ export function fireIndirect(engine: Engine, shooter: Entity, w: WeaponDef, poin
     fireTime: now,
     impactTime: now + Math.max(1, range / w.projectileSpeed),
     range,
+    smoke: smoke || undefined,
   });
 }
 
@@ -184,6 +192,7 @@ export function applyBlast(engine: Engine, w: WeaponDef, at: Vec3, shooterId?: s
     if (!e.remote) {
       if (shooterId) e.attackers.set(shooterId, engine.time);
       e.underFireUntil = engine.time + 15;
+      suppress(engine, e, 0.8 * (1 - d / (radius * 3)));
     }
     if (d > radius || e.remote) continue;
     let pk = (w.pk[e.type.armor] ?? 0) * (1 - d / radius) ** 2;
@@ -231,6 +240,10 @@ export function resolveImpact(engine: Engine, shot: Shot): Detonation {
     const x = shot.to.x + gaussian(engine) * sigma;
     const y = shot.to.y + gaussian(engine) * sigma;
     const location = { x, y, z: engine.terrain.surfaceHeight(x, y) };
+    if (shot.smoke && w.smoke) {
+      engine.smoke.add(location, w.smoke.radius, w.smoke.duration);
+      return { shot, location, hit: false, outcome: 'noEffect', smoke: true };
+    }
     const effects = w.blastRadius ? applyBlast(engine, w, location, shot.shooterId) : [];
     const outcome = effects.some((f) => f.outcome === 'kill') ? 'kill' : effects[0]?.outcome ?? 'noEffect';
     return { shot, location, hit: effects.length > 0, outcome, effects };
@@ -242,8 +255,11 @@ export function resolveImpact(engine: Engine, shot: Shot): Detonation {
   }
   // Wire/command-guided missiles need the launcher to keep guiding them to impact.
   if (shot.weapon.commandGuided) {
-    const guiding = shooter && shooter.alive && !shooter.firepowerKill && engine.terrain.lineOfSight(shooter.eye, { x: target.x, y: target.y, z: target.z + 1.5 });
-    if (!guiding) return { shot, location: scatter(engine, target.position), hit: false, outcome: 'miss', guidanceLost: true };
+    const guiding = shooter && shooter.alive && !shooter.firepowerKill && engine.losCached(shooter, target);
+    if (!guiding) {
+      suppress(engine, target, 0.15);
+      return { shot, location: scatter(engine, target.position), hit: false, outcome: 'miss', guidanceLost: true };
+    }
   }
   // Guided munitions track the target; ballistic rounds land at the launch aim point.
   const moved = dist2d(target, shot.to);
@@ -256,6 +272,8 @@ export function resolveImpact(engine: Engine, shot: Shot): Detonation {
     const loc = hit ? target.position : scatter(engine, shot.to);
     return { shot, location: loc, hit, outcome: 'noEffect' };
   }
+  // Rounds landing on or around a target keep its head down.
+  suppress(engine, target, hit ? 0.35 : 0.25);
   if (!hit) return { shot, location: scatter(engine, shot.to), hit: false, outcome: 'miss' };
   // Given a hit, the kill probability is pk / hitChance so overall P(kill) == pk.
   const outcome = applyDamage(engine, target, pk / hitChance);

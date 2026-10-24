@@ -80,9 +80,10 @@ The event logs differ too. Blue's has its own detections and kills, with Red
 names replaced by types:
 
 ```
-00:02:33  T-72B3 (E15) destroyed by Gunslinger Lead
-00:02:48  T-72B3 (E17) destroyed by Gunslinger Lead
-00:03:05  T-72B3 (E16) destroyed by Gunslinger 2
+00:02:16  T-72B3 (E15) destroyed by Gunslinger Lead
+00:02:19  T-72B3 (E17) destroyed by Gunslinger 2
+00:02:30  T-72B3 (E16) suffered a firepower kill
+00:02:46  BRDM-2 (E30) destroyed by Gunslinger 2
 ```
 
 while exercise control's says *Tank Plt 1 Lead destroyed by Gunslinger Lead*.
@@ -121,7 +122,7 @@ curl -s -H 'Authorization: Bearer control' localhost:8080/api/v1/recording
 ```
 
 ```json
-{"live":true,"scenarioName":"Calloway Crossroads","start":0,"end":900,"interval":1,"frames":901,"entities":36,"events":53,"bookmarks":[{"id":"B1","time":300,"text":"Gunslinger cleared the road"}],"bytes":1037952}
+{"live":true,"scenarioName":"Calloway Crossroads","start":0,"end":900,"interval":1,"frames":901,"entities":36,"events":62,"bookmarks":[{"id":"B1","time":300,"text":"Gunslinger cleared the road"}],"bytes":1037952}
 ```
 
 `GET /recording/state?time=120` returns everything as it was at 2:00, with
@@ -139,14 +140,14 @@ curl -s -H 'Authorization: Bearer control' localhost:8080/api/v1/recording/repor
 ```
 
 ```json
-{"force":1,"start":14,"end":14,"losses":0,"shots":16,"kills":7}
-{"force":2,"start":19,"end":12,"losses":7,"shots":0,"kills":0}
+{"force":1,"start":14,"end":14,"losses":0,"shots":12,"kills":6}
+{"force":2,"start":19,"end":13,"losses":6,"shots":0,"kills":0}
 {"force":3,"start":3,"end":3,"losses":0,"shots":0,"kills":0}
-{"time":153,"victimId":"E15","victim":"Tank Plt 1 Lead","victimForce":2,"killerId":"E11","killer":"Gunslinger Lead","weaponId":"hellfire"}
-{"hellfire":16}
+{"time":136.7,"victimId":"E15","victim":"Tank Plt 1 Lead","victimForce":2,"killerId":"E11","killer":"Gunslinger Lead","weaponId":"hellfire"}
+{"hellfire":12}
 ```
 
-Sixteen Hellfires for seven kills. Red never fired a shot: it never saw the
+Twelve Hellfires for six kills. Red never fired a shot: it never saw the
 helicopters. That is the kind of thing the debrief is for. AI agents get the
 same report as text from the MCP tool `after_action_report`.
 

@@ -1,6 +1,38 @@
-// Simplified MIL-STD-2525 style symbology drawn on a 2D canvas.
+// Unit and entity symbols on a 2D canvas: full MIL-STD-2525C (rendered by milsymbol),
+// or a simplified style drawn directly.
 
+import ms from 'milsymbol';
+import { sidcFor } from '../src/shared/symbology.js';
 import type { Domain, ForceId, SymbolKind, UnitTemplate } from '../src/shared/types.js';
+
+export type SymbolStyle = '2525' | 'simple';
+let style: SymbolStyle = '2525';
+
+export function setSymbolStyle(s: SymbolStyle): void {
+  style = s;
+}
+
+export function symbolStyle(): SymbolStyle {
+  return style;
+}
+
+/** Rendered 2525 symbols by SIDC and size, with the pixel offset of their anchor. */
+const cache = new Map<string, { canvas: HTMLCanvasElement; ax: number; ay: number; w: number; h: number }>();
+
+function milSymbol(sidc: string, px: number) {
+  const key = `${sidc}@${px}`;
+  let hit = cache.get(key);
+  if (!hit) {
+    const dpr = window.devicePixelRatio || 1;
+    const sym = new ms.Symbol(sidc, { size: px * dpr, outlineWidth: 2 * dpr, outlineColor: 'rgba(0,0,0,0.6)' });
+    const canvas = sym.asCanvas();
+    const a = sym.getAnchor();
+    hit = { canvas, ax: a.x / dpr, ay: a.y / dpr, w: canvas.width / dpr, h: canvas.height / dpr };
+    if (cache.size > 2000) cache.clear();
+    cache.set(key, hit);
+  }
+  return hit;
+}
 
 export const FORCE_COLORS: Record<ForceId, { fill: string; stroke: string; text: string }> = {
   0: { fill: '#ffff80', stroke: '#000', text: '#ffff9a' },
@@ -97,6 +129,20 @@ function icon(ctx: CanvasRenderingContext2D, kind: SymbolKind, s: number): void 
     case 'artillery':
       ctx.arc(0, 0, s * 0.2, 0, Math.PI * 2);
       break;
+    case 'engineer':
+      // The NATO engineer sign: a squared-off "E" lying on its back.
+      ctx.moveTo(-w * 0.6, h * 0.35);
+      ctx.lineTo(-w * 0.6, -h * 0.3);
+      ctx.lineTo(w * 0.6, -h * 0.3);
+      ctx.lineTo(w * 0.6, h * 0.35);
+      ctx.moveTo(0, -h * 0.3);
+      ctx.lineTo(0, h * 0.35);
+      break;
+    case 'supply':
+      // Combat service support, supply: a bar across the lower part of the frame.
+      ctx.moveTo(-w * 1.2, h * 0.55);
+      ctx.lineTo(w * 1.2, h * 0.55);
+      break;
     case 'rotary':
       ctx.moveTo(-w, -h * 0.6);
       ctx.lineTo(w, h * 0.6);
@@ -153,6 +199,8 @@ export interface SymbolOptions {
   remote?: boolean;
   echelon?: UnitTemplate['echelon'];
   alpha?: number;
+  /** The entity type's SIDC pattern (2525 style). */
+  sidc?: string;
 }
 
 /** Draw a symbol centred at (x, y) in screen pixels. `s` is the half-height. */
@@ -181,6 +229,24 @@ export function drawSymbol(
     ctx.stroke();
     ctx.setLineDash([]);
   }
+  if (style === '2525') {
+    // milsymbol sizes the icon's frame; ~1.9x the simple style's half-height matches it.
+    const sym = milSymbol(sidcFor(force, domain, kind, opts.sidc, opts.echelon), Math.round(s * 1.9));
+    if (opts.destroyed) ctx.globalAlpha *= 0.55;
+    ctx.drawImage(sym.canvas, -sym.ax, -sym.ay, sym.w, sym.h);
+    if (opts.remote) {
+      ctx.beginPath();
+      ctx.arc(0, 0, s * 1.6, 0, Math.PI * 2);
+      ctx.strokeStyle = '#ffe066';
+      ctx.setLineDash([3, 2]);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    damageMarks(ctx, s, opts);
+    ctx.restore();
+    return;
+  }
   frame(ctx, force, domain, s);
   ctx.fillStyle = opts.destroyed ? '#555' : c.fill;
   ctx.fill();
@@ -205,6 +271,12 @@ export function drawSymbol(
     const top = force === 2 ? -s * 1.2 : domain === 'air' ? -s * 1.05 : -s * 0.9;
     ctx.fillText(ECHELON_DOTS[opts.echelon], 0, top - 1);
   }
+  damageMarks(ctx, s, opts);
+  ctx.restore();
+}
+
+/** Damage bar under the symbol, or a red cross when destroyed. */
+function damageMarks(ctx: CanvasRenderingContext2D, s: number, opts: SymbolOptions): void {
   if (opts.damaged && !opts.destroyed) {
     ctx.beginPath();
     ctx.moveTo(-s, s * 1.15);
@@ -214,6 +286,7 @@ export function drawSymbol(
     ctx.stroke();
   }
   if (opts.destroyed) {
+    ctx.globalAlpha = 1;
     ctx.beginPath();
     ctx.moveTo(-s * 1.4, -s * 1.1);
     ctx.lineTo(s * 1.4, s * 1.1);
@@ -223,11 +296,10 @@ export function drawSymbol(
     ctx.lineWidth = 2.5;
     ctx.stroke();
   }
-  ctx.restore();
 }
 
 /** Render a symbol into a small standalone canvas (for palettes and lists). */
-export function symbolCanvas(force: ForceId, domain: Domain, kind: SymbolKind, size = 28, echelon?: UnitTemplate['echelon']): HTMLCanvasElement {
+export function symbolCanvas(force: ForceId, domain: Domain, kind: SymbolKind, size = 28, echelon?: UnitTemplate['echelon'], sidc?: string): HTMLCanvasElement {
   const cv = document.createElement('canvas');
   const dpr = window.devicePixelRatio || 1;
   cv.width = size * 1.4 * dpr;
@@ -236,6 +308,6 @@ export function symbolCanvas(force: ForceId, domain: Domain, kind: SymbolKind, s
   cv.style.height = `${size}px`;
   const ctx = cv.getContext('2d')!;
   ctx.scale(dpr, dpr);
-  drawSymbol(ctx, size * 0.7, size * (echelon ? 0.6 : 0.5), size * 0.3, force, domain, kind, { echelon });
+  drawSymbol(ctx, size * 0.7, size * (echelon ? 0.6 : 0.5), size * 0.3, force, domain, kind, { echelon, sidc });
   return cv;
 }

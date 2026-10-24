@@ -2,6 +2,11 @@
 
 import type { TerrainData, TerrainSpec } from './types.js';
 
+/** Land cover classes stored per post. 0: none recorded (the forest and water masks still apply). */
+export const LAND_COVER = { none: 0, open: 1, forest: 2, shrub: 3, builtUp: 4, wetland: 5, water: 6, bare: 7, snow: 8 } as const;
+export type LandCoverClass = (typeof LAND_COVER)[keyof typeof LAND_COVER];
+export const LAND_COVER_NAMES = ['none', 'open', 'forest', 'shrub', 'built-up', 'wetland', 'water', 'bare', 'snow'] as const;
+
 export function bytesToBase64(bytes: Uint8Array): string {
   if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
   let s = '';
@@ -40,6 +45,8 @@ export class TerrainGrid {
     readonly forest: Uint8Array,
     /** 1 = inland water per post (imported terrain); sea is wherever elevation < 0. */
     readonly water: Uint8Array | null = null,
+    /** Land cover class per post (LAND_COVER), when imported. */
+    readonly landCover: Uint8Array | null = null,
   ) {
     this.cols = Math.round(spec.size / spec.cellSize) + 1;
     this.rows = this.cols;
@@ -47,7 +54,7 @@ export class TerrainGrid {
   }
 
   static fromData(data: TerrainData): TerrainGrid {
-    return new TerrainGrid(data.spec, decodeHeights(data), base64ToBytes(data.forestB64), data.waterB64 ? base64ToBytes(data.waterB64) : null);
+    return new TerrainGrid(data.spec, decodeHeights(data), base64ToBytes(data.forestB64), data.waterB64 ? base64ToBytes(data.waterB64) : null, data.landCoverB64 ? base64ToBytes(data.landCoverB64) : null);
   }
 
   /** Metres per stored height unit: decimetres unless the terrain is too high for Int16. */
@@ -106,6 +113,11 @@ export class TerrainGrid {
 
   isForest(x: number, y: number): boolean {
     return this.forest[this.nearestPost(x, y)] === 1;
+  }
+
+  /** Land cover class at a point (LAND_COVER.none when not imported). */
+  coverAt(x: number, y: number): number {
+    return this.landCover ? this.landCover[this.nearestPost(x, y)] : LAND_COVER.none;
   }
 
   /** Slope magnitude (rise over run) using central differences. */
