@@ -221,7 +221,7 @@ export class View3D {
     this.grid = grid;
     this.texCanvas = this.composeTexture(terrainImage);
     this.near.key = '';
-    if (grid instanceof TiledGrid) grid.listeners.add(() => (this.near.dirty = true));
+    if (grid instanceof TiledGrid) grid.listeners.add((t) => this.tileArrived(grid, t));
     this.buildTerrain();
     this.graphicsKey = '';
     this.smokeKey = '';
@@ -436,7 +436,14 @@ export class View3D {
   /** Large terrain: the finest tiles around the camera target, over the overview mesh. */
   private near = { key: '', dirty: false, group: new THREE.Group(), bounds: null as null | { x0: number; y0: number; x1: number; y1: number } };
 
-  /** Rebuild the detailed patch when the camera target moves to another tile or tiles arrive. */
+  /** A finest tile of the detailed patch arrived: rebuild it. */
+  private tileArrived(g: TiledGrid, t: TerrainTile): void {
+    if (g !== this.grid || t.z !== g.pyramid.maxZoom || !this.near.key) return;
+    const [x, y] = this.near.key.split(',').map(Number);
+    if (Math.abs(t.x - x) <= 1 && Math.abs(t.y - y) <= 1) this.near.dirty = true;
+  }
+
+  /** Rebuild the detailed patch when the camera target moves to another tile or its tiles arrive. */
   private updateNear(): void {
     const g = this.grid;
     if (!(g instanceof TiledGrid) || !this.data || !this.terrainMesh) return;
