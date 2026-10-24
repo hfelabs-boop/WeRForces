@@ -4,6 +4,8 @@ import { FORCE_NAMES, type Building, type EntitySnapshot, type Graphic, type Gra
 import { base64ToBytes, TerrainGrid } from '../src/shared/terrainGrid.js';
 import { drawSymbol, FORCE_COLORS } from './symbols.js';
 import { renderTerrain } from './terrainRender.js';
+import { reliefImage, TiledGrid } from './tiledGrid.js';
+import type { TerrainTile } from '../src/shared/terrainTiles.js';
 
 export type MapMode =
   | { kind: 'select' }
@@ -155,12 +157,72 @@ export class MapView {
 
   // ------------------------------------------------------------ data
 
-  setTerrain(data: TerrainData): void {
+  setTerrain(data: TerrainData, grid: TerrainGrid = TerrainGrid.fromData(data)): void {
     this.terrain = data;
-    this.grid = TerrainGrid.fromData(data);
-    this.terrainImage = renderTerrain(this.grid);
+    this.grid = grid;
+    if (grid instanceof TiledGrid) {
+      // Large terrain: the overview tile underneath, finer tiles for the view drawn over it.
+      this.terrainImage = this.tileImage(grid, grid.get(0, 0, 0)!);
+      grid.listeners.add(() => this.invalidate());
+    } else {
+      this.terrainImage = renderTerrain(grid);
+    }
     this.buildingBuckets = bucketBuildings(data.buildings ?? []);
     this.fit();
+  }
+
+  private tileImage(g: TiledGrid, t: TerrainTile): HTMLCanvasElement {
+    return reliefImage(g, this.terrain!, t);
+  }
+
+  /** The tile level for the zoom: tiles drawn between one and two screen pixels per post. */
+  private tileLevel(g: TiledGrid): number {
+    const ratio = this.metresPerPixel / g.spec.cellSize;
+    return Math.max(0, Math.min(g.pyramid.maxZoom, g.pyramid.maxZoom - Math.ceil(Math.log2(Math.max(1, ratio)))));
+  }
+
+  private drawTiles(g: TiledGrid): void {
+    const ctx = this.ctx;
+    const size = g.spec.size;
+    const a = this.toWorld(0, this.height);
+    const b = this.toWorld(this.width, 0);
+    const nw = this.toScreen({ x: 0, y: size });
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(nw.x, nw.y, size * this.scale, size * this.scale);
+    ctx.clip();
+    const want = this.tileLevel(g);
+    // Coarser tiles already loaded fill in while the finer ones arrive.
+    for (let z = 0; z <= want; z++) {
+      const span = g.pyramid.span(z);
+      for (const { x, y } of g.tilesIn(z, Math.max(0, a.x), Math.max(0, a.y), Math.min(size, b.x), Math.min(size, b.y))) {
+        const t = g.get(z, x, y);
+        if (!t) {
+          if (z === want) g.request(z, x, y);
+          continue;
+        }
+        const p = this.toScreen({ x: x * span, y: (y + 1) * span });
+        const w = span * this.scale;
+        ctx.drawImage(this.tileImage(g, t), Math.floor(p.x), Math.floor(p.y), Math.ceil(w + 1), Math.ceil(w + 1));
+      }
+    }
+    ctx.restore();
+  }
+
+  /** Roads and buildings of the finest tiles in view (only drawn zoomed in). */
+  private tileFeatures(): { roads: Vec2[][]; buildings: Building[] } | null {
+    const g = this.grid;
+    if (!(g instanceof TiledGrid) || this.tileLevel(g) < g.pyramid.maxZoom) return null;
+    const a = this.toWorld(0, this.height);
+    const b = this.toWorld(this.width, 0);
+    const out = { roads: [] as Vec2[][], buildings: [] as Building[] };
+    const z = g.pyramid.maxZoom;
+    for (const { x, y } of g.tilesIn(z, a.x, a.y, b.x, b.y)) {
+      const f = g.get(z, x, y)?.features;
+      if (f?.roads) out.roads.push(...f.roads);
+      if (f?.buildings) out.buildings.push(...f.buildings);
+    }
+    return out;
   }
 
   /** Line of sight between two ground points, eyes 2 m up (set by the app). */
@@ -174,7 +236,10 @@ export class MapView {
 
   private drawBuildings(): void {
     // Footprints are only legible when zoomed in.
-    if (!this.buildingBuckets.size || this.scale < 0.25) return;
+    if (this.scale < 0.25) return;
+    const fromTiles = this.tileFeatures()?.buildings;
+    if (fromTiles?.length) this.buildingBuckets = bucketBuildings(fromTiles);
+    if (!this.buildingBuckets.size) return;
     const ctx = this.ctx;
     const a = this.toWorld(0, this.height);
     const b = this.toWorld(this.width, 0);
@@ -340,7 +405,8 @@ export class MapView {
       const sy = e.clientY - r.top;
       const before = this.toWorld(sx, sy);
       const factor = Math.exp(-e.deltaY * 0.0015);
-      this.scale = Math.min(8, Math.max(0.01, this.scale * factor));
+      const fitAll = this.terrain ? (0.5 * Math.min(this.width, this.height)) / this.terrain.spec.size : 0.01;
+      this.scale = Math.min(8, Math.max(Math.min(0.01, fitAll), this.scale * factor));
       const after = this.toWorld(sx, sy);
       this.cx += before.x - after.x;
       this.cy += before.y - after.y;
@@ -521,7 +587,8 @@ export class MapView {
     const span = size * this.scale;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(this.terrainImage, nw.x, nw.y, span, span);
+    if (this.grid instanceof TiledGrid) this.drawTiles(this.grid);
+    else ctx.drawImage(this.terrainImage, nw.x, nw.y, span, span);
     ctx.strokeStyle = 'rgba(0,0,0,0.6)';
     ctx.lineWidth = 1;
     ctx.strokeRect(nw.x, nw.y, span, span);
@@ -582,7 +649,7 @@ export class MapView {
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       ctx.beginPath();
-      for (const road of this.terrain!.roads) {
+      for (const road of [...this.terrain!.roads, ...(this.tileFeatures()?.roads ?? [])]) {
         road.forEach((p, i) => {
           const s = this.toScreen(p);
           if (i === 0) ctx.moveTo(s.x, s.y);

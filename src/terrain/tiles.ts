@@ -86,7 +86,8 @@ export async function writeTileset(maker: TileMaker, dir: string, progress?: (do
         const gz = gzipSync(encoded, { level: 6 });
         writeFileSync(path.join(folder, `${y}.wft`), gz);
         bytes += gz.byteLength;
-        progress?.(++done, total);
+        done++;
+        progress?.(done, total);
       }
     }
   }

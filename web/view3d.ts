@@ -4,7 +4,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { TerrainGrid } from '../src/shared/terrainGrid.js';
-import type { EntitySnapshot, ForceId, EnvironmentState, Graphic, SimEvent, SmokeCloud, SimState, SymbolKind, TerrainData, Vec2 } from '../src/shared/types.js';
+import type { Building, EntitySnapshot, ForceId, EnvironmentState, Graphic, SimEvent, SmokeCloud, SimState, SymbolKind, TerrainData, Vec2 } from '../src/shared/types.js';
+import type { TerrainTile } from '../src/shared/terrainTiles.js';
+import { reliefImage, TiledGrid, tileGrid } from './tiledGrid.js';
 
 export interface View3DCallbacks {
   select(id: string | null): void;
@@ -198,7 +200,7 @@ export class View3D {
     this.scene.background = new THREE.Color(sky);
     this.scene.add(this.hemi);
     this.sun.position.set(-1, 1.6, -0.8);
-    this.scene.add(this.sun, this.graphicsGroup, this.entityGroup);
+    this.scene.add(this.sun, this.graphicsGroup, this.entityGroup, this.near.group);
 
     this.buildOverlay();
     this.bindPointer();
@@ -218,6 +220,8 @@ export class View3D {
     this.data = data;
     this.grid = grid;
     this.texCanvas = this.composeTexture(terrainImage);
+    this.near.key = '';
+    if (grid instanceof TiledGrid) grid.listeners.add(() => (this.near.dirty = true));
     this.buildTerrain();
     this.graphicsKey = '';
     this.smokeKey = '';
@@ -310,7 +314,7 @@ export class View3D {
     const s = this.data.spec.size;
     this.controls.target.set(0, 0, 0);
     this.camera.position.set(0, s * 0.55, s * 0.72);
-    this.camera.near = 5;
+    this.camera.near = Math.max(5, s / 20000);
     this.camera.far = s * 6;
     this.camera.updateProjectionMatrix();
     this.controls.maxDistance = s * 2.5;
@@ -335,10 +339,19 @@ export class View3D {
   private composeTexture(terrainImage: HTMLCanvasElement): HTMLCanvasElement {
     const data = this.data!;
     const cv = document.createElement('canvas');
-    cv.width = terrainImage.width;
-    cv.height = terrainImage.height;
     const ctx = cv.getContext('2d')!;
-    ctx.drawImage(terrainImage, 0, 0);
+    if (this.grid instanceof TiledGrid) {
+      // The overview tile reaches past the extent: crop it, and upscale so roads stay thin.
+      const span = this.grid.pyramid.span(0);
+      const k = terrainImage.width / span;
+      cv.width = cv.height = 2048;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(terrainImage, 0, (span - data.spec.size) * k, data.spec.size * k, data.spec.size * k, 0, 0, cv.width, cv.height);
+    } else {
+      cv.width = terrainImage.width;
+      cv.height = terrainImage.height;
+      ctx.drawImage(terrainImage, 0, 0);
+    }
     const k = cv.width / data.spec.size;
     const px = (p: Vec2) => [p.x * k, (data.spec.size - p.y) * k] as const;
     ctx.lineJoin = 'round';
@@ -380,22 +393,15 @@ export class View3D {
     const size = data.spec.size;
     const seg = Math.min(grid.cols - 1, 256);
     const g = new THREE.PlaneGeometry(size, size, seg, seg);
-    const pos = g.attributes.position as THREE.BufferAttribute;
-    const half = size / 2;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i) + half;
-      const y = pos.getY(i) + half;
-      const h = grid.elevation(x, y);
-      // Sea floor drops away; inland water (imported lakes) sits just below its banks.
-      const z = h < 0 ? h * 0.5 - 3 : grid.water && grid.isWater(x, y) ? h - 1.5 : h;
-      pos.setZ(i, z * this.exaggeration);
-    }
+    this.shapeGround(g, size, 0, 0, (x, y) => grid.elevation(x, y), (x, y) => !!grid.water && grid.isWater(x, y));
     g.rotateX(-Math.PI / 2);
     g.computeVertexNormals();
     const tex = new THREE.CanvasTexture(this.texCanvas!);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     this.terrainMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, metalness: 0 }));
+    this.coarseGeometry = g.clone();
+    this.near.dirty = true;
     this.terrainMesh.name = 'terrain';
     this.scene.add(this.terrainMesh);
     const water = new THREE.Mesh(
@@ -409,6 +415,126 @@ export class View3D {
     this.buildBuildings();
   }
 
+  /** Heights of a plane's vertices (before it is turned to lie flat); (x0, y0): its south-west corner. */
+  private shapeGround(g: THREE.BufferGeometry, size: number, x0: number, y0: number, elevation: (x: number, y: number) => number, water: (x: number, y: number) => boolean, sink?: (x: number, y: number) => boolean): void {
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    const half = size / 2;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i) + half + x0;
+      const y = pos.getY(i) + half + y0;
+      const h = elevation(x, y);
+      // Sea floor drops away; inland water (imported lakes) sits just below its banks.
+      let z = h < 0 ? h * 0.5 - 3 : water(x, y) ? h - 1.5 : h;
+      // Under the detailed tiles near the camera, the overview mesh keeps out of sight.
+      if (sink?.(x, y)) z -= 80;
+      pos.setZ(i, z * this.exaggeration);
+    }
+  }
+
+  /** The overview mesh before it was laid flat, for reshaping as finer tiles arrive. */
+  private coarseGeometry: THREE.BufferGeometry | null = null;
+  /** Large terrain: the finest tiles around the camera target, over the overview mesh. */
+  private near = { key: '', dirty: false, group: new THREE.Group(), bounds: null as null | { x0: number; y0: number; x1: number; y1: number } };
+
+  /** Rebuild the detailed patch when the camera target moves to another tile or tiles arrive. */
+  private updateNear(): void {
+    const g = this.grid;
+    if (!(g instanceof TiledGrid) || !this.data || !this.terrainMesh) return;
+    const z = g.pyramid.maxZoom;
+    const span = g.pyramid.span(z);
+    const target = this.fromScene(this.controls.target);
+    const close = this.camera.position.distanceTo(this.controls.target) < span * 2.5;
+    const tx = Math.floor(target.x / span);
+    const ty = Math.floor(target.y / span);
+    const key = close ? `${tx},${ty}` : '';
+    if (key === this.near.key && !this.near.dirty) return;
+    this.near.key = key;
+    this.near.dirty = false;
+    for (const c of [...this.near.group.children]) {
+      this.near.group.remove(c);
+      const m = c as THREE.Mesh;
+      m.geometry.dispose();
+      const mat = m.material as THREE.MeshStandardMaterial;
+      mat.map?.dispose();
+      mat.dispose();
+    }
+    this.near.bounds = null;
+    if (close) {
+      const tiles: TerrainTile[] = [];
+      for (let y = ty - 1; y <= ty + 1; y++) {
+        for (let x = tx - 1; x <= tx + 1; x++) {
+          if (!g.pyramid.valid(z, x, y)) continue;
+          const t = g.get(z, x, y);
+          if (t) tiles.push(t);
+          else g.request(z, x, y);
+        }
+      }
+      const buildings: Building[] = [];
+      for (const t of tiles) {
+        this.near.group.add(this.tileMesh(g, t, span));
+        buildings.push(...(t.features?.buildings ?? []));
+      }
+      if (buildings.length) this.near.group.add(this.buildingMesh(buildings.slice(0, 30000)));
+      if (tiles.length) {
+        const xs = tiles.map((t) => t.x);
+        const ys = tiles.map((t) => t.y);
+        this.near.bounds = { x0: Math.min(...xs) * span, y0: Math.min(...ys) * span, x1: (Math.max(...xs) + 1) * span, y1: (Math.max(...ys) + 1) * span };
+      }
+    }
+    // Reshape the overview from the finest tiles loaded, sunk below the detailed patch.
+    const geo0 = this.coarseGeometry!.clone();
+    geo0.rotateX(Math.PI / 2);
+    const size = this.data.spec.size;
+    const b = this.near.bounds;
+    const margin = size / 256;
+    const sink = b ? (x: number, y: number) => x > b.x0 + margin && x < b.x1 - margin && y > b.y0 + margin && y < b.y1 - margin : undefined;
+    this.shapeGround(geo0, size, 0, 0, (x, y) => g.elevation(x, y), (x, y) => !!g.water && g.isWater(x, y), sink);
+    geo0.rotateX(-Math.PI / 2);
+    geo0.computeVertexNormals();
+    this.terrainMesh.geometry.dispose();
+    this.terrainMesh.geometry = geo0;
+  }
+
+  /** One finest tile as a mesh (every second post), textured with its relief and roads. */
+  private tileMesh(g: TiledGrid, t: TerrainTile, span: number): THREE.Mesh {
+    const data = this.data!;
+    const local = tileGrid(data, g.pyramid, t);
+    const seg = (t.n - 1) / 2;
+    const geo0 = new THREE.PlaneGeometry(span, span, seg, seg);
+    const x0 = t.x * span;
+    const y0 = t.y * span;
+    this.shapeGround(geo0, span, 0, 0, (x, y) => local.elevation(x, y), (x, y) => !!local.water && local.isWater(x, y));
+    geo0.rotateX(-Math.PI / 2);
+    geo0.computeVertexNormals();
+    const half = data.spec.size / 2;
+    geo0.translate(x0 + span / 2 - half, 0, -(y0 + span / 2 - half));
+    const relief = reliefImage(g, data, t);
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = relief.width * 2;
+    const ctx = cv.getContext('2d')!;
+    ctx.drawImage(relief, 0, 0, cv.width, cv.height);
+    const k = cv.width / span;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    const roads = [...data.roads, ...(t.features?.roads ?? [])];
+    for (const [w, col] of [
+      [5, 'rgba(70,40,10,0.9)'],
+      [3, '#f4d27a'],
+    ] as const) {
+      ctx.lineWidth = w;
+      ctx.strokeStyle = col;
+      ctx.beginPath();
+      for (const road of roads) road.forEach((p, i) => (i ? ctx.lineTo((p.x - x0) * k, (y0 + span - p.y) * k) : ctx.moveTo((p.x - x0) * k, (y0 + span - p.y) * k)));
+      ctx.stroke();
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    const mesh = new THREE.Mesh(geo0, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, metalness: 0 }));
+    mesh.name = 'terrain-tile';
+    return mesh;
+  }
+
   private buildingsMesh: THREE.Mesh | null = null;
 
   /** All building footprints extruded into one mesh, standing on the ground. */
@@ -420,16 +546,22 @@ export class View3D {
     }
     const list = this.data?.buildings ?? [];
     if (!list.length || !this.grid) return;
+    this.buildingsMesh = this.buildingMesh(list.slice(0, 100000));
+    this.scene.add(this.buildingsMesh);
+  }
+
+  /** Building footprints extruded into one mesh, standing on the ground. */
+  private buildingMesh(list: Building[]): THREE.Mesh {
     const pos: number[] = [];
     const k = this.exaggeration;
-    for (const b of list.slice(0, 100000)) {
+    for (const b of list) {
       const n = b.pts.length / 2;
       if (n < 3) continue;
       const ring: THREE.Vector2[] = [];
       let lowest = Infinity;
       for (let i = 0; i < n; i++) {
         ring.push(new THREE.Vector2(b.pts[2 * i], b.pts[2 * i + 1]));
-        lowest = Math.min(lowest, this.grid.surfaceHeight(b.pts[2 * i], b.pts[2 * i + 1]));
+        lowest = Math.min(lowest, this.grid!.surfaceHeight(b.pts[2 * i], b.pts[2 * i + 1]));
       }
       if (THREE.ShapeUtils.isClockWise(ring)) ring.reverse();
       const base = lowest * k;
@@ -452,9 +584,9 @@ export class View3D {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.computeVertexNormals();
-    this.buildingsMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xb8aea4, roughness: 0.9, metalness: 0, side: THREE.DoubleSide }));
-    this.buildingsMesh.name = 'buildings';
-    this.scene.add(this.buildingsMesh);
+    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xb8aea4, roughness: 0.9, metalness: 0, side: THREE.DoubleSide }));
+    mesh.name = 'buildings';
+    return mesh;
   }
 
   // ------------------------------------------------------------ graphics
@@ -644,6 +776,7 @@ export class View3D {
       }
     }
     this.controls.update();
+    this.updateNear();
     // Scale models with distance so they stay visible; labels sit above them.
     for (const o of this.entities.values()) {
       const d = this.camera.position.distanceTo(o.group.position);
@@ -694,7 +827,8 @@ export class View3D {
         break;
       }
     }
-    const ground = this.terrainMesh ? this.raycaster.intersectObject(this.terrainMesh, false)[0]?.point ?? null : null;
+    const surfaces = [...this.near.group.children.filter((c) => c.name === 'terrain-tile'), ...(this.terrainMesh ? [this.terrainMesh] : [])];
+    const ground = this.raycaster.intersectObjects(surfaces, false)[0]?.point ?? null;
     return { entityId, ground };
   }
 

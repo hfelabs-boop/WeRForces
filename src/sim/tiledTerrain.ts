@@ -302,15 +302,16 @@ export class TiledTerrain extends Terrain {
     const n = t.n;
     const bc = Math.ceil((n - 1) / LOS_BLOCK) + 1;
     const max = new Float32Array(bc * bc).fill(-Infinity);
-    for (let r = 0; r < n; r++) {
-      for (let c = 0; c < n; c++) {
-        const top = obstacleTop(t, r * n + c);
-        for (const br of r % LOS_BLOCK === 0 && r > 0 ? [r / LOS_BLOCK - 1, r / LOS_BLOCK] : [Math.floor(r / LOS_BLOCK)]) {
-          for (const bcol of c % LOS_BLOCK === 0 && c > 0 ? [c / LOS_BLOCK - 1, c / LOS_BLOCK] : [Math.floor(c / LOS_BLOCK)]) {
-            const j = br * bc + bcol;
-            if (top > max[j]) max[j] = top;
-          }
+    // Block (br, bcol) holds posts LOS_BLOCK * br .. LOS_BLOCK * (br + 1): edge posts are in both blocks.
+    const tops = new Float32Array(n * n);
+    for (let i = 0; i < n * n; i++) tops[i] = obstacleTop(t, i);
+    for (let br = 0; br < bc; br++) {
+      for (let bcol = 0; bcol < bc; bcol++) {
+        let m = -Infinity;
+        for (let r = br * LOS_BLOCK; r <= Math.min(n - 1, (br + 1) * LOS_BLOCK); r++) {
+          for (let c = bcol * LOS_BLOCK; c <= Math.min(n - 1, (bcol + 1) * LOS_BLOCK); c++) if (tops[r * n + c] > m) m = tops[r * n + c];
         }
+        max[br * bc + bcol] = m;
       }
     }
     e.tops = max;

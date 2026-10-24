@@ -2,6 +2,7 @@
 
 import { LocalFrame } from '../src/dis/geodesy.js';
 import { TerrainGrid } from '../src/shared/terrainGrid.js';
+import { TiledGrid } from './tiledGrid.js';
 import type {
   Catalog,
   Command,
@@ -307,9 +308,11 @@ class App {
   private async loadTerrain(version: number): Promise<void> {
     this.terrainVersion = version;
     const data = await this.api.terrain();
-    this.grid = TerrainGrid.fromData(data);
+    // Large terrain comes in tiles, fetched for what is in view.
+    this.grid = data.tiles ? await TiledGrid.open(data, (z, x, y) => this.api.tile(z, x, y, version)) : TerrainGrid.fromData(data);
+    if (version !== this.terrainVersion) return;
     this.frame = new LocalFrame(data.spec.origin.lat, data.spec.origin.lon);
-    this.map.setTerrain(data);
+    this.map.setTerrain(data, this.grid);
     this.terrainData = data;
     if (this.view3d && this.grid && this.map.terrainImage) this.view3d.setTerrain(data, this.grid, this.map.terrainImage);
   }

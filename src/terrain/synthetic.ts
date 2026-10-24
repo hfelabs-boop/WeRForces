@@ -25,6 +25,7 @@ export interface SyntheticOptions {
 /** Towns are about this far apart. */
 const TOWN_SPACING = 16000;
 const SYLLABLES = ['al', 'ber', 'cal', 'dun', 'east', 'fal', 'grey', 'har', 'iron', 'jun', 'kes', 'lark', 'mor', 'nor', 'ock', 'pem', 'quar', 'ros', 'sel', 'tor', 'ul', 'ven', 'wick', 'yar'];
+const PREFIXES = ['Upper', 'Lower', 'Great', 'Little', 'East', 'West', 'North', 'South', 'Old', 'New'];
 const SUFFIXES = ['ford', 'ham', 'ton', 'by', 'wick', 'stead', 'bridge', 'field', 'moor', 'dale'];
 
 function hash(ix: number, iy: number, seed: number): number {
@@ -127,8 +128,11 @@ export class SyntheticTiles implements TileSource {
         const y = Math.round((j + 0.5 + (hash(j, i, this.seed + 1) - 0.5) * 0.5) * step);
         if (this.isLake(x, y)) continue;
         const k = Math.floor(hash(i, j, this.seed + 2) * SYLLABLES.length * SUFFIXES.length);
-        const name = SYLLABLES[k % SYLLABLES.length] + SUFFIXES[Math.floor(k / SYLLABLES.length) % SUFFIXES.length];
-        towns.push({ name: `${name[0].toUpperCase()}${name.slice(1)}${towns.some((t) => t.name.startsWith(name[0].toUpperCase() + name.slice(1))) ? ` ${i}-${j}` : ''}`, x, y });
+        const base = SYLLABLES[k % SYLLABLES.length] + SUFFIXES[Math.floor(k / SYLLABLES.length) % SUFFIXES.length];
+        let name = base[0].toUpperCase() + base.slice(1);
+        // Names repeat across a big map: tell them apart the way real ones are.
+        for (let q = 0; towns.some((t) => t.name === name); q++) name = `${PREFIXES[q % PREFIXES.length]} ${base[0].toUpperCase()}${base.slice(1)}${q >= PREFIXES.length ? ` ${Math.floor(q / PREFIXES.length) + 1}` : ''}`;
+        towns.push({ name, x, y });
       }
     }
     return towns;
