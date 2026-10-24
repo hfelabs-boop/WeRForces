@@ -102,3 +102,23 @@ describe('mounted infantry', () => {
     }
   });
 });
+
+describe('orders given to passengers', () => {
+  it('wait until they dismount, then carry on', () => {
+    const eng = engine();
+    const ifv = eng.createEntity({ typeId: 'us-m2a3', force: 1, x: 500, y: 2000 });
+    const squad = eng.createUnitFromTemplate('us-rifle-squad', 1, 520, 2000);
+    eng.embarkNow(squad.id, ifv.id);
+    eng.assignTask(squad.id, { type: 'moveTo', target: { x: 900, y: 2600 } });
+    eng.assignTask(ifv.id, { type: 'moveTo', target: { x: 1500, y: 2000 } });
+    eng.runFor(120);
+    const lead = squad.leader!;
+    expect(lead.embarkedIn).toBe(ifv.id);
+    expect(squad.taskStatus()).toBe('running');
+    eng.assignTask(ifv.id, { type: 'dismount' });
+    eng.runFor(900);
+    expect(lead.embarkedIn).toBeUndefined();
+    expect(Math.hypot(lead.x - 900, lead.y - 2600)).toBeLessThan(15);
+    expect(squad.taskStatus()).toBe('done');
+  });
+});

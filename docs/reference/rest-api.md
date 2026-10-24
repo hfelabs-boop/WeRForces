@@ -51,7 +51,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | --- | --- | --- |
 | GET | `/scenario` | The current state as a [scenario file](scenario-format.md) |
 | PUT | `/scenario` | Load a scenario file (the body). Rolls back if invalid |
-| POST | `/scenario/new` | `{"name": "...", "terrain": {"seed": 7, "size": 12000}}` (terrain optional) |
+| POST | `/scenario/new` | `{"name": "...", "terrain": {"seed": 7, "size": 12000}}` (terrain optional; `{"dataset": "fulda"}` for an imported terrain) |
 | GET | `/scenarios` | Scenarios stored on the server |
 | GET / PUT | `/scenarios/{name}` | Read one / save the current state under that name |
 | POST | `/scenarios/{name}/load` | Load a stored scenario |
@@ -62,15 +62,17 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | --- | --- | --- |
 | GET | `/entities` | `?force=1\|blue&domain=air&unit=U1&alive=true&remote=false` |
 | POST | `/entities` | `{"typeId", "force", "position", "heading"?, "name"?, "altitude"?}` |
-| GET / PATCH / DELETE | `/entities/{id}` | PATCH: `{"name"?, "roe"?, "position"?, "heading"?}` |
+| GET / PATCH / DELETE | `/entities/{id}` | PATCH: `{"name"?, "roe"?, "reactions"?, "position"?, "heading"?}` |
 | POST | `/entities/{id}/task` | a [task](#tasks) |
 | POST | `/entities/{id}/plan` | a [plan](#plans) |
 | POST | `/entities/{id}/stop` | |
+| POST | `/entities/{id}/embark` | `{"carrierId": "E4"}` or a carrier unit id: put this soldier inside now (scenario set-up) |
+| POST | `/entities/{id}/disembark` | let this carrier's passengers out now |
 | GET | `/entities/{id}/path` | remaining planned waypoints |
 | GET | `/units` | `?force=` |
 | POST | `/units` | `{"templateId", "force", "position", "heading"?, "name"?}` or `{"entityIds": [...], "name"?, "formation"?}` |
-| GET / PATCH / DELETE | `/units/{id}` | PATCH: `{"name"?, "formation"?, "roe"?}`. DELETE removes the members too |
-| POST | `/units/{id}/task` · `/plan` · `/stop` | as for entities |
+| GET / PATCH / DELETE | `/units/{id}` | PATCH: `{"name"?, "formation"?, "roe"?, "reactions"?}`. DELETE removes the members too |
+| POST | `/units/{id}/task` · `/plan` · `/stop` · `/embark` · `/disembark` | as for entities. A unit embarking into a carrier unit shares out the seats |
 | GET / POST | `/graphics` | POST `{"kind": "route\|area\|phaseLine\|point", "points": [...], "name"?, "force"?}` |
 | GET / PATCH / DELETE | `/graphics/{id}` | PATCH `{"name"?, "points"?}` |
 
@@ -84,6 +86,18 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 {"type": "follow", "targetId": "E4", "distance": 80}
 {"type": "attack", "targetId": "E12"}
 {"type": "orbit", "center": {"x": 8000, "y": 8000}, "radius": 2500, "duration": 600}
+{"type": "fireMission", "target": {"x": 9200, "y": 11400}, "rounds": 4, "radius": 50}
+{"type": "mount", "carrierId": "U3"}
+{"type": "dismount"}
+```
+
+### Reactions
+
+`PATCH /entities/{id}` or `/units/{id}` with `{"reactions": {...}}` replaces the
+reactions; a plan's `setReactions` step changes only those it names:
+
+```json
+{"onContact": "halt", "withdrawBelow": 0.5, "withdrawTo": {"town": "Brenham"}, "callForFire": true}
 ```
 
 ### Plans
@@ -103,9 +117,29 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 ```
 
 Setting statements: `setRoe` (`fireAtWill|returnFire|holdFire`), `setSpeed` (m/s),
-`setAltitude` (m above ground), `setFormation` (`column|line|wedge|vee|echelonRight`).
-Conditions: `simTime {time}`, `inArea {areaId}`, `enemyDetected`, `underFire`,
-`entityDestroyed {entityId}`. Semantics are described in [Concepts](../concepts.md#plans).
+`setAltitude` (m above ground), `setFormation` (`column|line|wedge|vee|echelonRight`),
+`setReactions` (`{"reactions": {...}}`).
+Conditions: `simTime {time}`, `inArea {areaId}`, `enemyInArea {areaId}`,
+`enemyDetected`, `underFire`, `strengthBelow {fraction}`, `entityDestroyed {entityId}`.
+Semantics are described in [Concepts](../concepts.md#plans).
+
+### Recording and after-action review
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/recording` | Summary: `live`, scenario, `start`/`end` time, interval, frames, entities, events, bookmarks |
+| GET | `/recording/data` | The whole recording as JSON (frames of 8 numbers per entity: index, x, y, z, heading, speed, flags, carrier) |
+| GET | `/recording/state` | `?time=` → every entity and unit as recorded then (interpolated), with lat/lon |
+| GET | `/recording/report` | After-action report: per force start/end strength, losses, kills and rounds fired; every kill with killer and weapon; rounds per weapon; strength over time; bookmarks |
+| POST | `/recording/bookmarks` | `{"text", "time"?}` (default now) → 201 with the bookmark |
+| DELETE | `/recording/bookmarks/{id}` | |
+| POST | `/recording/clear` | Discard it (or stop reviewing a loaded one) and record afresh from now |
+| POST | `/recording/load` | Review a recording sent in the body; live recording pauses until `clear` |
+| GET | `/recordings` | Saved recordings |
+| PUT | `/recordings/{name}` | Save the current recording |
+| POST | `/recordings/{name}/load` | Review a saved recording |
+
+Returns 409 when the server runs with `--record-interval 0`.
 
 ### Events, terrain, catalog
 
@@ -117,6 +151,8 @@ Conditions: `simTime {time}`, `inArea {areaId}`, `enemyDetected`, `underFire`,
 | POST | `/terrain/line-of-sight` | `{"from": "E1" or position, "to": ...}`. Positions take an optional `height` above ground (default 2 m) |
 | POST | `/terrain/route` | `{"from", "to", "domain": "ground\|lifeform\|surface\|air"}` → waypoints and length |
 | GET | `/catalog` · `/catalog/entity-types` · `/catalog/unit-templates` | see the [catalog](catalog.md) |
+| GET | `/terrains` | Imported terrain datasets ([Terrain import](../terrain-import.md)) |
+| PUT | `/terrains/{name}` | Upload a dataset made with `werforces-terrain` (body: the dataset JSON, up to 8 MB) |
 
 ### Integrations and export
 
@@ -159,6 +195,13 @@ The browser app uses a few unversioned endpoints, which you can also use:
   - `?api_key=<key>` (for links, KML NetworkLinks and the WebSocket).
 
   Keys are compared in constant time.
+- **Player keys.** With `--player blue:KEY`, a request carrying a player key gets
+  the player role: listings and the WebSocket state show only its force and its
+  contacts, events are filtered, commands are limited to its own force, and
+  every exercise-control route (time, scenarios, recordings, export,
+  integrations, creating or moving entities) answers **403**. The routes a
+  player may use are the object, task, plan, graphics, events, terrain and
+  catalog routes.
 - **JSON-only writes.** Requiring `Content-Type: application/json` on `POST`/`PUT`
   means a web page on another origin can only send them after a CORS preflight,
   which is refused unless you allowed that origin with `--cors`.

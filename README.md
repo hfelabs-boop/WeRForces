@@ -5,7 +5,9 @@ architecture and workflow of MAK's **VR-Forces**. It has a simulation back-end, 
 browser-based scenario editor with **2D and 3D views**, entity and unit models with
 tasks and plans, sensors, direct and guided fire with damage adjudication, and
 **DIS (IEEE 1278.1)** networking, so other DIS simulations can see and engage its
-entities.
+entities. It covers artillery with forward observers, mounted infantry,
+reactions, fog of war with per-side player access, recording with after-action
+review, and real-world terrain imported from elevation data and OpenStreetMap.
 
 It also connects to other systems:
 
@@ -38,8 +40,11 @@ serves it at **`/docs`** (toolbar → **Help**).
   [6 DIS](docs/tutorials/06-dis-interoperability.md) ·
   [7 TAK, webhooks, GIS](docs/tutorials/07-tak-webhooks-and-gis.md) ·
   [8 Monte Carlo analysis](docs/tutorials/08-batch-and-monte-carlo.md) ·
-  [9 Extending the catalog](docs/tutorials/09-extending-the-catalog.md)
-- [User guide](docs/user-guide.md) · [Concepts](docs/concepts.md) · [Architecture](docs/architecture.md) · [FAQ](docs/faq.md)
+  [9 Extending the catalog](docs/tutorials/09-extending-the-catalog.md) ·
+  [10 Fire support and mech infantry](docs/tutorials/10-fire-support-and-mech-infantry.md) ·
+  [11 Exercise control and AAR](docs/tutorials/11-exercise-control-and-aar.md) ·
+  [12 Real terrain](docs/tutorials/12-real-terrain.md)
+- [User guide](docs/user-guide.md) · [Concepts](docs/concepts.md) · [Terrain import](docs/terrain-import.md) · [Deployment](docs/deployment.md) · [Architecture](docs/architecture.md) · [FAQ](docs/faq.md)
 - **Reference:**
   [CLI](docs/reference/cli.md) · [REST API](docs/reference/rest-api.md) ·
   [MCP tools](docs/reference/mcp-tools.md) · [Catalog](docs/reference/catalog.md) ·
@@ -57,6 +62,12 @@ npm start -- --scenario calloway-crossroads      # http://127.0.0.1:8080
 
 Open the URL, press **Space** (or ▶ Run), and set the time multiplier to 8–16×.
 
+With Docker (`docker compose up -d` adds HTTPS; see [Deployment](docs/deployment.md)):
+
+```bash
+docker build -t werforces . && docker run -p 8080:8080 -e WERFORCES_API_KEY=change-me werforces
+```
+
 Useful options (`npm start -- --help` lists all of them):
 
 | Option | Meaning |
@@ -67,7 +78,10 @@ Useful options (`npm start -- --help` lists all of them):
 | `--dis` | Enable DIS over UDP |
 | `--dis-port`, `--dis-address` | UDP port (3000) and destination: broadcast, multicast group or unicast host |
 | `--exercise`, `--site`, `--application` | DIS exercise and simulation address |
-| `--api-key <key>` | Require a key on `/api`, `/ws` and `/mcp` (or set `WERFORCES_API_KEY`) |
+| `--api-key <key>` | Require a key on `/api`, `/ws` and `/mcp` (or set `WERFORCES_API_KEY`). The exercise-control key |
+| `--player <force:key>` | A player key: that force only, with fog of war. Repeatable |
+| `--record-interval <s>` | Recording rate for the after-action review (1 s; 0 = off) |
+| `--terrains <dir>` | Imported terrain datasets (`./terrains`) |
 | `--cors <origin>` | Allow cross-origin browser access from an origin (`*` for any). Repeatable |
 | `--cot <url>`, `--cot-interval <s>` | Stream Cursor-on-Target to `udp://239.2.3.1:6969` (ATAK multicast) or `tcp://host:8087` (TAK Server) |
 | `--webhook <url>` | POST simulation events to a URL. Slack and Discord webhook URLs get chat formatting. Repeatable |
@@ -80,19 +94,23 @@ Useful options (`npm start -- --help` lists all of them):
 | --- | --- |
 | Simulation engine (back-end) | `src/sim/engine.ts`: fixed-step (0.1 s) deterministic engine with seeded RNG |
 | Front-end GUI / scenario editor | `web/`: 2D tactical map, 3D scene view (Three.js), palette, object tree, inspector, plan editor, event log |
-| Simulation Object Model (entity, weapon and sensor parameters) | `src/sim/catalog.ts`: 20 entity types, 22 weapons, 8 sensors, 12 unit templates |
-| Terrain database | `src/sim/terrain.ts`: procedural elevation, lakes, forest, towns and roads, plus LOS, mobility and route planning |
-| Tasks | Move to, Follow route, Patrol, Wait, Follow entity, Attack, Orbit, plus internal formation keeping |
-| Plans | Ordered statements: tasks, set ROE/speed/altitude/formation, *wait until* (time, in area, enemy detected, under fire, entity destroyed), optional loop |
-| Reactive behaviour / ROE | Fire at will, Return fire, Hold fire. Automatic target and weapon selection |
+| Simulation Object Model (entity, weapon and sensor parameters) | `src/sim/catalog.ts`: 27 entity types, 26 weapons, 9 sensors, 16 unit templates |
+| Terrain database | `src/sim/terrain.ts`: procedural terrain, or real terrain imported from GeoTIFF elevation and GeoJSON/OSM features (`src/terrain/`); LOS, mobility and route planning |
+| Tasks | Move to, Follow route, Patrol, Wait, Follow entity, Attack, Orbit, Fire mission, Mount, Dismount, plus internal formation keeping |
+| Plans | Ordered statements: tasks, set ROE/speed/altitude/formation/reactions, *wait until* (time, in area, enemy in area, enemy detected, under fire, strength below, entity destroyed), optional loop |
+| Reactive behaviour / ROE | Fire at will, Return fire, Hold fire; halt on contact, withdraw below a strength, call for fire. Automatic target and weapon selection |
+| Indirect fire | Howitzers and mortars: fire missions with sheaf, dispersion and blast effects; automatic call for fire by observers, with danger-close checks |
+| Embarked entities | Infantry riding in IFVs, trucks and helicopters; mount, dismount, losses with the carrier |
+| Exercise roles | Exercise-control and per-force player keys with server-side fog of war (GUI, REST and MCP) |
+| After-action review | Continuous recording, replay on the 2D/3D map, bookmarks, AAR report, saved recordings |
 | Units / aggregates | Leader + followers in column, line, wedge, vee and echelon formations. Unit tasking, contact sharing and leader succession. Aggregated symbols when zoomed out |
 | Tactical graphics | Routes, areas, phase lines, points |
 | Sensors / perception | Range, field of view, terrain and forest-canopy line of sight, probabilistic detection. Per-entity contact lists shared within a unit |
 | Weapons & damage | Munition fly-out, range/motion/concealment-modified Pk, mobility, firepower and catastrophic kills |
 | Remote Control API | REST API `/api/v1` with OpenAPI (`src/server/apiV1.ts`), WebSocket commands, MCP server (`src/mcp/`) |
 | Network interoperability (VR-Link) | DIS gateway (`src/dis/`): Entity State, Fire and Detonation PDUs, dead reckoning, heartbeats, remote entity reflection |
-| Rewind / save / load | Rewind to scenario start; save to the server or download; import a file |
-| Batch / headless runs | `--headless --duration <s>` |
+| Rewind / save / load / checkpoint | Rewind to scenario start; save to the server or download; import a file. Saving mid-run is a full checkpoint that continues identically |
+| Batch / headless runs | `--headless --duration <s>`, the engine as a library, `npm run bench` (1000 entities at ~20× real time) |
 | Interoperability with C2 / GIS tools | Cursor-on-Target to TAK, webhooks, GeoJSON/KML (`src/integrations/`) |
 
 ## Using the GUI
@@ -142,9 +160,11 @@ Useful options (`npm start -- --help` lists all of them):
  └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Each 0.1 s step runs, in order: unit leader succession, unit and entity plans,
-tasks (which produce steering commands), kinematics, sensor scans (1 Hz, staggered),
-weapon selection and firing, then munition impacts.
+Each 0.1 s step runs, in order: unit leader succession, withdraw reactions, unit
+and entity plans, tasks (which produce steering commands; halt-on-contact holds
+position), kinematics (passengers ride with carriers), sensor scans (1 Hz,
+staggered, using a spatial grid), call for fire, weapon selection and firing,
+munition impacts (area damage for indirect fire), then recording.
 
 ### Models
 
@@ -166,6 +186,9 @@ weapon selection and firing, then munition impacts.
   take flight time to arrive. A hit rolls for a catastrophic kill, otherwise a
   mobility or firepower kill; losing both counts as destroyed. Damage to remote
   (DIS) entities is left to the simulation that owns them.
+  Wire-guided missiles miss if their launcher dies or loses sight of the target.
+- **Indirect fire.** Rounds land with range-dependent dispersion and damage
+  everything within the blast radius, falling off with distance.
 
 ## DIS interoperability
 

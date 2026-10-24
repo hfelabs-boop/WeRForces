@@ -24,8 +24,15 @@ values in the code (`src/sim/`), so you can predict and explain what you see.
 
 ## Terrain
 
-Terrain is generated from a **seed**, so the same seed always produces the same
-map.
+Terrain is either **generated** from a seed (the same seed always produces the
+same map) or **imported** from real elevation data and map features with
+`werforces-terrain` (see [Terrain import](terrain-import.md)). A scenario refers
+to an imported terrain by name: `"terrain": {"dataset": "fulda"}`.
+
+The table describes generated terrain. Imported terrain has the same layers,
+taken from the data instead: elevation from the DEM, inland water (lakes and
+rivers, with bridges where roads cross) from an extra water layer, and forest,
+roads and towns from the features.
 
 | Feature | Model |
 | --- | --- |
@@ -41,7 +48,7 @@ map.
 | --- | --- | --- | --- | --- | --- |
 | Ground vehicle | impassable | 100 % | type's off-road factor (tanks 0.7, trucks 0.4) | × 0.45 off-road | slower with slope; impassable above ~31° off-road |
 | Dismounted | impassable | 100 % | factor 0.85 | × 0.75 | gentler penalty; impassable above 45° |
-| Surface vessel | only on water | – | – | – | – |
+| Surface vessel | only on water (at sea level, or a lake's level) | – | – | – | – |
 | Aircraft | unaffected | | | | |
 
 **Route planning.** *Move to* and *Follow route* plan a ground or water path with
@@ -117,7 +124,8 @@ entities.
 
 - **Tasking a unit.** The leader does the task and the others hold formation on
   it. They speed up to catch up, and fall in behind the leader if their slot is
-  blocked by terrain. *Attack* is different: every member attacks.
+  blocked by terrain. *Attack*, *Fire mission*, *Mount* and *Dismount* are
+  different: every member does them itself.
 - **Shared contacts.** When one member detects something, every member knows
   about it.
 - **Succession.** If the leader is destroyed, or immobilised while another
@@ -138,6 +146,9 @@ plan. **Stop** clears both.
 | **Follow** *entity* | Stays `distance` m behind it (default 50) | The followed entity is destroyed |
 | **Attack** *entity* | Closes to 80 % of its best weapon's range with line of sight, then stops and engages (fixed-wing aircraft keep making passes). **Ignores ROE for this target** | Target destroyed (fails if no weapon can hurt it) |
 | **Orbit** *point, radius* | Circles the point. Meant for aircraft | `duration` elapsed, if set; otherwise never |
+| **Fire mission** *point* | Stops, lays the weapon (20 s), then fires `rounds` (default 3) indirect-fire rounds at the point, spread over `radius` m (default 0). On a unit, every tube that can reach fires | All rounds fired (fails out of range or out of ammunition) |
+| **Mount** *carrier* | Dismounted infantry walk to the carrier and board when it is stopped (a helicopter must have landed). A unit as carrier: each soldier takes the nearest free seat in it | Aboard (fails when no seats are left) |
+| **Dismount** | A carrier stops (a helicopter lands) and unloads its passengers in a line behind it | Passengers out |
 
 Every task accepts an optional `speed` (m/s) where it makes sense. The plan
 setting *Set speed* changes the default cruise speed.
@@ -150,6 +161,7 @@ A **plan** is a list of statements carried out **in order**:
 | --- | --- |
 | `task` | Start the task and wait until it finishes (or fails) |
 | `setRoe`, `setSpeed`, `setAltitude`, `setFormation` | Change a setting instantly and continue |
+| `setReactions` | Change the [reactions](#reactions) it names (others are kept) and continue |
 | `waitUntil` *condition* | Wait until the condition holds |
 
 Conditions:
@@ -161,6 +173,8 @@ Conditions:
 | `enemyDetected` | Any member has a hostile contact |
 | `underFire` | Any member was shot at in the last 15 s |
 | `entityDestroyed` *id* | That entity is destroyed or gone |
+| `enemyInArea` *area* | A living hostile (to the plan's owner) is inside the area |
+| `strengthBelow` *fraction* | Fewer than that fraction of the members are alive (an entity counts as one member) |
 
 With `loop: true` the plan starts over when it ends. When a non-looping plan
 finishes, the event log reports *plan … complete*. Plans can be given to
@@ -168,8 +182,22 @@ entities or units. Tasks inside a unit's plan are carried out unit-style (see
 above).
 
 Plans run one step at a time. To react to something *while* moving, use ROE
-(units fire on the move), or split the route into legs separated by
-`waitUntil` steps.
+(units fire on the move), [reactions](#reactions), or split the route into legs
+separated by `waitUntil` steps.
+
+## Reactions
+
+Reactions are standing orders that run alongside whatever task or plan is
+going on. Set them in the inspector, with a plan's `setReactions` step, or
+through the API.
+
+| Reaction | Effect |
+| --- | --- |
+| `onContact: "halt"` | Stop moving while a hostile seen in the last 3 s is within range of a direct-fire weapon with ammunition; fight; then carry on with the task where it left off. The activity line shows *HALTED (contact)* |
+| `withdrawBelow` *fraction* | A unit whose share of living members drops below the fraction abandons its plan, switches to *return fire* and moves to `withdrawTo` (default: where it was when the reaction was set). For an entity, the trigger is a firepower kill |
+| `callForFire: true` | The entity is an observer: see [Indirect fire](#indirect-fire-and-call-for-fire) |
+
+Setting reactions on a unit sets *on contact* and *call for fire* on every member.
 
 ## Rules of engagement
 
@@ -251,8 +279,83 @@ than 6 m from where it was aimed.
   that still works. Losing both means destroyed.
 - Hits on people and aircraft either destroy them or have no effect.
 
+**Wire-guided missiles.** TOW, Konkurs and Shturm are command guided: the
+launcher must stay alive, able to fire, and in line of sight of the target until
+impact. Otherwise the missile *loses guidance and misses*. Killing the launcher
+of a missile in flight saves its target.
+
 **Remote targets.** Damage to remote (DIS) entities is decided by the
 simulation that owns them. WeRForces only sends the detonation.
+
+## Indirect fire and call for fire
+
+Howitzers and mortars (M109A7, 2S19, 81 mm and 120 mm mortar teams) carry
+**indirect-fire** weapons. These never fire on their own at what they see: they
+fire **fire missions** at a location, with no line of sight needed.
+
+- **Flight.** A round takes range ÷ 320 m/s (howitzers) or 200–220 m/s (mortars)
+  to land: about a minute at 20 km.
+- **Accuracy.** Each round lands off the aim point by a normal error with a
+  standard deviation of the weapon's `dispersion` at maximum range (120 m for
+  155 mm), half that at short range.
+- **Effect.** Every entity, of any force, within the **blast radius** (50 m for
+  155 mm, 25 m for 81 mm) is damaged with probability Pk × (1 − d / radius)²,
+  where *d* is its distance from the burst; people in forest get × 0.7. Entities
+  within three blast radii come under fire (for *underFire* and *return fire*).
+  Armour is hard to kill this way; troops in the open and soft vehicles are not.
+
+**Call for fire.** An entity with the `callForFire` reaction (forward observer
+teams have it by default) watches its contacts once a second. For a hostile
+ground or surface target it has seen in the last 2 s, it calls the **nearest idle
+friendly firing unit** that can reach it: a battery (every tube in range fires
+3 rounds over a 50 m sheaf) or a single gun or mortar. "Idle" means no running
+task (holding formation counts as idle), no plan in progress and not on *hold
+fire*. It will not call:
+
+- within **150 m of friendly troops** (danger close);
+- on a point already covered by a mission or rounds in flight (within 150 m);
+- more than once a minute.
+
+## Mounted infantry
+
+Carriers have **seats**: M2A3 6, BMP-2 7, UH-60 11, Mi-24 8, Ural truck 20. Only
+dismounted infantry (lifeform entities) can ride. Passengers:
+
+- move with the carrier and keep their own state;
+- cannot see, shoot, or be seen or shot at; they do not appear on the map, over
+  DIS or on TAK (the carrier's label shows *+N*);
+- do not carry out their own tasks until they get out.
+
+If the carrier is **destroyed**, each passenger dies with it with probability
+0.5 and the rest bail out; after a **mobility kill** they all bail out.
+
+## Fog of war and roles
+
+A server started with `--player blue:KEY` (and `--api-key` for exercise control)
+gives each player key a **player role**:
+
+- they see their own force in full, other forces only as **contacts** their
+  force currently holds, at the position last seen, named by type
+  (*T-72B3 (E15)*), fading on the map as they go stale;
+- their event log only has events involving their own force, with enemy names
+  hidden;
+- they can only order their own force and refer to objects they can see; time
+  control, editing, recordings and exports stay with exercise control.
+
+This applies to the GUI, the REST API and MCP alike.
+
+## Recording and after-action review
+
+The server records the run as it goes: every entity's position, heading, speed
+and damage once per simulated second (`--record-interval`), plus the event log
+and bookmarks. Long runs stay within a memory budget by halving the frame rate.
+Rewinding or loading a checkpoint cuts the recording back to that time; a new
+scenario starts a new recording.
+
+The **after-action review** replays the recording on the map with a timeline,
+and builds a report: strength and losses per force, every kill with killer,
+weapon and time, rounds fired per weapon and strength over time. Recordings can
+be saved on the server and reviewed later.
 
 ## Time
 
@@ -268,3 +371,14 @@ simulation that owns them. WeRForces only sends the detonation.
   - headless `--duration`.
 
 A 40-minute engagement with about 35 entities computes in roughly a second.
+`npm run bench` measures larger scenes: on a typical laptop core, 1000 moving
+and fighting entities run about 20× faster than real time. Sensor scans use a
+spatial grid, so their cost grows with how crowded the battlefield is, not with
+the square of the entity count.
+
+**Checkpoints.** Saving a scenario while it runs (or `GET /api/v1/scenario`)
+writes a full checkpoint: damage, ammunition, contacts, plan and task progress
+(a route resumes from its current waypoint, a fire mission keeps the rounds
+still to fire), munitions in flight, passengers and the random number state.
+Loading it continues the run exactly; only route planning restarts from the
+current positions.

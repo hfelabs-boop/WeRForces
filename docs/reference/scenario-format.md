@@ -8,7 +8,14 @@ A scenario is a JSON document. You get one from:
 
 Load it with **File → Import from file…**, `PUT /api/v1/scenario`, or
 `--scenario`. Saving captures the **current** state: positions, assigned tasks
-and plans, ROE and graphics. Destroyed entities are left out.
+and plans, ROE, reactions and graphics.
+
+A scenario saved at time 0 is a clean starting point. Saved while running
+(time > 0) it is a full **checkpoint**: entities also carry a `state` with
+damage, ammunition, contacts and plan/task progress, units carry their leader
+and plan progress, and the file adds munitions in flight (`shots`) and the
+random generator state (`rngState`). Loading a checkpoint continues the run
+exactly as it would have gone on. Destroyed entities are kept as wrecks.
 
 The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
 
@@ -25,7 +32,9 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
   "startTime": 0,
   "entities": [ ... ],
   "units": [ ... ],
-  "graphics": [ ... ]
+  "graphics": [ ... ],
+  "shots": [ ... ],
+  "rngState": 1234567890
 }
 ```
 
@@ -38,6 +47,8 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
 | `hostilities` | | Pairs of hostile forces (default `[[1,2]]`) |
 | `startTime` | | Initial simulation time in seconds (default 0) |
 | `entities`, `units`, `graphics` | yes | May be empty arrays |
+| `shots` | | Checkpoints: munitions in flight (`shooterId`, `targetId`, `weaponId`, `from`, `to`, `fireTime`, `impactTime`, `range`) |
+| `rngState` | | Checkpoints: random number generator state, so the run continues identically |
 
 ## `terrain`
 
@@ -64,6 +75,7 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
 | `waterFraction` | 0.1 | Share of the map below sea level |
 | `forestFraction` | 0.28 | Share of the land that is forest |
 | `towns` | 7 | Number of towns, connected by roads |
+| `dataset` | | Name of an imported terrain in `terrains/`. When set, the terrain comes from that dataset and the other fields are ignored ([Terrain import](../terrain-import.md)) |
 
 ## `entities[]`
 
@@ -78,8 +90,10 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
   "heading": 0,
   "altitude": 120,
   "roe": "fireAtWill",
+  "reactions": { "onContact": "halt" },
   "plan": { ... },
-  "task": { ... }
+  "task": { ... },
+  "state": { ... }
 }
 ```
 
@@ -93,6 +107,8 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
 | `altitude` | Aircraft only: metres above ground (defaults to the type's cruise altitude) |
 | `roe` | `fireAtWill` (default), `returnFire`, `holdFire` |
 | `plan` / `task` | Optional. Assigned when the scenario loads. If both are given, the plan wins |
+| `reactions` | Optional: `onContact`, `withdrawBelow`, `withdrawTo`, `callForFire` ([Concepts](../concepts.md#reactions)) |
+| `state` | Optional. At time 0 only `destroyed`, `mobilityKill`, `firepowerKill` and `embarkedIn` (carrier id: starts mounted) are used. Checkpoints add `speed`, `z`, `ammo`, `weaponReadyAt`, `contacts`, `attackers`, `underFireUntil`, `lastFiredAt`, `sensorDue`, `speedOverride`, `altitudeOverride`, `planIndex`, `taskState` (a task spec that resumes the running task), `taskDone`, `withdrawn`, `callForFireAt` |
 
 Ground and dismounted entities must be on land, and surface vessels on water.
 Otherwise loading fails and the previous scenario stays loaded.
@@ -112,7 +128,9 @@ Otherwise loading fails and the previous scenario stays loaded.
 }
 ```
 
-The first member is the initial leader. `echelon` is one of `team`, `section`,
+The first member is the initial leader. Units also take `reactions` and, in
+checkpoints, a `state` with `planIndex`, `taskState`, `taskDone`, `leaderId`
+and `withdrawn`. `echelon` is one of `team`, `section`,
 `platoon`, `company`, `flight` or `group`, and only affects the symbol. Members
 must be listed in `entities` and share the unit's force.
 

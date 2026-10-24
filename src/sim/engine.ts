@@ -409,8 +409,9 @@ export class Engine {
       p.z = this.terrain.elevation(at.x, at.y);
       p.speed = 0;
       p.heading = c.heading;
-      this.setEntityTask(p, null);
-      // A dismounted squad falls back in on its leader.
+      p.steer = null;
+      // Orders given while riding (e.g. the squad's plan) start now; idle soldiers fall in on their leader.
+      if (p.task?.status !== 'running') this.setEntityTask(p, null);
       if (p.unit && p.unit.leader !== p && !p.unit.leader?.embarkedIn) p.unit.formUp(this);
     });
     if (list.length) {

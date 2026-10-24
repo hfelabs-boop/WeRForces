@@ -103,6 +103,36 @@ server. **Export to file** downloads the same JSON to your computer.
 
 ### Can I use real terrain or maps?
 
-Not yet. Terrain is procedural, chosen by seed, size, relief and water/forest
-fractions. Positions do convert to real latitude/longitude (set
-`terrain.origin`), so exports and TAK feeds land wherever you place the map.
+Yes. Import a GeoTIFF elevation model and, optionally, OpenStreetMap features
+with `npm run terrain:import`, then pick the terrain in **File → New
+scenario**. A 10 km Fulda sample is included. See
+[Terrain import](terrain-import.md). Generated terrain also converts to real
+latitude/longitude (set `terrain.origin`), so exports and TAK feeds land
+wherever you place the map.
+
+### `403 exercise control only` or *players cannot …*
+
+You are using a player key (`--player`). Players can only see and order their
+own force; time, scenarios, recordings and exports need the `--api-key`. See
+[Concepts → Fog of war and roles](concepts.md#fog-of-war-and-roles).
+
+### The artillery doesn't answer my observer's calls
+
+A call needs: an observer with **Call for fire** set that currently sees a
+hostile ground target; a friendly gun, mortar or battery that is idle (no
+running task or plan, not on hold fire) and in range (155 mm: 2–22 km, 81 mm:
+80 m – 5.6 km); no friendly troops within 150 m of the target; and no other
+mission already on that spot. Observers call at most once a minute. See
+[Concepts → Indirect fire](concepts.md#indirect-fire-and-call-for-fire).
+
+### My infantry won't get in
+
+Only dismounted infantry can mount, the carrier must be stopped (a helicopter
+must have landed: *Set altitude 0*), and it needs free seats (M2A3 6, BMP-2 7,
+UH-60 11, Mi-24 8, Ural 20). The task fails with *no free seats* otherwise.
+
+### The AAR button says "Nothing recorded yet"
+
+The recording starts when a scenario is loaded and samples once per simulated
+second. Run or step the simulation first. A server started with
+`--record-interval 0` does not record.
