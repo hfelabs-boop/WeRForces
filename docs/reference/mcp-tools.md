@@ -90,6 +90,27 @@ Send a codeword to a force (players: their own). Plans waiting for it ({type:"co
 | `codeword` | string | yes |  |
 | `force` | `"blue"` \| `"red"` \| `"neutral"` |  | default blue (exercise control only) |
 
+## `set_commander`
+
+Hand a force to a commander, or take it back. "rules": the offline doctrinal commander (attacks when strong enough, defends or delays when weak, calls fire on groups of contacts, resupplies, pulls back broken units, sends scouts first). "llm": a language model configured on the server. Either sees only what the force sees and orders through the same commands as a player; orders it did not give are left alone for holdOff seconds. Its decisions and reasons go to the event log and get_commander. "none" stands it down.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `force` | `"blue"` \| `"red"` \| `"neutral"` | yes |  |
+| `kind` | `"none"` \| `"rules"` \| `"llm"` | yes |  |
+| `aggressiveness` | number (0–1) |  | 0 cautious .. 1 bold (default 0.5) |
+| `interval` | number (10–600) |  | simulated seconds between decisions (default 45) |
+| `holdOff` | number (0–3600) |  | seconds an order it did not give is left alone (default 300) |
+| `intent` | string |  | LLM: the commander's intent |
+
+## `get_commander` _(read-only)_
+
+A force's commander: its kind, settings, state and latest decisions with their rationale and orders.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `force` | `"blue"` \| `"red"` \| `"neutral"` | yes |  |
+
 ## `get_alerts`
 
 The attention queue: what needs looking at now (units idle after finishing their orders, broken, out of fuel or ammunition, leader lost, losses, failed tasks, under fire, first contact), newest first. Pass acknowledge: true to clear them once handled.
@@ -298,6 +319,7 @@ Replace the scenario with a generated, ready-to-run battle: pick the mission (fr
 | `weather` | `"clear"` \| `"haze"` \| `"fog"` \| `"rain"` |  |  |
 | `distance` | number (1000–20000) |  | metres between the sides at the start |
 | `civilians` | boolean |  |  |
+| `commander` | {blue, red} |  | sides run by the rule-based commander instead of a phase plan, e.g. {red: "rules"} |
 | `seed` | integer (-9007199254740991–9007199254740991) |  | same seed and options, same battle |
 | `name` | string |  |  |
 
