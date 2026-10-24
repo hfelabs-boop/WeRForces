@@ -54,6 +54,15 @@ Give an order in plain words, the way a commander would say it: "<who> <verb> <w
 | `text` | string | yes | The order, e.g. "Team ARMOR move to Calloway covered" |
 | `dryRun` | boolean |  |  |
 
+## `viewshed` _(read-only)_
+
+What an entity (or a point) can see: the share of the ground within the radius that is in its line of sight, and the dead ground. Use it to choose observation posts, overwatch positions or covered approaches.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `from` | string or {x, y, height} | yes | entity id, or a position |
+| `radius` | number |  |  |
+
 ## `set_sync_matrix`
 
 Plan an operation in phases for a force (a synchronization matrix, or global plan). Each phase has a trigger and orders for units; phases start in order, each giving all its orders at once and announcing its name as a codeword (e.g. phase "Phase 2 Assault" sends codeword "PHASE 2 ASSAULT", which unit plans can wait for). Triggers: {type:"manual"} (start_phase), {type:"time",time} (s), {type:"codeword",codeword}, {type:"previousDone",delay?} (when the previous phase's orders are carried out), {type:"condition",ownerId,condition} (plan conditions). Orders: {targetId, text} with the order in words as for give_order without the name ("move to Calloway covered", "defend OBJ CALLOWAY facing north", "hold fire"), or {targetId, task}. An empty phases list removes the matrix.

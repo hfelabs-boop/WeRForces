@@ -1427,3 +1427,23 @@ body.player [data-controller-only] {
 .sync-unit {
   font-weight: 600;
 }
+
+/* Viewshed legend */
+.viewshed-chip {
+  position: absolute;
+  left: 8px;
+  top: 48px;
+  max-width: 340px;
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  background: rgba(20, 25, 31, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  z-index: 5;
+}
+.viewshed-chip.hidden {
+  display: none;
+}

@@ -202,6 +202,17 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'viewshed',
+    'What an entity (or a point) can see: the share of the ground within the radius that is in its line of sight, and the dead ground. Use it to choose observation posts, overwatch positions or covered approaches.',
+    { from: z.union([z.string(), z.object({ x: z.number(), y: z.number(), height: z.number().optional() })]).describe('entity id, or a position'), radius: z.number().optional() },
+    async ({ from, radius }) => {
+      const v = await api<{ visibleFraction: number; radius: number; cell: number; eye: { x: number; y: number; z: number } }>('POST', '/api/v1/terrain/viewshed', { from, radius });
+      return { radius: v.radius, seen: `${Math.round(v.visibleFraction * 100)}% of the ground within ${(v.radius / 1000).toFixed(1)} km`, eyeHeight: Math.round(v.eye.z), cell: v.cell };
+    },
+    { readOnlyHint: true },
+  );
+
+  tool(
     'set_sync_matrix',
     'Plan an operation in phases for a force (a synchronization matrix, or global plan). Each phase has a trigger and orders for units; phases start in order, each giving all its orders at once and announcing its name as a codeword (e.g. phase "Phase 2 Assault" sends codeword "PHASE 2 ASSAULT", which unit plans can wait for). Triggers: {type:"manual"} (start_phase), {type:"time",time} (s), {type:"codeword",codeword}, {type:"previousDone",delay?} (when the previous phase\'s orders are carried out), {type:"condition",ownerId,condition} (plan conditions). Orders: {targetId, text} with the order in words as for give_order without the name ("move to Calloway covered", "defend OBJ CALLOWAY facing north", "hold fire"), or {targetId, task}. An empty phases list removes the matrix.',
     {

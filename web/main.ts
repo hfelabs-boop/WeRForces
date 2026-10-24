@@ -26,6 +26,7 @@ import type {
   TerrainData,
   Travel,
   UnitSnapshot,
+  Viewshed,
   UnitTemplate,
   Vec2,
 } from '../src/shared/types.js';
@@ -592,6 +593,33 @@ class App {
         this.orderLine.focus();
       }
     });
+  }
+
+  private viewshedOn = false;
+
+  /** Show what an entity or a point can see (null clears it). */
+  private async showViewshed(from: string | { x: number; y: number; height: number } | null): Promise<void> {
+    const chip = $('#viewshed-chip');
+    if (!from) {
+      this.viewshedOn = false;
+      this.map.setViewshed(null);
+      chip.classList.add('hidden');
+      return;
+    }
+    try {
+      const v = await this.api.v1<Viewshed>('POST', '/terrain/viewshed', { from });
+      this.viewshedOn = true;
+      this.map.setViewshed(v);
+      const who = typeof from === 'string' ? (this.entity(from)?.name ?? from) : fmtGrid(from.x, from.y);
+      clear(chip);
+      chip.append(
+        h('span', { text: `Viewshed from ${who}: ${Math.round(v.visibleFraction * 100)}% of the ground within ${(v.radius / 1000).toFixed(1)} km seen; red is dead ground` }),
+        h('button', { class: 'small', text: '✕', title: 'Clear', onclick: () => void this.showViewshed(null) }),
+      );
+      chip.classList.remove('hidden');
+    } catch (err) {
+      this.toast(err instanceof Error ? err.message : String(err));
+    }
   }
 
   /** The phase in progress on the toolbar button. */
@@ -1495,6 +1523,8 @@ class App {
       sep();
     }
     add('Center map here', () => this.map.centerOn(world));
+    add('What can be seen from here (viewshed)', () => void this.showViewshed({ x: Math.round(world.x), y: Math.round(world.y), height: 2 }));
+    if (this.viewshedOn) add('Clear viewshed', () => this.showViewshed(null));
     add('Place point here', () => this.cmd({ cmd: 'createGraphic', kind: 'point', points: [world], force: this.force }));
     if (this.armed) add('Place armed item here', () => (this.map.mode.kind === 'place' ? this.map.mode.onPlace(world) : undefined));
     for (const it of items) if (it) menu.append(it);
@@ -1615,7 +1645,13 @@ class App {
       h('div', { class: 'section' }, h('h4', { text: 'Weapons' }), h('div', { 'data-bind': 'weapons' })),
       h('div', { class: 'section' }, h('h4', { text: 'Sensors' }), h('div', { class: 'hint', text: (t?.sensors ?? []).map((s) => this.catalog?.sensors.find((x) => x.id === s)?.name ?? s).join(', ') || 'none' })),
       h('div', { class: 'section' }, h('h4', { text: 'Contacts' }), h('div', { 'data-bind': 'contacts' })),
-      h('div', { class: 'section row' }, h('button', { text: 'Center', onclick: () => this.centerOn(e.id) }), h('button', { class: 'danger', text: 'Delete', onclick: () => this.deleteSelected() })),
+      h(
+        'div',
+        { class: 'section row' },
+        h('button', { text: 'Center', onclick: () => this.centerOn(e.id) }),
+        h('button', { text: 'Viewshed', title: 'Show the ground it can see, and its dead ground, out to its sensor range', onclick: () => void this.showViewshed(e.id) }),
+        h('button', { class: 'danger', text: 'Delete', onclick: () => this.deleteSelected() }),
+      ),
     );
   }
 

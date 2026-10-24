@@ -586,6 +586,22 @@ export interface SyncMatrixState extends SyncMatrix {
   current?: string;
 }
 
+/** What an observer can see: a grid of cells, 0 out of range (or water), 1 hidden (dead ground), 2 seen. */
+export interface Viewshed {
+  /** Centre of cell (0, 0), and the spacing. Row r, column c is at (x0 + c*cell, y0 + r*cell). */
+  x0: number;
+  y0: number;
+  cell: number;
+  cols: number;
+  rows: number;
+  eye: Vec3;
+  radius: number;
+  targetHeight: number;
+  cellsB64: string;
+  /** Share of the ground in range that is seen. */
+  visibleFraction: number;
+}
+
 // ---------------------------------------------------------------- diagnostics
 
 /** One reason in an explanation. `block` stops the activity; `warn` hampers it; `info` explains it. */

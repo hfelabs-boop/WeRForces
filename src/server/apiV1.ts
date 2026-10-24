@@ -8,6 +8,8 @@ import { dist2d } from '../shared/math.js';
 import type { Command, CommandResult, EntitySnapshot, ForceId, Role, ScenarioFile, SimEventKind, SimState, TerrainData, TerrainDataset, UnitSnapshot, Vec2 } from '../shared/types.js';
 import { outcomesCsv } from '../sim/batch.js';
 import { explainEntity, explainUnit } from '../sim/explain.js';
+import { computeViewshed } from '../sim/viewshed.js';
+import { sensorRange } from '../sim/environment.js';
 import { OrderError, orderContext, parseOrder } from '../shared/orders.js';
 import type { BatchManager } from './batch.js';
 import { attachment, eventsCsv, killsCsv, reportPdf, strengthCsv } from './reports.js';
@@ -62,7 +64,7 @@ const PLAYER_ROUTES: [string, RegExp][] = [
   ['POST', /^\/api\/v1\/codewords\/?$/],
   ['POST', /^\/api\/v1\/alerts\/([^/]+\/)?acknowledge\/?$/],
   ['POST', /^\/api\/v1\/(entities|units)\/[^/]+\/(task|plan|stop|embark|disembark)\/?$/],
-  ['POST', /^\/api\/v1\/(graphics|terrain\/line-of-sight|terrain\/route)\/?$/],
+  ['POST', /^\/api\/v1\/(graphics|terrain\/line-of-sight|terrain\/route|terrain\/viewshed)\/?$/],
   ['PATCH', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
   ['DELETE', /^\/api\/v1\/graphics\/[^/]+\/?$/],
 ];
@@ -697,6 +699,17 @@ export class ApiV1 {
       const a = this.endpoint(b.from, 'from');
       const c = this.endpoint(b.to, 'to');
       return { json: { visible: this.engine.lineOfSight(a, c, b.radar === true), distance: Math.round(Math.hypot(c.x - a.x, c.y - a.y, c.z - a.z)), from: a, to: c } };
+    });
+    r.post(`${P}/terrain/viewshed`, (req) => {
+      const b = obj(req.body);
+      const eye = this.endpoint(b.from, 'from');
+      const e = typeof b.from === 'string' ? this.engine.entities.get(b.from) : undefined;
+      // An entity sees as far as its best sensor does now (light and weather); a point, 3 km.
+      const reach = e ? Math.max(...e.type.sensors.map((s) => sensorRange(this.engine.catalog.sensors.get(s)!, this.engine.env)), 0) : 3000;
+      const radius = b.radius === undefined ? Math.min(10000, Math.max(1000, reach)) : num(b.radius, 'radius');
+      if (radius < 100 || radius > 20000) throw new HttpError(400, 'radius must be 100-20000 m');
+      const targetHeight = b.targetHeight === undefined ? 2 : num(b.targetHeight, 'targetHeight');
+      return { json: computeViewshed(this.engine, eye, radius, targetHeight, b.radar === true) };
     });
     r.post(`${P}/terrain/route`, (req) => {
       const b = obj(req.body);
