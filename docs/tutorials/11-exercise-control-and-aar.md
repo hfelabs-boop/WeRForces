@@ -68,11 +68,11 @@ team *Gunslinger* has found and engaged the Red column, and the windows differ:
 | Window | Entities shown | Of which contacts |
 | --- | --- | --- |
 | Control | 36 | – |
-| Blue | 18 | a Ural truck and three civilian cars |
+| Blue | 17 | three civilian cars |
 | Red | 21 | the two F-16s overhead |
 
 Contacts are drawn at the position where they were **last seen**, named by type
-(*Ural-4320 (E32)*), and fade when they have not been seen for a few seconds.
+(*Civilian Car (E34)*), and fade when they have not been seen for a few seconds.
 Select one and the inspector says how long ago that was. When a contact is
 destroyed, or lost for 15 s, it disappears.
 
@@ -121,7 +121,7 @@ curl -s -H 'Authorization: Bearer control' localhost:8080/api/v1/recording
 ```
 
 ```json
-{"live":true,"scenarioName":"Calloway Crossroads","start":0,"end":900,"interval":1,"frames":901,"entities":36,"events":55,"bookmarks":[{"id":"B1","time":300,"text":"Gunslinger cleared the road"}],"bytes":1037952}
+{"live":true,"scenarioName":"Calloway Crossroads","start":0,"end":900,"interval":1,"frames":901,"entities":36,"events":53,"bookmarks":[{"id":"B1","time":300,"text":"Gunslinger cleared the road"}],"bytes":1037952}
 ```
 
 `GET /recording/state?time=120` returns everything as it was at 2:00, with
@@ -139,14 +139,14 @@ curl -s -H 'Authorization: Bearer control' localhost:8080/api/v1/recording/repor
 ```
 
 ```json
-{"force":1,"start":14,"end":14,"losses":0,"shots":16,"kills":6}
-{"force":2,"start":19,"end":13,"losses":6,"shots":0,"kills":0}
+{"force":1,"start":14,"end":14,"losses":0,"shots":16,"kills":7}
+{"force":2,"start":19,"end":12,"losses":7,"shots":0,"kills":0}
 {"force":3,"start":3,"end":3,"losses":0,"shots":0,"kills":0}
 {"time":153,"victimId":"E15","victim":"Tank Plt 1 Lead","victimForce":2,"killerId":"E11","killer":"Gunslinger Lead","weaponId":"hellfire"}
 {"hellfire":16}
 ```
 
-Sixteen Hellfires for six kills. Red never fired a shot: it never saw the
+Sixteen Hellfires for seven kills. Red never fired a shot: it never saw the
 helicopters. That is the kind of thing the debrief is for. AI agents get the
 same report as text from the MCP tool `after_action_report`.
 

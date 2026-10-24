@@ -147,11 +147,14 @@ export class Unit implements Taskable {
     if (old && old.alive && (!old.mobilityKill || mobile.length === 0)) return;
     const next = mobile[0] ?? this.alive()[0];
     if (!next || next === old) return;
-    const wasRunning = !!this.taskSpec && !perMemberTask(this.taskSpec) && this.leaderTask?.status === 'running';
     this.leader = next;
     engine.log('info', `${this.name}: ${old?.name ?? 'leader'} ${old?.alive ? 'immobilised' : 'lost'}, ${next.name} takes command`, this.id);
-    if (wasRunning && this.taskSpec) {
-      this.leaderTask = createTask(this.taskSpec);
+    // Attacks, fire missions and mounting are done by every member: they simply carry on.
+    if (this.taskSpec && perMemberTask(this.taskSpec) && this.taskStatus() === 'running') return;
+    const running = !!this.taskSpec && !perMemberTask(this.taskSpec) && this.leaderTask?.status === 'running' ? this.leaderTask : null;
+    if (running) {
+      // The new leader picks up where the old one was (e.g. the same waypoint of a route).
+      this.leaderTask = createTask(running.resumeSpec());
       engine.setEntityTask(next, this.leaderTask);
     } else {
       engine.setEntityTask(next, null);

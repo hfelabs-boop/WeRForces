@@ -154,3 +154,37 @@ describe('checkpoints', () => {
     expect(b.toScenario().shots).toHaveLength(1);
   });
 });
+
+describe('leader succession', () => {
+  it('keeps a unit attack going when the leader is lost', () => {
+    const eng = engine();
+    const tanks = eng.createUnitFromTemplate('us-tank-platoon', 1, 500, 2000, Math.PI / 2);
+    const target = eng.createEntity({ typeId: 'ru-t72b3', force: 2, x: 3800, y: 2000 });
+    target.roe = 'holdFire';
+    eng.assignPlan(tanks.id, { statements: [{ kind: 'task', task: { type: 'attack', targetId: target.id } }, { kind: 'setFormation', formation: 'line' }] });
+    eng.runFor(1);
+    tanks.memberList[0].destroyed = true;
+    eng.runFor(1);
+    expect(tanks.leader).toBe(tanks.memberList[1]);
+    expect(tanks.formation).toBe('wedge');
+    expect(tanks.memberList.slice(1).every((m) => m.task?.spec.type === 'attack' && m.task.status === 'running')).toBe(true);
+  });
+
+  it('resumes a route from the current waypoint under the new leader', () => {
+    const eng = engine();
+    const route = eng.addGraphic('route', [{ x: 300, y: 300 }, { x: 1300, y: 300 }, { x: 2300, y: 300 }, { x: 3300, y: 300 }, { x: 3300, y: 1500 }], 'R');
+    const convoy = eng.createUnitFromTemplate('ru-supply-convoy', 2, 300, 300, Math.PI / 2);
+    eng.assignTask(convoy.id, { type: 'followRoute', routeId: route.id });
+    eng.runFor(150);
+    const lead = convoy.leader!;
+    const xBefore = lead.x;
+    expect(xBefore).toBeGreaterThan(1500);
+    lead.destroyed = true;
+    eng.runFor(30);
+    const next = convoy.leader!;
+    expect(next).not.toBe(lead);
+    // Heading on along the route, not back to its first point.
+    expect(next.task?.spec).toMatchObject({ type: 'followRoute', startIndex: expect.any(Number) });
+    expect((next.task!.spec as { startIndex: number }).startIndex).toBeGreaterThanOrEqual(2);
+  });
+});
