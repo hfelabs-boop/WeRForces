@@ -306,6 +306,25 @@ Switch a jammer (an electronic warfare entity, e.g. R-330Zh Zhitel, Krasukha-2, 
 | `id` | string | yes |  |
 | `on` | boolean | yes |  |
 
+## `set_emcon` _(idempotent)_
+
+Emission control for an entity, or a unit with its members and subordinate units. radioSilence: it transmits nothing, so enemy direction finders cannot locate it by its radio, but it shares no contacts, cannot call for fire or hear codewords, and orders reach it a minute late. radarOff: its radars neither radiate nor detect, and anti-radiation missiles lose them. jamming: switch its jammers on or off. Settings left out stay as they are.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | yes | entity or unit id |
+| `radioSilence` | boolean |  |  |
+| `radarOff` | boolean |  |  |
+| `jamming` | boolean |  |  |
+
+## `get_df_contacts` _(read-only)_
+
+Enemy emitters located by direction finding (SIGINT/ELINT stations such as Prophet or R-381T, and anti-radiation targeting receivers): radars, jammers, radios that transmitted in the last 10 s, drone datalinks and their ground control stations. Each has an estimated position with an uncertainty ellipse (semi-axes in m): one station gives a long ellipse along its bearing, two or more stations cross bearings into a tight fix. Fire a fire mission at a good fix (or let a DF station with call-for-fire do it).
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `force` | `1` or `2` or `3` or `0` |  | exercise control: only this force's contacts |
+
 ## `quick_battle`
 
 Replace the scenario with a generated, ready-to-run battle: pick the mission (from Blue's side), each force's nation, composition, size and support, time and weather. Both forces are placed on land either side of an objective (a town near the middle when there is one), with the mission's graphics and a synchronization matrix per force; start the simulation to fight it. Returns the mission brief.

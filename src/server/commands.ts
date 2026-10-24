@@ -540,6 +540,19 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         engine.ew.update();
         return;
       }
+      case 'setEmcon': {
+        const id = str(c.targetId, 'targetId');
+        const t = engine.entities.get(id) ?? engine.units.get(id);
+        if (!t || ('remote' in t && t.remote)) throw new ValidationError(`unknown local entity or unit ${id}`);
+        const flag = (v: unknown, what: string) => {
+          if (v !== undefined && typeof v !== 'boolean') throw new ValidationError(`${what} must be true or false`);
+          return v as boolean | undefined;
+        };
+        const emcon = { radioSilence: flag(c.radioSilence, 'radioSilence'), radarOff: flag(c.radarOff, 'radarOff'), jamming: flag(c.jamming, 'jamming') };
+        if (emcon.radioSilence === undefined && emcon.radarOff === undefined && emcon.jamming === undefined) throw new ValidationError('give radioSilence, radarOff or jamming');
+        engine.setEmcon(id, emcon);
+        return;
+      }
       case 'setPatternOfLife': {
         const n = (v: unknown, what: string) => {
           if (v === undefined) return undefined;
