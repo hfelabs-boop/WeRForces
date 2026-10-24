@@ -143,9 +143,11 @@ jammer, or switch it off (exercise control: the jammer's inspector, or `PATCH
 Phases start in order, so check that the one before it has started (**Phases**
 shows *started* and the time). A *when previous done* trigger waits until every
 order of the previous phase is carried out: an order that never ends, such as
-*Defend* or *Overwatch* without a duration, keeps it waiting. A *codeword*
-trigger needs exactly that codeword (`GET /api/v1/codewords` lists those sent).
-**▶ Start now** starts a phase by hand.
+*Defend* or *Overwatch* without a duration, keeps it waiting (orders to units
+wiped out count as done). Move such orders to a phase of their own, or give the
+next phase another trigger. A *codeword* trigger needs exactly that codeword
+(`GET /api/v1/codewords` lists those sent); send it from the codeword box at
+the bottom of the **Phases** dialog. **▶ Start now** starts a phase by hand.
 
 ### The order line says *which one?* or *where?*
 
@@ -153,9 +155,9 @@ The order names something more than one object answers to, or a place it
 doesn't know. *which one?* lists the candidates with their ids: type the id
 (*E31*) or the name with its id (*T-72B3 (E31)*). For a place, use a town, a
 graphic name or id (*G5*), an object, coordinates (*9382 7938*) or *2 km north
-of Brenham*. Exercise control sees every force's graphics, so a name both sides
-use (a quick battle draws *OBJ RAVEN* for each) is not understood as a place:
-use its id or coordinates. Check an order
+of Brenham*. Two different graphics with the same name can't be told apart
+(*where?*): use the id. A graphic drawn once for each force with the same name
+and shape, like a quick battle's *OBJ RAVEN*, counts as one place. Check an order
 without carrying it out with `POST /api/v1/orders` and `"dryRun": true`.
 
 ### The artillery doesn't answer my observer's calls

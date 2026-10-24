@@ -78,34 +78,48 @@ for the full name.
 ## 3. The synchronization matrix
 
 Press **Phases** in the toolbar (or **Show phases** in the brief). This is
-Blue's operation, one column per phase and one row per unit. Over the API, `GET
-$B/sync-matrix` returns both sides' matrices. In short:
+Blue's operation, one column per phase and one row per unit. The wizard gave
+the orders as tasks, so the cells show their descriptions (*Move to 08.922E
+06.668N*); hover one: *Given as a task; type over it to change it*. Over the
+API, `GET $B/sync-matrix` returns both sides' matrices:
 
 | Force | Phase | Trigger | Orders |
 | --- | --- | --- | --- |
-| Blue | P1 Move | at time 1 s | US Combined Arms Team: move to ATK POS |
-| Blue | P2 Assault | when previous done, +30 s | US Combined Arms Team: assault OBJ RAVEN; US 81mm Mortar Section: fire 4 rounds on OBJ RAVEN |
-| Blue | P3 Consolidate | when previous done, +10 s | US Combined Arms Team: consolidate (defend) on OBJ RAVEN |
-| Red | P1 Defend | at time 0 | RU Mech Platoon: defend BP 1 |
+| Blue | P1 Move | at time 1 s | US Combined Arms Team: Move to 08.922E 06.668N (ATK POS) |
+| Blue | P2 Assault | when previous done, +30 s | US Combined Arms Team: Move to 09.382E 07.938N (OBJ RAVEN); US 81mm Mortar Section: Fire mission 09.382E 07.938N, 4 rounds |
+| Blue | P3 Consolidate | when previous done, +10 s | US Combined Arms Team: Defend 09.382E 07.938N facing 20° |
+| Red | P1 Defend | at time 0 | RU Mech Platoon: Defend 09.382E 07.938N facing 200° |
+
+```json
+{"force": 1, "phases": [
+  {"id": "P1", "name": "Move", "trigger": {"type": "time", "time": 1},
+   "orders": [{"targetId": "U1", "task": {"type": "moveTo", "target": {"x": 8922.181219652968, "y": 6668.40571970489}}}]},
+  {"id": "P2", "name": "Assault", "trigger": {"type": "previousDone", "delay": 30}, ...},
+  ...], "started": {}}
+```
 
 Phases start in order. When one starts, it gives all its orders at once and
 sends its name to its force as a **codeword**: *Move* sends *MOVE*, so a unit's
-plan can *wait until codeword MOVE*.
+plan can *wait until codeword MOVE*. (Support that never finishes its orders,
+such as scouts on overwatch or helicopters holding, gets a phase of its own,
+*P0 Deploy*, so it doesn't hold up the others. This battle has none.)
 
 As planned, Blue assaults 30 s after the team reaches ATK POS. Make it wait for
-your word instead: change P2's trigger to the codeword **EXECUTE**. A matrix is
-replaced as a whole, and each order can be given in words, as you would type it
-on the order line but without the unit's name:
+your word instead: change P2's trigger to the codeword **EXECUTE**. In the
+dialog, set the chooser under *Assault* to **on codeword**, type *EXECUTE* in
+the box next to it and press **Save**. Over the API, a matrix is replaced as a
+whole, and each order can be given in words, as you would type it on the order
+line but without the unit's name:
 
 ```bash
 curl -s -X PUT -H "$H" $B/sync-matrix/blue -d '{"phases": [
   {"id": "P1", "name": "Move", "trigger": {"type": "time", "time": 1},
    "orders": [{"targetId": "U1", "text": "move to ATK POS"}]},
   {"id": "P2", "name": "Assault", "trigger": {"type": "codeword", "codeword": "EXECUTE"},
-   "orders": [{"targetId": "U1", "text": "move to 9382 7938"},
-              {"targetId": "U5", "text": "fire 4 rounds on 9382 7938"}]},
+   "orders": [{"targetId": "U1", "text": "move to OBJ RAVEN"},
+              {"targetId": "U5", "text": "fire 4 rounds on OBJ RAVEN"}]},
   {"id": "P3", "name": "Consolidate", "trigger": {"type": "previousDone", "delay": 10},
-   "orders": [{"targetId": "U1", "text": "defend 9382 7938 facing 20 width 500 m"}]}]}'
+   "orders": [{"targetId": "U1", "text": "defend OBJ RAVEN facing 20 width 500 m"}]}]}'
 ```
 
 The server turns each `text` into a task (it answers 400, naming the unit and
@@ -118,11 +132,12 @@ phase, if it can't) and returns the matrix, with `started` still empty:
  "started": {}}
 ```
 
-(9382 7938 is the centre of OBJ RAVEN. Exercise control sees both sides'
-*OBJ RAVEN*, so the name alone is ambiguous; a player would only see their
-own.) Open **Phases** again: the cells now read as typed, green when they parse
-as an order. Each column's trigger is the chooser under its name: *by hand*,
-*at time (s)*, *on codeword* or *when previous done (+s)*.
+The outputs below come from this call. The dialog keeps the wizard's exact
+coordinates where the call rounds them to the metre, so with the GUI a few
+grid references come out a metre different. Open **Phases** again: the cells
+now read as typed, green when they parse as an order. Each column's trigger is
+the chooser under its name: *by hand*, *at time (s)*, *on codeword* or *when
+previous done (+s)*.
 
 ![Blue's synchronization matrix after the change, with phase Move started](../images/tutorial-16-phases.png)
 
@@ -180,7 +195,8 @@ The team passed its order down to its platoons, each keeping its place.
 offers the common orders as buttons with keys **1**–**0**: *Move*, *Covered*,
 *Attack*, *Defend*, *Overwatch*, *Fire*, *Smoke*, *Stop*, *Hold fire*, *Fire
 at will*. Press **2** and click ATK POS for the same covered move. **⚙**
-chooses the buttons.
+chooses the buttons, and **⇅** moves the bar to the top of the map when it
+covers units near the bottom edge.
 
 ## 5. Travel estimates
 
@@ -341,9 +357,9 @@ warning). E2's **Why?** explains what that means:
 - *Jammed by Zhitel, 3.1 km away (reach 15.0 km).* (info, exercise control
   only)
 
-Now give the word for the assault. There is no codeword button in the GUI:
-send it over the API (or MCP `send_codeword`), or press **▶ Start now** on the
-Assault column in **Phases**, which starts the phase the same way. At 0:05:00:
+Now give the word for the assault. At 0:05:00 open **Phases**, type *execute* in
+the codeword box at the bottom and press **Send codeword** (or use MCP
+`send_codeword`, or the API):
 
 ```bash
 curl -s -H "$H" $B/codewords -d '{"force": 1, "codeword": "execute"}'

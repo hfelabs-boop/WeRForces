@@ -227,7 +227,7 @@ A force's operation in phases ([Concepts](../concepts.md#synchronization-matrix)
   "force": 1,
   "phases": [
     { "id": "P1", "name": "Move", "trigger": { "type": "time", "time": 1 },
-      "orders": [ { "targetId": "U1", "task": { "type": "moveTo", "target": { "x": 8922, "y": 6668 } }, "text": "US Combined Arms Team: move to ATK POS" } ] },
+      "orders": [ { "targetId": "U1", "task": { "type": "moveTo", "target": { "x": 8922, "y": 6668 } }, "text": "move to ATK POS" } ] },
     { "id": "P2", "name": "Assault", "trigger": { "type": "codeword", "codeword": "EXECUTE" },
       "orders": [ { "targetId": "U1", "task": { "type": "moveTo", "target": { "x": 9382, "y": 7938 } } },
                   { "targetId": "U5", "task": { "type": "fireMission", "target": { "x": 9382, "y": 7938 }, "rounds": 4, "radius": 150 } } ] }

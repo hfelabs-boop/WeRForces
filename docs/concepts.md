@@ -237,7 +237,7 @@ A **plan** is a list of statements carried out **in order**:
 | `waitUntil` *condition* | Wait until the condition holds |
 | `if` *condition* `then` [...] `else` [...] | Check the condition once, now, and carry out one branch (`else` is optional) |
 | `while` *condition* `body` [...] | Check the condition; while it holds, carry out the body and check again |
-| `sendCodeword` *word* | Send a [codeword](#codewords) to the owner's force and continue |
+| `sendCodeword` *word* | Send a [codeword](#codewords) to the owner's force and continue. While the owner's radio is jammed the plan waits here |
 | `report` *text* | Put a radio message from the owner in the event log (*radio*) and continue |
 
 Conditions:
@@ -285,7 +285,9 @@ unit that sent it).
 
 Once a force has a codeword it keeps it, so a plan that reaches *wait until
 codeword EXECUTE* after it was sent goes straight on. A unit whose radio is
-[jammed](#electronic-warfare) does not hear codewords until its radio is back.
+[jammed](#electronic-warfare) does not hear codewords until its radio is back,
+and a plan cannot send one while its unit's radio is jammed: it waits at that
+step.
 Codewords are per force: Red can't hear Blue's. `GET /api/v1/codewords` lists
 them with the time each was first sent; checkpoints save them.
 
@@ -311,7 +313,10 @@ out to the force as a codeword (*ASSAULT*).
 Orders are carried out like any order: a later order to the same unit (typed,
 from a plan, or by hand) replaces the phase's order. An order that never ends,
 such as *Defend* or *Overwatch* without a duration, keeps a following
-`previousDone` phase waiting; use another trigger after such a phase. Phases
+`previousDone` phase waiting: give such orders in a phase of their own, with
+another trigger after it (a quick battle puts its support's orders in a first
+*Deploy* phase for this reason). An order to a unit with no one left alive
+counts as failed, so it doesn't hold up the next phase. Phases
 are checked once a simulated second. Each force has its own matrix and its own
 record of which phases have started. Up to 20 phases of up to 100 orders each.
 
@@ -684,7 +689,8 @@ leader lost, losses, under fire or first contact after a quiet minute, and
 radio jammed. Each is about a unit or a loose entity, with a severity
 (critical, warning, info), the time it was last raised and a count. An alert
 about a lasting condition (broken, fuel, ammunition, jammed) closes by itself
-when the condition clears. Acknowledged alerts are kept (up to 200 in all) and
+when the condition clears. Acknowledged while the condition lasts, it is not
+raised again until the condition has cleared and come back. Acknowledged alerts are kept (up to 200 in all) and
 listed with `GET /api/v1/alerts?all=true`. Alerts are checked once a simulated
 second and only read the simulation.
 

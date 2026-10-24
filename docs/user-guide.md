@@ -411,8 +411,9 @@ orders. Each button has a key, **1** to **9** then **0**:
 
 Buttons the selection can't use are greyed out. **⚙** chooses up to ten
 buttons and their order from the full list (which adds *Follow*, *Screen*,
-*Orbit*, *Return fire*, *Resupply* and *Dismount*). The choice is kept in this
-browser.
+*Orbit*, *Return fire*, *Resupply* and *Dismount*). **⇅** moves the bar to
+the top of the map (and back), for when it covers units near the bottom edge.
+Both choices are kept in this browser.
 
 ## Alerts
 
@@ -435,7 +436,8 @@ loose entity:
 Critical alerts also pop up once. Click an alert to select and centre what it
 is about, ✓ to acknowledge it, or **Acknowledge all**. **N** jumps to the next
 alert. Alerts about a condition that clears (fuel, morale, jamming) close by
-themselves. Players only see their own force's alerts. REST `GET
+themselves. An alert you acknowledged stays quiet while its condition lasts,
+and comes back if the condition clears and then returns. Players only see their own force's alerts. REST `GET
 /api/v1/alerts`, MCP `get_alerts`.
 
 ## Synchronization matrix
@@ -445,7 +447,9 @@ phase, one row per unit (and loose entity), and in each cell that unit's order
 for the phase, in words as on the [order line](#typed-orders) but without the
 name (*move to Calloway covered*, *defend OBJ CALLOWAY facing north*, *hold
 fire*; several separated by *;*). A cell turns green when it reads as an order
-(hover to see how) and red when it doesn't.
+(hover to see how) and red when it doesn't. Orders given as tasks (by a quick
+battle, or through the API) show as their description, e.g. *Move to 08.922E
+06.668N*, and are kept as they are unless you type over them.
 
 Above each column are the phase's name and its trigger:
 
@@ -461,7 +465,9 @@ Phases start in order: one waits until the one before it has started. When a
 phase starts it gives all its orders at once and sends its name to the force as
 a codeword (phase *Assault* sends *ASSAULT*), so unit plans can wait for it.
 **+ Phase** adds a column, ✕ removes one, **Save** stores the matrix and
-**Close** leaves without saving. A started phase shows *started 00:05:01*.
+**Close** leaves without saving. Type a word in the codeword box at the bottom
+and press **Send codeword** to send it to the force now: phases and plans
+waiting for it go on. A started phase shows *started 00:05:01*.
 Exercise control picks the force at the top; a player plans for their own.
 See [Concepts](concepts.md#synchronization-matrix).
 
@@ -493,7 +499,8 @@ shows its speed, heading, throttle, target, damage and ammunition.
 | Esc | Hand it back: it stops and its task ends |
 
 Driving replaces its task and plan, and any other order ends it. Driving a unit's leader takes the unit's
-orders away too; members keeping formation follow it. Aircraft keep at least
+orders away too, and its members fall in behind it in formation (also those
+that were holding positions of their own). Aircraft keep at least
 their minimum speed. REST `POST /api/v1/entities/{id}/drive` with `{"throttle":
 0.5, "turn": -1, "targetId": "E12"}` (a turn lasts 1.5 s unless sent again).
 
@@ -557,6 +564,9 @@ File → **Simulation settings…** (or click the time-of-day chip):
   roads; people walk about the towns. They are neutral (force 3) and run from
   shots and blasts nearby. See [Concepts](concepts.md#pattern-of-life).
 
+**Apply** changes all of these as one edit, so one **Undo** takes the whole
+dialog back.
+
 ## Quick battle
 
 File → **Quick battle…** builds a ready-to-run battle and replaces the current
@@ -580,7 +590,11 @@ scenario:
 **Build battle** places both forces on land either side of an objective (a town
 near the middle of the map when there is one), draws the mission's graphics
 (objective, attack position, line of departure, battle position, minefield...)
-and gives each side a [synchronization matrix](#synchronization-matrix). The
+and gives each side a [synchronization matrix](#synchronization-matrix), its
+orders given as tasks. Support whose orders never finish (scouts watching the
+objective from their own side, attack helicopters holding over the battle
+area, sappers following the attack) gets them in a first phase of its own, *P0
+Deploy*, so it does not hold up the phases that wait for the one before. The
 brief that follows says who does what; **Start** runs the clock, **Show
 phases** opens the matrix. The quick battle is one edit: **Undo** brings back
 the previous scenario. REST `POST /api/v1/scenario/quick-battle`, MCP
