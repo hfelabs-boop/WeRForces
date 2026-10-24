@@ -97,6 +97,13 @@ function buildModel(symbol: SymbolKind, domain: string, color: number): THREE.Gr
       g.add(part(geo.box, body, 2.8, 0.9, 3.4, 0, 2, 0.4));
       g.add(part(geo.cyl, dark, 0.22, 5.5, 0.22, 0, 2.05, -3.8, R));
       break;
+    case 'artillery':
+      // Self-propelled howitzer: large rear turret, long barrel at a firing elevation.
+      g.add(part(geo.box, body, 3.6, 1.4, 7.5, 0, 0.9));
+      g.add(part(geo.box, dark, 3.8, 0.9, 7.7, 0, 0.45));
+      g.add(part(geo.box, body, 3.2, 1.6, 4.2, 0, 2.3, 1.2));
+      g.add(part(geo.cyl, dark, 0.25, 7.5, 0.25, 0, 3.8, -3.4, R - 0.35));
+      break;
     case 'mech':
     case 'recon':
       g.add(part(geo.box, body, 3.3, 1.8, 6.6, 0, 1.2));
@@ -232,7 +239,13 @@ export class View3D {
     if (!this.data) return;
     const now = performance.now();
     for (const ev of events) {
-      if (ev.kind === 'fire' && ev.from && ev.to) {
+      if (ev.kind === 'fire' && ev.from && ev.indirect) {
+        const mat = new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.9 });
+        const s = new THREE.Mesh(geo.sphere, mat);
+        s.position.copy(this.toScene(ev.from.x, ev.from.y, ev.from.z + 2));
+        this.scene.add(s);
+        this.effects.push({ obj: s, material: mat, start: now, duration: 500, grow: 12 });
+      } else if (ev.kind === 'fire' && ev.from && ev.to) {
         const mat = new THREE.LineBasicMaterial({ color: 0xffd34d, transparent: true, opacity: 1, depthTest: false });
         const g = new THREE.BufferGeometry().setFromPoints([this.toScene(ev.from.x, ev.from.y, ev.from.z), this.toScene(ev.to.x, ev.to.y, ev.to.z)]);
         const line = new THREE.Line(g, mat);
@@ -243,7 +256,7 @@ export class View3D {
         const s = new THREE.Mesh(geo.sphere, mat);
         s.position.copy(this.toScene(ev.to.x, ev.to.y, ev.to.z));
         this.scene.add(s);
-        this.effects.push({ obj: s, material: mat, start: now, duration: 1100, grow: ev.hit ? 90 : 40 });
+        this.effects.push({ obj: s, material: mat, start: now, duration: ev.radius ? 1600 : 1100, grow: ev.radius ? ev.radius * 1.5 : ev.hit ? 90 : 40 });
       }
     }
   }

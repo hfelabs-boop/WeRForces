@@ -5,7 +5,7 @@ import type { ForceId, Formation, Plan, PlanStatement, Reactions, TaskSpec, Unit
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import type { PlanExecutor, Taskable } from './plans.js';
-import { createTask, FormationTask, type Task, type TaskStatus } from './tasks.js';
+import { createTask, FormationTask, indirectWeaponFor, type Task, type TaskStatus } from './tasks.js';
 
 /** Body-frame offset (x = right, y = forward) for follower k (1-based) in a formation. */
 export function formationOffset(formation: Formation, k: number, spacing: number): Vec2 {
@@ -23,6 +23,11 @@ export function formationOffset(formation: Formation, k: number, spacing: number
     case 'echelonRight':
       return { x: k * spacing, y: -k * spacing };
   }
+}
+
+/** Unit tasks that every member executes itself, rather than the leader with the rest in formation. */
+export function perMemberTask(spec: TaskSpec): boolean {
+  return spec.type === 'attack' || spec.type === 'fireMission';
 }
 
 export class Unit implements Taskable {
@@ -79,6 +84,13 @@ export class Unit implements Taskable {
       for (const m of this.alive()) engine.setEntityTask(m, createTask(spec));
       return;
     }
+    if (spec.type === 'fireMission') {
+      // Every tube that can reach the target fires; the rest stay put.
+      const alive = this.alive();
+      const tubes = alive.filter((m) => indirectWeaponFor(engine, m, spec.target, spec.weaponId));
+      for (const m of tubes.length ? tubes : alive) engine.setEntityTask(m, createTask(spec));
+      return;
+    }
     this.leaderTask = createTask(spec);
     engine.setEntityTask(leader, this.leaderTask);
     this.formUp(engine);
@@ -97,8 +109,9 @@ export class Unit implements Taskable {
 
   taskStatus(): TaskStatus | 'none' {
     if (!this.taskSpec) return 'none';
-    if (this.taskSpec.type === 'attack') {
-      return this.alive().some((m) => m.task?.status === 'running') ? 'running' : 'done';
+    if (perMemberTask(this.taskSpec)) {
+      const type = this.taskSpec.type;
+      return this.alive().some((m) => m.task?.status === 'running' && m.task.spec.type === type) ? 'running' : 'done';
     }
     return this.leaderTask?.status ?? 'done';
   }
@@ -109,7 +122,8 @@ export class Unit implements Taskable {
       return;
     }
     if (st.kind === 'setReactions') {
-      engine.setReactions(this.id, st.reactions);
+      // Plan steps change only the reactions they name.
+      engine.setReactions(this.id, { ...this.reactions, ...st.reactions });
       return;
     }
     for (const m of this.memberList) engine.applyEntitySetting(m, st);
@@ -122,7 +136,7 @@ export class Unit implements Taskable {
     if (old && old.alive && (!old.mobilityKill || mobile.length === 0)) return;
     const next = mobile[0] ?? this.alive()[0];
     if (!next || next === old) return;
-    const wasRunning = !!this.taskSpec && this.taskSpec.type !== 'attack' && this.leaderTask?.status === 'running';
+    const wasRunning = !!this.taskSpec && !perMemberTask(this.taskSpec) && this.leaderTask?.status === 'running';
     this.leader = next;
     engine.log('info', `${this.name}: ${old?.name ?? 'leader'} ${old?.alive ? 'immobilised' : 'lost'}, ${next.name} takes command`, this.id);
     if (wasRunning && this.taskSpec) {

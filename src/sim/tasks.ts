@@ -4,6 +4,7 @@
 import { bearing, dist2d, rotateOffset } from '../shared/math.js';
 import type { TaskSpec, Vec2, WeaponDef } from '../shared/types.js';
 import type { Engine } from './engine.js';
+import { fireIndirect } from './combat.js';
 import type { Entity } from './entity.js';
 
 export type TaskStatus = 'running' | 'done' | 'failed';
@@ -270,7 +271,7 @@ export function bestWeaponAgainst(engine: Engine, shooter: Entity, target: Entit
   for (const wid of shooter.type.weapons) {
     if ((shooter.ammo.get(wid) ?? 0) <= 0) continue;
     const w = engine.catalog.weapon(wid);
-    if (!w.targets.includes(target.domain)) continue;
+    if (w.indirect || !w.targets.includes(target.domain)) continue;
     const pk = w.pk[target.type.armor] ?? 0;
     if (pk > bestPk) {
       bestPk = pk;
@@ -396,6 +397,72 @@ export class FormationTask extends Task {
   }
 }
 
+export const DEFAULT_MISSION_ROUNDS = 3;
+/** Seconds to lay the weapon on a new target before the first round. */
+export const LAY_TIME = 20;
+
+/** Indirect-fire weapon (with ammunition) that can reach a point from where the entity is. */
+export function indirectWeaponFor(engine: Engine, e: Entity, target: Vec2, weaponId?: string): WeaponDef | undefined {
+  const d = dist2d(e, target);
+  for (const wid of e.type.weapons) {
+    if (weaponId && wid !== weaponId) continue;
+    const w = engine.catalog.weapon(wid);
+    if (!w.indirect || (e.ammo.get(wid) ?? 0) <= 0) continue;
+    if (d >= w.minRange && d <= w.maxRange) return w;
+  }
+  return undefined;
+}
+
+/** Halt, lay on the target, then fire a number of indirect-fire rounds at it. */
+export class FireMissionTask extends Task {
+  private fired = 0;
+  private laidAt?: number;
+  readonly rounds: number;
+
+  constructor(readonly mission: Extract<TaskSpec, { type: 'fireMission' }>) {
+    super(mission);
+    this.rounds = Math.max(1, Math.round(mission.rounds ?? DEFAULT_MISSION_ROUNDS));
+  }
+
+  protected tick({ engine, entity }: TaskContext): TaskStatus {
+    entity.steer = { x: entity.x, y: entity.y, speed: 0, arrive: true };
+    if (entity.firepowerKill) return this.fail('weapon out of action');
+    const w = indirectWeaponFor(engine, entity, this.mission.target, this.mission.weaponId);
+    if (!w) {
+      if (this.fired > 0) return 'done';
+      const any = entity.type.weapons.map((id) => engine.catalog.weapon(id)).filter((x) => x.indirect && (!this.mission.weaponId || x.id === this.mission.weaponId));
+      if (any.length === 0) return this.fail('no indirect-fire weapon');
+      if (any.every((x) => (entity.ammo.get(x.id) ?? 0) <= 0)) return this.fail('out of ammunition');
+      return this.fail('target out of range');
+    }
+    // Lay the weapon once stopped.
+    if (entity.speed > 0.5) return 'running';
+    this.laidAt ??= engine.time + LAY_TIME;
+    if (engine.time < this.laidAt || (entity.weaponReadyAt.get(w.id) ?? 0) > engine.time) return 'running';
+    // Spread the sheaf: rounds land at random points within the mission radius.
+    const r = this.mission.radius ?? 0;
+    let point = this.mission.target;
+    if (r > 0) {
+      const a = engine.rng.range(0, Math.PI * 2);
+      const d = r * Math.sqrt(engine.rng.next());
+      point = { x: point.x + Math.sin(a) * d, y: point.y + Math.cos(a) * d };
+    }
+    fireIndirect(engine, entity, w, point);
+    this.fired++;
+    return this.fired >= this.rounds ? 'done' : 'running';
+  }
+
+  describe(): string {
+    const t = this.mission.target;
+    const at = `Fire mission at (${Math.round(t.x)}, ${Math.round(t.y)})`;
+    return this.fired === 0 ? `${at}, ${this.rounds} round${this.rounds > 1 ? 's' : ''}` : `${at}: ${this.fired}/${this.rounds} fired`;
+  }
+
+  override resumeSpec(): TaskSpec {
+    return { ...this.mission, rounds: this.rounds - this.fired };
+  }
+}
+
 export function createTask(spec: TaskSpec): Task {
   switch (spec.type) {
     case 'moveTo':
@@ -414,5 +481,7 @@ export function createTask(spec: TaskSpec): Task {
       return new OrbitTask(spec.center, spec.radius, spec.duration);
     case 'formation':
       return new FormationTask(spec.leaderId);
+    case 'fireMission':
+      return new FireMissionTask(spec);
   }
 }

@@ -85,6 +85,15 @@ export interface WeaponDef {
    * fire and in line of sight of the target until impact, or they miss.
    */
   commandGuided?: boolean;
+  /**
+   * Indirect fire (artillery, mortars): fired at a location by fire missions, never by
+   * direct-fire target selection, and needs no line of sight.
+   */
+  indirect?: boolean;
+  /** Lethal radius in metres; the round damages every entity inside it (area effect). */
+  blastRadius?: number;
+  /** One-sigma radial aiming error in metres at maximum range (half that at short range). */
+  dispersion?: number;
 }
 
 export interface SensorDef {
@@ -128,6 +137,8 @@ export interface EntityTypeDef {
   weapons: string[];
   /** Number of personnel (informational). */
   crew: number;
+  /** Reactions that new entities of this type start with (e.g. observers call for fire). */
+  reactions?: Reactions;
 }
 
 export interface UnitTemplate {
@@ -156,7 +167,12 @@ export type TaskSpec =
   | { type: 'follow'; targetId: string; distance?: number }
   | { type: 'attack'; targetId: string }
   | { type: 'orbit'; center: Vec2; radius: number; duration?: number }
-  | { type: 'formation'; leaderId: string };
+  | { type: 'formation'; leaderId: string }
+  /**
+   * Indirect fire on a location: `rounds` per tube (default 3), spread over `radius`
+   * metres around the target (default 0, all rounds at the aim point).
+   */
+  | { type: 'fireMission'; target: Vec2; rounds?: number; radius?: number; weaponId?: string };
 
 export type Condition =
   | { type: 'simTime'; time: number }
@@ -177,6 +193,8 @@ export interface Reactions {
   withdrawBelow?: number;
   /** Where to fall back to (default: where the reaction was set). */
   withdrawTo?: Vec2;
+  /** Request fire missions from friendly artillery on hostiles this entity can see. */
+  callForFire?: boolean;
 }
 
 export type PlanStatement =
@@ -287,6 +305,10 @@ export interface EntityState {
   withdrawn?: boolean;
   /** Id of the carrier this entity is riding in. */
   embarkedIn?: string;
+  /** The assigned task already finished (do not restart it on load). */
+  taskDone?: boolean;
+  /** Simulation time this observer may call for fire again. */
+  callForFireAt?: number;
 }
 
 export interface UnitRecord {
@@ -301,7 +323,7 @@ export interface UnitRecord {
   task?: TaskSpec;
   reactions?: Reactions;
   /** Runtime state, present in checkpoints. */
-  state?: { planIndex?: number; taskState?: TaskSpec; leaderId?: string; withdrawn?: boolean };
+  state?: { planIndex?: number; taskState?: TaskSpec; leaderId?: string; withdrawn?: boolean; taskDone?: boolean };
 }
 
 /** A munition in flight, saved in checkpoints. */
@@ -409,6 +431,10 @@ export interface SimEvent {
   to?: Vec3;
   weaponId?: string;
   hit?: boolean;
+  /** Indirect fire: the round flies out of sight, so viewers show a muzzle flash, not a tracer. */
+  indirect?: boolean;
+  /** Blast radius of an area-effect detonation (m). */
+  radius?: number;
 }
 
 export interface SimState {

@@ -31,6 +31,8 @@ export interface MapLayers {
 
 interface Effect {
   kind: 'fire' | 'detonation';
+  /** Blast radius in metres (area-effect rounds). */
+  radius?: number;
   from?: Vec2;
   to: Vec2;
   hit?: boolean;
@@ -105,10 +107,13 @@ export class MapView {
   addEvents(events: SimEvent[]): void {
     const now = performance.now();
     for (const ev of events) {
-      if (ev.kind === 'fire' && ev.from && ev.to) {
+      if (ev.kind === 'fire' && ev.from && ev.indirect) {
+        // Indirect fire: muzzle flash only; the round lands later as a detonation.
+        this.effects.push({ kind: 'detonation', to: ev.from, hit: false, start: now, duration: 600 });
+      } else if (ev.kind === 'fire' && ev.from && ev.to) {
         this.effects.push({ kind: 'fire', from: ev.from, to: ev.to, start: now, duration: 900 });
       } else if (ev.kind === 'detonation' && ev.to) {
-        this.effects.push({ kind: 'detonation', to: ev.to, hit: ev.hit, start: now, duration: 1100 });
+        this.effects.push({ kind: 'detonation', to: ev.to, hit: ev.hit, radius: ev.radius, start: now, duration: ev.radius ? 1600 : 1100 });
       }
     }
     if (this.effects.length > 400) this.effects.splice(0, this.effects.length - 400);
@@ -640,6 +645,16 @@ export class MapView {
         ctx.arc(from.x, from.y, 4 + t * 6, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(255,240,150,${(1 - t) * 0.9})`;
         ctx.fill();
+      } else if (f.radius) {
+        // Area burst drawn to scale (at least a few pixels).
+        const r = Math.max(6, (f.radius * this.scale) * (0.4 + 0.6 * t));
+        ctx.beginPath();
+        ctx.arc(to.x, to.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,${f.hit ? 90 : 170},20,${(1 - t) * 0.55})`;
+        ctx.fill();
+        ctx.strokeStyle = `rgba(60,40,20,${(1 - t) * 0.8})`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
       } else {
         ctx.beginPath();
         ctx.arc(to.x, to.y, 4 + t * (f.hit ? 22 : 12), 0, Math.PI * 2);

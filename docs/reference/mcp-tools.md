@@ -126,22 +126,23 @@ Delete an entity, a unit (with its members) or a graphic.
 
 ## `assign_task`
 
-Give an entity or unit a task (replaces its current plan). moveTo/orbit need `to`; followRoute/patrol need `routeId`; attack/follow need `targetId`; wait needs `duration`.
+Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetId`; wait needs `duration`. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `targetId` | string | yes | entity (E..) or unit (U..) id |
-| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` | yes |  |
+| `type` | `"moveTo"` \| `"followRoute"` \| `"patrol"` \| `"attack"` \| `"follow"` \| `"orbit"` \| `"wait"` \| `"fireMission"` | yes |  |
 | `to` | {x, y, lat, lon, town} |  | Location as {x,y}, {lat,lon} or {town} |
 | `routeId` | string |  |  |
 | `targetEntityId` | string |  |  |
 | `duration` | number |  | seconds |
-| `radius` | number |  | orbit radius in m (default 2000) |
+| `radius` | number |  | orbit radius in m (default 2000), or fire mission sheaf radius (default 0) |
+| `rounds` | integer (1–100) |  | fire mission rounds per tube (default 3) |
 | `speedKmh` | number |  |  |
 
 ## `assign_plan`
 
-Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: {kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), {kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, {kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1}}, {kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"entityDestroyed",entityId}}.
+Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: {kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), {kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, {kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, {kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"entityDestroyed",entityId}}.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -169,7 +170,7 @@ Set rules of engagement for an entity or unit: fireAtWill, returnFire or holdFir
 
 ## `set_reactions` _(idempotent)_
 
-Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out.
+Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out; callForFire makes it request fire missions from idle friendly artillery in range on hostiles it sees (not within 150 m of friendly troops).
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -177,6 +178,7 @@ Automatic behaviours that run alongside tasks: onContact "halt" makes the entity
 | `onContact` | `"continue"` \| `"halt"` |  |  |
 | `withdrawBelow` | number (0–1) |  |  |
 | `withdrawTo` | {x, y, lat, lon, town} |  | Location as {x,y}, {lat,lon} or {town} |
+| `callForFire` | boolean |  |  |
 
 ## `control_simulation`
 

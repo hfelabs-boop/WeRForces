@@ -30,8 +30,9 @@ import type {
   WeaponDef,
 } from '../shared/types.js';
 import { CatalogIndex, DEFAULT_CATALOG } from './catalog.js';
-import { applyDamage, type Detonation, effectivePk, resolveImpact, type Shot, updateCombat } from './combat.js';
+import { applyBlast, applyDamage, type Detonation, effectivePk, resolveImpact, type Shot, updateCombat } from './combat.js';
 import { Entity } from './entity.js';
+import { checkCallsForFire } from './fires.js';
 import { stepMovement } from './movement.js';
 import { PlanExecutor, type Taskable } from './plans.js';
 import { Rng } from './rng.js';
@@ -39,7 +40,7 @@ import { SENSOR_INTERVAL, updateSensors } from './sensors.js';
 import { SpatialIndex } from './spatial.js';
 import { createTask, type Task, type TaskStatus } from './tasks.js';
 import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
-import { formationOffset, Unit } from './units.js';
+import { formationOffset, perMemberTask, Unit } from './units.js';
 
 export const DEFAULT_DT = 0.1;
 const MAX_EVENTS = 1000;
@@ -206,6 +207,8 @@ export class Engine {
     const e = new Entity(id, name, type, opts.force, { x: opts.x, y: opts.y }, opts.heading ?? 0);
     e.disNumber = ++this.disCounter;
     for (const w of type.weapons) e.ammo.set(w, this.catalog.weapon(w).ammo);
+    if (type.reactions) e.reactions = { ...type.reactions };
+    this.spatial.invalidate();
     if (type.domain === 'air') {
       e.altitudeOverride = opts.altitude;
       e.z = this.terrain.surfaceHeight(e.x, e.y) + (opts.altitude ?? type.cruiseAltitude ?? 100);
@@ -397,6 +400,7 @@ export class Engine {
     const t = this.resolveTarget(targetId);
     const r: Reactions = {};
     if (reactions.onContact) r.onContact = reactions.onContact;
+    if (reactions.callForFire) r.callForFire = true;
     if (reactions.withdrawBelow !== undefined && reactions.withdrawBelow > 0) {
       r.withdrawBelow = Math.min(1, reactions.withdrawBelow);
       // Fall back to where we are now unless told otherwise.
@@ -406,7 +410,7 @@ export class Engine {
     if (t instanceof Unit) {
       t.reactions = r;
       t.withdrawn = false;
-      for (const m of t.memberList) m.reactions = { onContact: r.onContact };
+      for (const m of t.memberList) m.reactions = { onContact: r.onContact, callForFire: r.callForFire };
     } else {
       t.reactions = r;
       t.withdrawn = false;
@@ -423,7 +427,7 @@ export class Engine {
       const range = Math.hypot(t.x - e.x, t.y - e.y);
       for (const wid of e.type.weapons) {
         const w = this.catalog.weapon(wid);
-        if ((e.ammo.get(wid) ?? 0) > 0 && w.targets.includes(t.domain) && range <= w.maxRange) return true;
+        if (!w.indirect && (e.ammo.get(wid) ?? 0) > 0 && w.targets.includes(t.domain) && range <= w.maxRange) return true;
       }
     }
     return false;
@@ -471,7 +475,8 @@ export class Engine {
         if (e.domain === 'air') e.altitudeOverride = st.altitude;
         break;
       case 'setReactions':
-        this.setReactions(e.id, st.reactions);
+        // Plan steps change only the reactions they name.
+        this.setReactions(e.id, { ...e.reactions, ...st.reactions });
         break;
       default:
         break;
@@ -491,8 +496,9 @@ export class Engine {
         if (!this.entities.has(spec.targetId)) throw new Error(`unknown entity ${spec.targetId}`);
         break;
       case 'moveTo':
-      case 'orbit': {
-        const p = spec.type === 'moveTo' ? spec.target : spec.center;
+      case 'orbit':
+      case 'fireMission': {
+        const p = spec.type === 'orbit' ? spec.center : spec.target;
         if (!this.terrain.inBounds(p.x, p.y)) throw new Error('destination is outside the terrain');
         break;
       }
@@ -507,12 +513,19 @@ export class Engine {
     this.shots.push(shot);
     const shooter = this.entities.get(shot.shooterId);
     const target = shot.targetId ? this.entities.get(shot.targetId) : undefined;
-    this.log('fire', `${shooter?.name ?? shot.shooterId} fired ${shot.weapon.name} at ${target?.name ?? 'target'} (${Math.round(shot.range)} m)`, shot.shooterId, shot.targetId, {
+    const at = target?.name ?? (shot.targetId ? 'target' : `(${Math.round(shot.to.x)}, ${Math.round(shot.to.y)})`);
+    this.log('fire', `${shooter?.name ?? shot.shooterId} fired ${shot.weapon.name} at ${at} (${Math.round(shot.range)} m)`, shot.shooterId, shot.targetId, {
       from: shot.from,
       to: shot.to,
       weaponId: shot.weapon.id,
+      indirect: shot.weapon.indirect || undefined,
     });
     for (const fn of this.listeners.fire) fn(shot);
+  }
+
+  /** Munitions currently in flight. */
+  get shotsInFlight(): readonly Shot[] {
+    return this.shots;
   }
 
   hasShotInFlight(shooterId: string, targetId: string, weapon: WeaponDef): boolean {
@@ -529,6 +542,19 @@ export class Engine {
 
   private reportDetonation(det: Detonation): void {
     const shot = det.shot;
+    if (det.effects) {
+      const names = det.effects.map((f) => `${this.nameOf(f.entityId)}${f.outcome === 'kill' ? ' destroyed' : ` ${f.outcome} kill`}`);
+      const at = `(${Math.round(det.location.x)}, ${Math.round(det.location.y)})`;
+      this.log('detonation', `${shot.weapon.name} impact at ${at}: ${names.length ? names.join(', ') : 'no effect'}`, shot.shooterId, det.effects[0]?.entityId, {
+        to: det.location,
+        hit: det.hit,
+        weaponId: shot.weapon.id,
+        radius: shot.weapon.blastRadius,
+      });
+      for (const fn of this.listeners.detonation) fn(det);
+      for (const f of det.effects) this.afterDamage(this.entities.get(f.entityId)!, f.outcome, shot.shooterId);
+      return;
+    }
     const target = shot.targetId ? this.entities.get(shot.targetId) : undefined;
     const tname = target?.name ?? 'target';
     const text = det.guidanceLost
@@ -561,13 +587,9 @@ export class Engine {
     }
   }
 
-  /** Damage a local entity from a detonation reported by another simulation. */
-  applyExternalDetonation(targetId: string, munition: { kind: number; domain: number; country: number; category: number; subcategory: number }, location: Vec3, shooterId?: string): void {
-    const target = this.entities.get(targetId);
-    if (!target || target.remote || target.destroyed) return;
-    if (dist2d(target, location) > 30) return;
-    // Use a catalog weapon with the same munition type when we know it.
-    const w = this.catalog.catalog.weapons.find(
+  /** Catalog weapon with a given DIS munition type, if any. */
+  weaponForMunition(munition: { kind: number; domain: number; country: number; category: number; subcategory: number }): WeaponDef | undefined {
+    return this.catalog.catalog.weapons.find(
       (x) =>
         x.munition.kind === munition.kind &&
         x.munition.domain === munition.domain &&
@@ -575,6 +597,30 @@ export class Engine {
         x.munition.category === munition.category &&
         x.munition.subcategory === munition.subcategory,
     );
+  }
+
+  /**
+   * Area damage from a detonation another simulation reported at a location (no target
+   * entity), when the munition is a known area-effect round. Returns false otherwise.
+   */
+  applyExternalAreaDetonation(munition: { kind: number; domain: number; country: number; category: number; subcategory: number }, location: Vec3, shooterId?: string): boolean {
+    const w = this.weaponForMunition(munition);
+    if (!w?.blastRadius) return false;
+    this.spatial.invalidate();
+    const effects = applyBlast(this, w, location, shooterId);
+    const names = effects.map((f) => `${this.nameOf(f.entityId)}${f.outcome === 'kill' ? ' destroyed' : ` ${f.outcome} kill`}`);
+    this.log('detonation', `external ${w.name} impact: ${names.length ? names.join(', ') : 'no effect'}`, shooterId, effects[0]?.entityId, { to: location, hit: effects.length > 0 });
+    for (const f of effects) this.afterDamage(this.entities.get(f.entityId)!, f.outcome, shooterId);
+    return true;
+  }
+
+  /** Damage a local entity from a detonation reported by another simulation. */
+  applyExternalDetonation(targetId: string, munition: { kind: number; domain: number; country: number; category: number; subcategory: number }, location: Vec3, shooterId?: string): void {
+    const target = this.entities.get(targetId);
+    if (!target || target.remote || target.destroyed) return;
+    if (dist2d(target, location) > 30) return;
+    // Use a catalog weapon with the same munition type when we know it.
+    const w = this.weaponForMunition(munition);
     const pk = w ? effectivePk(this, undefined, target, w, 0) : 0.3;
     if (shooterId) target.attackers.set(shooterId, this.time);
     target.underFireUntil = this.time + 15;
@@ -656,6 +702,7 @@ export class Engine {
         updateSensors(this, e);
       }
     }
+    if (Math.round(this.time * 10) % 10 === 0) checkCallsForFire(this);
     for (const e of this.entities.values()) updateCombat(this, e);
     this.processImpacts();
   }
@@ -731,19 +778,31 @@ export class Engine {
       if (r.plan) {
         this.assignPlan(r.id, r.plan);
         if (r.state?.planIndex !== undefined) e.plan!.resume(r.state.planIndex, r.state.taskState);
-      } else if (r.task) {
+      } else if (r.task && !r.state?.taskDone) {
         this.assignTask(r.id, r.state?.taskState ?? r.task);
+        e.assignedTask = r.task;
+      } else if (r.task) {
         e.assignedTask = r.task;
       }
     }
+    const records = new Map((s.entities ?? []).map((r) => [r.id, r]));
     for (const u of s.units ?? []) {
       const unit = this.units.get(u.id)!;
       if (!unit.leader) continue;
       if (u.plan) {
         this.assignPlan(u.id, u.plan);
         if (u.state?.planIndex !== undefined) unit.plan!.resume(u.state.planIndex, u.state.taskState);
-      } else if (u.task) {
+      } else if (u.task && !u.state?.taskDone) {
         this.assignTask(u.id, u.state?.taskState ?? u.task);
+        unit.assignedTask = u.task;
+        if (u.state && perMemberTask(u.task)) {
+          // Each member resumes its own part (e.g. rounds left to fire); finished members stay idle.
+          for (const m of unit.alive()) {
+            const st = records.get(m.id)?.state?.taskState;
+            this.setEntityTask(m, st && st.type === u.task.type ? createTask(st) : null);
+          }
+        }
+      } else if (u.task) {
         unit.assignedTask = u.task;
       }
     }
@@ -775,6 +834,7 @@ export class Engine {
     if (st.altitudeOverride !== undefined) e.altitudeOverride = st.altitudeOverride;
     e.withdrawn = !!st.withdrawn;
     if (st.embarkedIn) e.embarkedIn = st.embarkedIn;
+    if (st.callForFireAt !== undefined) e.callForFireAt = st.callForFireAt;
   }
 
   private authoredState(e: Entity): EntityRecord['state'] {
@@ -819,6 +879,8 @@ export class Engine {
         taskState: ownTask ? e.task!.resumeSpec() : undefined,
         withdrawn: e.withdrawn || undefined,
         embarkedIn: e.embarkedIn,
+        taskDone: (!!e.assignedTask && !(e.task && e.task.status === 'running')) || undefined,
+        callForFireAt: finite(e.callForFireAt),
       },
     };
   }
@@ -874,6 +936,7 @@ export class Engine {
           taskState: u.taskSpec && u.leaderTask?.status === 'running' ? u.leaderTask.resumeSpec() : undefined,
           leaderId: u.leader?.id,
           withdrawn: u.withdrawn || undefined,
+          taskDone: (!!u.assignedTask && u.taskStatus() !== 'running') || undefined,
         },
       })),
       graphics: [...this.graphics.values()],

@@ -4,7 +4,7 @@ import { pointInPolygon } from '../shared/math.js';
 import type { Condition, Plan, PlanStatement, TaskSpec } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
-import type { TaskStatus } from './tasks.js';
+import { DEFAULT_MISSION_ROUNDS, type TaskStatus } from './tasks.js';
 
 /** Something a plan can drive: an entity or a unit. */
 export interface Taskable {
@@ -39,6 +39,8 @@ export function describeStatement(st: PlanStatement, engine?: Engine): string {
           return `Orbit r=${t.radius}m`;
         case 'formation':
           return 'Hold formation';
+        case 'fireMission':
+          return `Fire mission at (${Math.round(t.target.x)}, ${Math.round(t.target.y)}), ${t.rounds ?? DEFAULT_MISSION_ROUNDS} rounds`;
       }
       break;
     }
@@ -57,9 +59,10 @@ export function describeStatement(st: PlanStatement, engine?: Engine): string {
   }
 }
 
-export function describeReactions(r: { onContact?: string; withdrawBelow?: number }): string {
+export function describeReactions(r: { onContact?: string; withdrawBelow?: number; callForFire?: boolean }): string {
   const parts = [`on contact ${r.onContact ?? 'continue'}`];
   if (r.withdrawBelow !== undefined && r.withdrawBelow > 0) parts.push(`withdraw below ${Math.round(r.withdrawBelow * 100)}%`);
+  if (r.callForFire) parts.push('call for fire');
   return parts.join(', ');
 }
 

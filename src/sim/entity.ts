@@ -56,6 +56,8 @@ export class Entity {
   withdrawn = false;
   /** Carrier id while riding in another entity (mounted infantry). */
   embarkedIn?: string;
+  /** Simulation time this observer may call for fire again. */
+  callForFireAt = -Infinity;
 
   /** Cruise speed override (m/s) set by plans. */
   speedOverride?: number;

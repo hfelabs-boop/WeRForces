@@ -70,6 +70,13 @@ export function validateTask(v: unknown): TaskSpec {
         radius: num(t.radius, 'radius'),
         duration: t.duration === undefined ? undefined : num(t.duration, 'duration'),
       };
+    case 'fireMission': {
+      const rounds = t.rounds === undefined ? undefined : Math.floor(num(t.rounds, 'rounds'));
+      if (rounds !== undefined && (rounds < 1 || rounds > 100)) throw new ValidationError('rounds must be between 1 and 100');
+      const radius = t.radius === undefined ? undefined : num(t.radius, 'radius');
+      if (radius !== undefined && (radius < 0 || radius > 1000)) throw new ValidationError('radius must be between 0 and 1000 m');
+      return { type: 'fireMission', target: vec(t.target, 'target'), rounds, radius, weaponId: t.weaponId === undefined ? undefined : str(t.weaponId, 'weaponId') };
+    }
     default:
       throw new ValidationError(`unknown task type ${String(t.type)}`);
   }
@@ -115,6 +122,10 @@ export function validateReactions(v: unknown): Reactions {
     if (f > 0) out.withdrawBelow = f;
   }
   if (r.withdrawTo !== undefined) out.withdrawTo = vec(r.withdrawTo, 'withdrawTo');
+  if (r.callForFire !== undefined) {
+    if (typeof r.callForFire !== 'boolean') throw new ValidationError('callForFire must be a boolean');
+    if (r.callForFire) out.callForFire = true;
+  }
   return out;
 }
 

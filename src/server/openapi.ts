@@ -199,6 +199,18 @@ export function buildOpenApi(baseUrl: string): Schema {
             { type: 'object', required: ['type', 'targetId'], properties: { type: { const: 'follow' }, targetId: { type: 'string' }, distance: { type: 'number' } } },
             { type: 'object', required: ['type', 'targetId'], properties: { type: { const: 'attack' }, targetId: { type: 'string' } } },
             { type: 'object', required: ['type', 'center', 'radius'], properties: { type: { const: 'orbit' }, center: ref('Position'), radius: { type: 'number' }, duration: { type: 'number' } } },
+            {
+              type: 'object',
+              required: ['type', 'target'],
+              description: 'Indirect fire (artillery, mortars) on a location. On a unit every tube that can reach the target fires.',
+              properties: {
+                type: { const: 'fireMission' },
+                target: ref('Position'),
+                rounds: { type: 'integer', minimum: 1, maximum: 100, description: 'rounds per tube (default 3)' },
+                radius: { type: 'number', minimum: 0, maximum: 1000, description: 'spread rounds over this radius in m (default 0)' },
+                weaponId: { type: 'string', description: 'indirect-fire weapon to use (default: first that can reach)' },
+              },
+            },
           ],
         },
         PlanStatement: {
@@ -234,6 +246,7 @@ export function buildOpenApi(baseUrl: string): Schema {
             onContact: { enum: ['continue', 'halt'], description: 'halt: stop and fight while a hostile is within weapon range, then resume' },
             withdrawBelow: { type: 'number', minimum: 0, maximum: 1, description: 'units: fall back when strength drops below this fraction; entities: when weapons are knocked out' },
             withdrawTo: ref('Position'),
+            callForFire: { type: 'boolean', description: 'request fire missions from idle friendly artillery on hostiles this entity sees' },
           },
         },
         Plan: { type: 'object', required: ['statements'], properties: { name: { type: 'string' }, loop: { type: 'boolean' }, statements: { type: 'array', items: ref('PlanStatement') } } },

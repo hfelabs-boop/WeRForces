@@ -59,7 +59,9 @@ type PlanStepKind =
   | 'waitDestroyed'
   | 'waitEnemyInArea'
   | 'waitStrength'
-  | 'setReaction';
+  | 'setReaction'
+  | 'fireMission'
+  | 'setCallForFire';
 
 class App {
   readonly api: Api;
@@ -224,6 +226,16 @@ class App {
 
   areas(): Graphic[] {
     return (this.state?.graphics ?? []).filter((g) => g.kind === 'area');
+  }
+
+  /** True if the entity, or any member of the unit, has an indirect-fire weapon. */
+  hasIndirect(id: string): boolean {
+    const u = this.unit(id);
+    const ids = u ? u.memberIds : [id];
+    return ids.some((m) => {
+      const t = this.types.get(this.entity(m)?.typeId ?? '');
+      return !!t?.weapons.some((w) => this.catalog?.weapons.find((x) => x.id === w)?.indirect);
+    });
   }
 
   /** Domain of the thing being tasked (unit uses its leader). */
@@ -839,12 +851,14 @@ class App {
       if (hitEntity && hit) {
         const selForce = this.entity(sel)?.force ?? this.unit(sel)?.force;
         if (hitEntity.force !== selForce && hitEntity.damage !== 'destroyed') add(`Attack ${hitEntity.name}`, () => this.task(sel, { type: 'attack', targetId: hitEntity.id }));
+        if (hitEntity.force !== selForce && this.hasIndirect(sel)) add(`Fire mission on ${hitEntity.name}`, () => this.task(sel, { type: 'fireMission', target: { x: Math.round(hitEntity.x), y: Math.round(hitEntity.y) }, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
         add(`Follow ${hitEntity.name}`, () => this.task(sel, { type: 'follow', targetId: hitEntity.id }));
       } else if (hitGraphic && (hitGraphic.kind === 'route' || hitGraphic.kind === 'phaseLine')) {
         add(`Follow route ${hitGraphic.name}`, () => this.task(sel, { type: 'followRoute', routeId: hitGraphic.id }));
         add(`Patrol route ${hitGraphic.name}`, () => this.task(sel, { type: 'patrol', routeId: hitGraphic.id }));
       } else {
         add('Move here', () => this.task(sel, { type: 'moveTo', target: world }));
+        if (this.hasIndirect(sel)) add('Fire mission here (3 rounds)', () => this.task(sel, { type: 'fireMission', target: world, rounds: 3, radius: this.unit(sel) ? 50 : 0 }));
         if (this.domainOf(sel) === 'air') add('Orbit here (2 km)', () => this.task(sel, { type: 'orbit', center: world, radius: 2000 }));
         add('Add "move here" to plan', () => this.addPlanStep(sel, { kind: 'task', task: { type: 'moveTo', target: world } }));
       }
@@ -1017,15 +1031,18 @@ class App {
       h('option', { value: '0', text: 'Never' }),
       ...(isUnit ? [75, 50, 25].map((p) => h('option', { value: String(p / 100), text: `Below ${p}% strength` })) : [h('option', { value: '1', text: 'When weapons are knocked out' })]),
     ) as HTMLSelectElement;
-    const apply = () => this.cmd({ cmd: 'setReactions', targetId: id, reactions: { onContact: onContact.value as 'halt', withdrawBelow: Number(withdraw.value) } });
+    const cff = h('select', { 'data-bind-value': 'callForFire', title: 'Request fire missions from idle friendly artillery on hostiles in sight' }, h('option', { value: 'no', text: 'No' }), h('option', { value: 'yes', text: 'Yes' })) as HTMLSelectElement;
+    const apply = () =>
+      this.cmd({ cmd: 'setReactions', targetId: id, reactions: { onContact: onContact.value as 'halt', withdrawBelow: Number(withdraw.value), callForFire: cff.value === 'yes' } });
     onContact.addEventListener('change', apply);
     withdraw.addEventListener('change', apply);
+    cff.addEventListener('change', apply);
     return h(
       'div',
       { class: 'section' },
       h('h4', { text: 'Reactions' }),
-      h('div', { class: 'kv' }, 'On contact', onContact, 'Withdraw', withdraw),
-      h('div', { class: 'hint', text: 'Withdrawing units fall back to where this was set, with return-fire ROE.' }),
+      h('div', { class: 'kv' }, 'On contact', onContact, 'Withdraw', withdraw, 'Call for fire', cff),
+      h('div', { class: 'hint', text: 'Withdrawing units fall back to where this was set, with return-fire ROE. Observers that call for fire get missions from the nearest idle friendly artillery in range.' }),
     );
   }
 
@@ -1046,6 +1063,25 @@ class App {
       this.task(id, { type, routeId: route.value });
     };
     const waitSecs = h('input', { type: 'number', value: '60', min: '1', style: 'width:64px' }) as HTMLInputElement;
+    const rounds = h('input', { type: 'number', value: '3', min: '1', max: '100', style: 'width:56px', title: 'rounds per tube' }) as HTMLInputElement;
+    const fireRow = this.hasIndirect(id)
+      ? h(
+          'div',
+          { class: 'row' },
+          'Fire',
+          rounds,
+          'rounds',
+          h('button', {
+            text: 'Fire mission…',
+            onclick: () =>
+              this.map.setMode({
+                kind: 'pickPoint',
+                label: 'Click the target location',
+                onPick: (p) => this.task(id, { type: 'fireMission', target: p, rounds: Math.max(1, Number(rounds.value) || 3), radius: this.unit(id) ? 50 : 0 }),
+              }),
+          }),
+        )
+      : null;
     return h(
       'div',
       { class: 'section' },
@@ -1063,6 +1099,7 @@ class App {
       ),
       h('div', { class: 'row' }, route, h('button', { text: 'Follow', onclick: routeAction('followRoute') }), h('button', { text: 'Patrol', onclick: routeAction('patrol') })),
       h('div', { class: 'row' }, 'Wait', waitSecs, 's', h('button', { text: 'Wait', onclick: () => this.task(id, { type: 'wait', duration: Number(waitSecs.value) || 0 }) })),
+      fireRow,
     );
   }
 
@@ -1102,6 +1139,8 @@ class App {
             return `Follow ${name(t.targetId)}`;
           case 'orbit':
             return `Orbit ${fmtGrid(t.center.x, t.center.y)} r ${t.radius} m`;
+          case 'fireMission':
+            return `Fire mission ${fmtGrid(t.target.x, t.target.y)}, ${t.rounds ?? 3} rounds`;
           default:
             return t.type;
         }
@@ -1125,6 +1164,7 @@ class App {
         return `Wait until ${name(c.entityId)} destroyed`;
       }
       case 'setReactions':
+        if (st.reactions.callForFire !== undefined && st.reactions.onContact === undefined) return `Set reaction: ${st.reactions.callForFire ? 'call for fire' : 'no call for fire'}`;
         return `Set reaction: ${st.reactions.onContact === 'halt' ? 'halt on contact' : 'continue on contact'}`;
     }
   }
@@ -1149,6 +1189,8 @@ class App {
       ['waitEnemyInArea', 'Wait until enemy in area'],
       ['waitStrength', 'Wait until strength below (%)'],
       ['setReaction', 'Set reaction on contact'],
+      ['setCallForFire', 'Set call for fire'],
+      ...(this.hasIndirect(id) ? ([['fireMission', 'Fire mission (pick), rounds']] as [PlanStepKind, string][]) : []),
     ];
     const kindSel = h('select', {}, kinds.map(([k, l]) => h('option', { value: k, text: l }))) as HTMLSelectElement;
     const param = h('span', {});
@@ -1178,8 +1220,12 @@ class App {
         const s = h('select', {}, h('option', { value: 'halt', text: 'Halt and fight' }), h('option', { value: 'continue', text: 'Continue' })) as HTMLSelectElement;
         param.append(s);
         getParam = () => s.value;
-      } else if (['wait', 'setSpeed', 'setAltitude', 'waitTime', 'orbit', 'waitStrength'].includes(k)) {
-        const defaults: Record<string, string> = { wait: '60', setSpeed: '30', setAltitude: '150', waitTime: String(Math.round((this.state?.time ?? 0) + 120)), orbit: '2000', waitStrength: '50' };
+      } else if (k === 'setCallForFire') {
+        const s = h('select', {}, h('option', { value: 'yes', text: 'Call for fire' }), h('option', { value: 'no', text: 'Stop calling for fire' })) as HTMLSelectElement;
+        param.append(s);
+        getParam = () => s.value;
+      } else if (['wait', 'setSpeed', 'setAltitude', 'waitTime', 'orbit', 'waitStrength', 'fireMission'].includes(k)) {
+        const defaults: Record<string, string> = { wait: '60', setSpeed: '30', setAltitude: '150', waitTime: String(Math.round((this.state?.time ?? 0) + 120)), orbit: '2000', waitStrength: '50', fireMission: '3' };
         const n = h('input', { type: 'number', value: defaults[k], style: 'width:80px', title: k === 'orbit' ? 'radius (m)' : '' }) as HTMLInputElement;
         param.append(n);
         getParam = () => Number(n.value);
@@ -1233,6 +1279,15 @@ class App {
             return push({ kind: 'waitUntil', condition: { type: 'strengthBelow', fraction: Math.min(100, Math.max(1, Number(v) || 50)) / 100 } });
           case 'setReaction':
             return push({ kind: 'setReactions', reactions: { onContact: v === 'halt' ? 'halt' : 'continue' } });
+          case 'setCallForFire':
+            return push({ kind: 'setReactions', reactions: { callForFire: v === 'yes' } });
+          case 'fireMission':
+            this.map.setMode({
+              kind: 'pickPoint',
+              label: 'Click the target location',
+              onPick: (p) => push({ kind: 'task', task: { type: 'fireMission', target: p, rounds: Math.max(1, Number(v) || 3), radius: this.unit(id) ? 50 : 0 } }),
+            });
+            return;
           case 'waitDestroyed':
             this.map.setMode({
               kind: 'pickEntity',
@@ -1336,11 +1391,13 @@ class App {
       if (cls !== undefined) n.className = cls;
     };
     const roeSel = el.querySelector<HTMLSelectElement>('[data-bind-value="roe"]');
-    const syncReactions = (r: { onContact?: string; withdrawBelow?: number } | undefined) => {
+    const syncReactions = (r: { onContact?: string; withdrawBelow?: number; callForFire?: boolean } | undefined) => {
       const oc = el.querySelector<HTMLSelectElement>('[data-bind-value="onContact"]');
       const wd = el.querySelector<HTMLSelectElement>('[data-bind-value="withdraw"]');
+      const cf = el.querySelector<HTMLSelectElement>('[data-bind-value="callForFire"]');
       if (oc && document.activeElement !== oc) oc.value = r?.onContact ?? 'continue';
       if (wd && document.activeElement !== wd) wd.value = String(r?.withdrawBelow ?? 0);
+      if (cf && document.activeElement !== cf) cf.value = r?.callForFire ? 'yes' : 'no';
     };
     const e = this.entity(id);
     const u = this.unit(id);

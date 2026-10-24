@@ -294,15 +294,16 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'assign_task',
-    'Give an entity or unit a task (replaces its current plan). moveTo/orbit need `to`; followRoute/patrol need `routeId`; attack/follow need `targetId`; wait needs `duration`.',
+    'Give an entity or unit a task (replaces its current plan). moveTo/orbit/fireMission need `to`; followRoute/patrol need `routeId`; attack/follow need `targetId`; wait needs `duration`. fireMission is indirect fire by artillery or mortars on a location (`rounds` per tube, optional `radius` sheaf).',
     {
       targetId: z.string().describe('entity (E..) or unit (U..) id'),
-      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait']),
+      type: z.enum(['moveTo', 'followRoute', 'patrol', 'attack', 'follow', 'orbit', 'wait', 'fireMission']),
       to: position.optional(),
       routeId: z.string().optional(),
       targetEntityId: z.string().optional(),
       duration: z.number().optional().describe('seconds'),
-      radius: z.number().optional().describe('orbit radius in m (default 2000)'),
+      radius: z.number().optional().describe('orbit radius in m (default 2000), or fire mission sheaf radius (default 0)'),
+      rounds: z.number().int().min(1).max(100).optional().describe('fire mission rounds per tube (default 3)'),
       speedKmh: z.number().optional(),
     },
     async (a) => {
@@ -314,7 +315,9 @@ export function createMcpServer(call: ApiCaller): McpServer {
       const task =
         a.type === 'moveTo'
           ? { type: 'moveTo', target: need(a.to, 'to'), speed }
-          : a.type === 'orbit'
+          : a.type === 'fireMission'
+            ? { type: 'fireMission', target: need(a.to, 'to'), rounds: a.rounds, radius: a.radius }
+            : a.type === 'orbit'
             ? { type: 'orbit', center: need(a.to, 'to'), radius: a.radius ?? 2000, duration: a.duration }
             : a.type === 'followRoute' || a.type === 'patrol'
               ? { type: a.type, routeId: need(a.routeId, 'routeId'), speed }
@@ -332,7 +335,7 @@ export function createMcpServer(call: ApiCaller): McpServer {
     'Give an entity or unit a plan: an ordered list of statements executed in sequence. Statement kinds: ' +
       '{kind:"task", task:{type:"moveTo",target:{town:"X"}}} (task types as in assign_task, with target/center positions), ' +
       '{kind:"setRoe", roe}, {kind:"setSpeed", speed (m/s)}, {kind:"setAltitude", altitude}, {kind:"setFormation", formation}, ' +
-      '{kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1}}, ' +
+      '{kind:"setReactions", reactions:{onContact:"halt"|"continue", withdrawBelow:0..1, callForFire:true|false}}, ' +
       '{kind:"waitUntil", condition:{type:"simTime",time}|{type:"inArea",areaId}|{type:"enemyInArea",areaId}|{type:"enemyDetected"}|{type:"underFire"}|{type:"strengthBelow",fraction}|{type:"entityDestroyed",entityId}}.',
     {
       targetId: z.string(),
@@ -372,12 +375,13 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'set_reactions',
-    'Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out.',
+    'Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out; callForFire makes it request fire missions from idle friendly artillery in range on hostiles it sees (not within 150 m of friendly troops).',
     {
       targetId: z.string(),
       onContact: z.enum(['continue', 'halt']).optional(),
       withdrawBelow: z.number().min(0).max(1).optional(),
       withdrawTo: position.optional(),
+      callForFire: z.boolean().optional(),
     },
     async ({ targetId, ...reactions }) => {
       const kind = targetId.startsWith('U') ? 'units' : 'entities';
