@@ -74,14 +74,15 @@ export class QuickBattleDialog {
       const comp = select(c.compositions, composition);
       const size = select(c.sizes, 'platoon');
       const support = c.support.map((s) => ({ s, box: h('input', { type: 'checkbox', checked: force === 'blue' ? s === 'artillery' || s === 'recon' : s === 'engineers' }) as HTMLInputElement }));
+      const commander = h('select', { title: 'Who runs this side: its phase plan, or the rule-based commander' }, h('option', { value: 'none', text: 'Phase plan' }), h('option', { value: 'rules', text: 'Rule-based commander' })) as HTMLSelectElement;
       const el = h(
         'div',
         { class: `qb-side qb-${force}` },
         h('h4', { text: force === 'blue' ? 'Blue' : 'Red' }),
-        h('div', { class: 'kv' }, 'Nation', n, 'Force', comp, 'Size', size),
+        h('div', { class: 'kv' }, 'Nation', n, 'Force', comp, 'Size', size, 'Run by', commander),
         h('div', { class: 'qb-support' }, support.map(({ s, box }) => h('label', {}, box, ` ${NAMES[s] ?? s}`))),
       );
-      return { el, value: () => ({ nation: n.value, composition: comp.value, size: size.value, support: support.filter((x) => x.box.checked).map((x) => x.s) }) };
+      return { el, commander: () => commander.value, value: () => ({ nation: n.value, composition: comp.value, size: size.value, support: support.filter((x) => x.box.checked).map((x) => x.s) }) };
     };
     const blue = side('blue', 'us', 'combined');
     const red = side('red', 'ru', 'mech');
@@ -102,6 +103,7 @@ export class QuickBattleDialog {
         time: Number(time.value),
         weather: weather.value,
         civilians: civilians.checked,
+        commander: { blue: blue.commander(), red: red.commander() },
       };
       if (distance.value) body.distance = Number(distance.value);
       if (seed.value) body.seed = Number(seed.value);

@@ -42,6 +42,7 @@ import { QuickBar } from './quickbar.js';
 import { PlanEditor } from './planeditor.js';
 import { SyncMatrixDialog } from './syncmatrix.js';
 import { QuickBattleDialog } from './quickbattle.js';
+import { CommanderDialog } from './commander.js';
 import { DriveMode } from './drive.js';
 import { CatalogEditor } from './catalogeditor.js';
 import { OrderLine } from './orderline.js';
@@ -86,6 +87,7 @@ class App {
   readonly map: MapView;
   private quick!: QuickBar;
   private syncDialog!: SyncMatrixDialog;
+  private commanderDialog!: CommanderDialog;
   private driveMode!: DriveMode;
   private orderLine!: OrderLine;
   catalog: Catalog | null = null;
@@ -208,6 +210,13 @@ class App {
       toast: (m, info) => this.toast(m, info),
     });
     $('#btn-sync').addEventListener('click', () => void this.syncDialog.open());
+    this.commanderDialog = new CommanderDialog({
+      v1: (m, path, body) => this.api.v1(m, path, body),
+      modal: (c) => this.modal(c),
+      toast: (m, info) => this.toast(m, info),
+      playerForce: () => (this.role.kind === 'player' ? this.role.force : undefined),
+    });
+    $('#btn-commander').addEventListener('click', () => void this.commanderDialog.open());
     this.driveMode = new DriveMode($('#drive-hud'), {
       entity: (id) => this.entity(id),
       cmd: (c) => this.cmd(c),
@@ -335,6 +344,10 @@ class App {
     this.renderAlerts();
     this.quick.update();
     this.renderPhase(s);
+    const cmdr = $('#btn-commander');
+    const cmdrText = CommanderDialog.label(s);
+    if (cmdr.textContent !== cmdrText) cmdr.textContent = cmdrText;
+    this.commanderDialog.update(s);
     this.driveMode.update();
     this.checkCatalog(s);
     $('#scenario-name').textContent = s.scenarioName;
