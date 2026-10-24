@@ -2,6 +2,7 @@
 // view, terrain/canopy line of sight and probabilistic detection.
 
 import { angleDiff, bearing, clamp } from '../shared/math.js';
+import type { EntityTypeDef, SensorDef } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import { LAND_COVER } from '../shared/terrainGrid.js';
@@ -33,6 +34,12 @@ export function detectionProbability(engine: Engine, observer: Entity, target: E
   return clamp(p, 0, 0.99);
 }
 
+/** How far a radar detects a target of this type, before jamming. */
+export function radarRange(engine: Engine, s: SensorDef, type: EntityTypeDef): number {
+  const radar = engine.models.radar;
+  return radar.detectionRange(s, radar.rcs(type));
+}
+
 export function updateSensors(engine: Engine, observer: Entity): void {
   const now = engine.time;
   if (observer.alive && !observer.remote && !observer.embarkedIn && observer.type.sensors.length > 0) {
@@ -43,7 +50,7 @@ export function updateSensors(engine: Engine, observer: Entity): void {
       const s = engine.catalog.sensors.get(sid)!;
       // Enemy radar jamming cuts a radar's range.
       const jam = s.radar ? engine.ew.radarFactor(observer) : 1;
-      return { s, range: sensorRange(s, engine.env) * jam, flashRange: sensorRange(s, flashEnv) * jam };
+      return { s, jam, range: sensorRange(s, engine.env) * jam, flashRange: sensorRange(s, flashEnv) * jam };
     });
     let reach = 0;
     for (const { flashRange } of sensors) reach = Math.max(reach, flashRange);
@@ -57,8 +64,9 @@ export function updateSensors(engine: Engine, observer: Entity): void {
       if (range2 > reach * reach) continue;
       const range = Math.sqrt(range2);
       const flash = now - target.lastFiredAt < 5;
-      for (const { s, range: dark, flashRange } of sensors) {
-        const maxRange = flash ? flashRange : dark;
+      for (const { s, jam, range: dark, flashRange } of sensors) {
+        // Radars see big targets further than small ones (the radar range equation).
+        const maxRange = s.radar && s.refRange ? radarRange(engine, s, target.type) * jam : flash ? flashRange : dark;
         if (range > maxRange || !s.detects.includes(target.domain)) continue;
         if (s.fov < Math.PI * 2 - 1e-6) {
           const off = Math.abs(angleDiff(observer.heading, bearing(observer, target)));
