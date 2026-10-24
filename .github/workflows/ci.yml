@@ -18,3 +18,40 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # The browser build that matches the pinned @playwright/test version.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+        env:
+          CI: 'true'
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t werforces:ci .
+      - name: Smoke test the image
+        run: |
+          docker run -d --name wf -p 8080:8080 -e WERFORCES_API_KEY=ci-key werforces:ci
+          for i in $(seq 1 30); do curl -sf -H 'Authorization: Bearer ci-key' http://127.0.0.1:8080/api/v1/simulation && break; sleep 1; done
+          curl -sf -H 'Authorization: Bearer ci-key' http://127.0.0.1:8080/api/v1/simulation
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/v1/simulation)" = 401
+          docker rm -f wf

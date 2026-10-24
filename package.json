@@ -26,7 +26,8 @@
     "mcp": "node dist/mcp/stdio.js",
     "docs:gen": "tsx scripts/docs-gen.ts",
     "bench": "tsx scripts/bench.ts",
-    "terrain:import": "tsx src/terrain/cli.ts"
+    "terrain:import": "tsx src/terrain/cli.ts",
+    "e2e": "playwright test"
   },
   "engines": {
     "node": ">=20"
@@ -41,6 +42,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/node": "^22.20.5",
     "@types/three": "^0.186.0",
     "@types/ws": "^8.18.2",

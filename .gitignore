@@ -4,3 +4,5 @@ dist/
 .DS_Store
 scenarios/*.autosave.json
 recordings/
+test-results/
+playwright-report/
