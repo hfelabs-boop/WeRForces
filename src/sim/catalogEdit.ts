@@ -70,6 +70,12 @@ function tidy<T extends object>(o: T): T {
   return o;
 }
 
+/** Armour by aspect (mm RHA): all four faces, each from 0 to 5000. */
+function aspects(p: Raw): NonNullable<EntityTypeDef['protection']> {
+  const f = (k: string) => num(p[k], `protection.${k} (mm)`, 0, 5000)!;
+  return { front: f('front'), side: f('side'), rear: f('rear'), top: f('top') };
+}
+
 export function validateEntityType(v: unknown): EntityTypeDef {
   const t = obj(v, 'entity type');
   const key = id(t.id);
@@ -80,6 +86,7 @@ export function validateEntityType(v: unknown): EntityTypeDef {
   const supply = t.supply === undefined ? undefined : obj(t.supply, 'supply');
   const jammer = t.jammer === undefined ? undefined : obj(t.jammer, 'jammer');
   if (jammer && !jammer.radio && !jammer.radar) throw new CatalogError('jammer: jams radio, radar or both');
+  const protection = t.protection === undefined ? undefined : obj(t.protection, 'protection');
   if (t.sidc !== undefined && (typeof t.sidc !== 'string' || !/^[A-Z*-]{10,15}$/.test(t.sidc))) throw new CatalogError('sidc: a MIL-STD-2525C letter code such as S-G-UCFM--');
   return tidy({
     id: key,
@@ -89,6 +96,8 @@ export function validateEntityType(v: unknown): EntityTypeDef {
     symbol: oneOf(t.symbol ?? 'generic', 'symbol', SYMBOLS),
     sidc: t.sidc as string | undefined,
     armor: oneOf(t.armor, 'armor', ARMOR),
+    protection: protection ? aspects(protection) : undefined,
+    rcs: num(t.rcs, 'rcs (m²)', 0.0001, 1e6, true),
     dis: dis(t.dis, 'dis'),
     maxSpeed,
     cruiseSpeed,
@@ -136,6 +145,10 @@ export function validateWeapon(v: unknown): WeaponDef {
     blastRadius: num(w.blastRadius, 'blastRadius', 0, 5000, true),
     dispersion: num(w.dispersion, 'dispersion', 0, 5000, true),
     smoke: smoke ? { radius: num(smoke.radius, 'smoke.radius', 1, 1000)!, duration: num(smoke.duration, 'smoke.duration', 1, 3600)! } : undefined,
+    penetration: num(w.penetration, 'penetration (mm)', 0, 5000, true),
+    topAttack: bool(w.topAttack, 'topAttack'),
+    spreadMrad: num(w.spreadMrad, 'spreadMrad', 0, 100, true),
+    rangeError: num(w.rangeError, 'rangeError', 0, 1, true),
   } as WeaponDef);
 }
 
@@ -151,6 +164,8 @@ export function validateSensor(v: unknown): SensorDef {
     radar: bool(s.radar, 'radar'),
     thermal: bool(s.thermal, 'thermal'),
     nightVision: bool(s.nightVision, 'nightVision'),
+    refRange: num(s.refRange, 'refRange', 1, 1e6, true),
+    refRcs: num(s.refRcs, 'refRcs (m²)', 0.0001, 1e6, true),
   } as SensorDef);
 }
 
