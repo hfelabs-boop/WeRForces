@@ -7,6 +7,7 @@ import type { IntegrationHub } from '../integrations/hub.js';
 import { dist2d } from '../shared/math.js';
 import type { Command, CommandResult, EntitySnapshot, ForceId, Role, ScenarioFile, SimEventKind, SimState, TerrainData, TerrainDataset, UnitSnapshot, Vec2 } from '../shared/types.js';
 import { outcomesCsv } from '../sim/batch.js';
+import { explainEntity, explainUnit } from '../sim/explain.js';
 import type { BatchManager } from './batch.js';
 import { attachment, eventsCsv, killsCsv, reportPdf, strengthCsv } from './reports.js';
 import { DATASET_NAME, listDatasets } from '../terrain/store.js';
@@ -50,6 +51,7 @@ const PLAYER_ROUTES: [string, RegExp][] = [
   ['GET', /^\/api\/v1\/(openapi\.json|simulation|catalog(\/[\w-]+)?|entities|units|graphics|events|terrain(\/point)?)\/?$/],
   ['GET', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
   ['GET', /^\/api\/v1\/entities\/[^/]+\/path\/?$/],
+  ['GET', /^\/api\/v1\/(entities|units)\/[^/]+\/explain\/?$/],
   ['POST', /^\/api\/v1\/(entities|units)\/[^/]+\/(task|plan|stop|embark|disembark)\/?$/],
   ['POST', /^\/api\/v1\/(graphics|terrain\/line-of-sight|terrain\/route)\/?$/],
   ['PATCH', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
@@ -429,6 +431,15 @@ export class ApiV1 {
       return { status: 204 };
     });
     r.get(`${P}/entities/{id}/path`, (req) => (this.ownEntity(req.params.id), { json: this.engine.plannedPath(req.params.id) }));
+    r.get(`${P}/entities/{id}/explain`, (req) => {
+      this.ownEntity(req.params.id);
+      return { json: explainEntity(this.engine, this.engine.entities.get(req.params.id)!, { omniscient: this.role.kind === 'controller' }) };
+    });
+    r.get(`${P}/units/{id}/explain`, (req) => {
+      const u = this.unit(req.params.id);
+      if (this.role.kind === 'player' && u.force !== this.role.force) throw new HttpError(404, `unknown unit ${req.params.id}`);
+      return { json: explainUnit(this.engine, this.engine.units.get(req.params.id)!, { omniscient: this.role.kind === 'controller' }) };
+    });
     for (const kind of ['entities', 'units'] as const) {
       const check = (id: string) => (kind === 'entities' ? this.entity(id) : this.unit(id));
       r.post(`${P}/${kind}/{id}/task`, (req) => {

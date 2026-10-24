@@ -1094,3 +1094,55 @@ body.player [data-controller-only] {
 .sim-time.behind {
   color: var(--warn);
 }
+
+/* Why? (explanations) */
+.why h4 button {
+  margin-left: 6px;
+}
+.why-summary {
+  padding: 4px 6px;
+  border-left: 3px solid var(--border);
+  margin: 4px 0;
+}
+.why-summary.sev-block {
+  border-left-color: var(--bad);
+  color: var(--text);
+}
+.why-summary.sev-warn {
+  border-left-color: var(--warn);
+  color: var(--text);
+}
+.why-details h5 {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.why-list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+.why-list li {
+  padding: 3px 6px;
+  border-left: 3px solid var(--border);
+  margin: 2px 0;
+  font-size: 12px;
+}
+.why-list li.sev-block {
+  border-left-color: var(--bad);
+}
+.why-list li.sev-warn {
+  border-left-color: var(--warn);
+}
+.why-list li.clickable {
+  cursor: pointer;
+}
+.why-list li.clickable:hover {
+  background: var(--panel-2);
+}
+.why-list .fix {
+  color: var(--good);
+  margin-top: 2px;
+}

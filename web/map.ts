@@ -63,6 +63,8 @@ export class MapView {
   selectedPath: Vec2[] = [];
   mode: MapMode = { kind: 'select' };
   layers: MapLayers = { labels: true, grid: true, contacts: true, ranges: false, paths: true, aggregate: 'auto' };
+  /** Places an explanation points at (what blocks a sight line), with the sight line itself. */
+  explainMarks: { at: Vec2; label: string; line?: [Vec2, Vec2] }[] = [];
   /** Weapon/sensor range rings for the selected entity, metres. */
   selectedRanges: { radius: number; label: string; color: string }[] = [];
 
@@ -479,6 +481,7 @@ export class MapView {
     this.drawSelectionOverlays();
     this.drawSymbols();
     this.drawEffects();
+    this.drawExplainMarks();
     this.drawModeOverlay();
     this.drawScale();
   }
@@ -703,6 +706,39 @@ export class MapView {
         ctx.lineWidth = cid === sel.engagingId ? 2 : 1;
         ctx.stroke();
       }
+    }
+  }
+
+  private drawExplainMarks(): void {
+    const ctx = this.ctx;
+    for (const m of this.explainMarks) {
+      const p = this.toScreen(m.at);
+      if (m.line) {
+        const a = this.toScreen(m.line[0]);
+        const b = this.toScreen(m.line[1]);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(p.x, p.y);
+        ctx.strokeStyle = 'rgba(120,220,255,0.9)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.strokeStyle = 'rgba(255,90,90,0.8)';
+        ctx.setLineDash([5, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.beginPath();
+      ctx.moveTo(p.x - 7, p.y - 7);
+      ctx.lineTo(p.x + 7, p.y + 7);
+      ctx.moveTo(p.x + 7, p.y - 7);
+      ctx.lineTo(p.x - 7, p.y + 7);
+      ctx.strokeStyle = '#ff5a5a';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      label(ctx, m.label, p.x + 10, p.y - 8, '#ffd0d0', 'bold 11px system-ui');
     }
   }
 

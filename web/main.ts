@@ -9,6 +9,8 @@ import type {
   EntitySnapshot,
   EntityTypeDef,
   EnvironmentState,
+  Explanation,
+  Finding,
   ForceId,
   Formation,
   Graphic,
@@ -1395,6 +1397,7 @@ class App {
       else if (g) this.buildGraphicInspector(el, g);
     }
     this.updateLiveFields(el);
+    void this.refreshWhy();
   }
 
   private bind(key: string): HTMLElement {
@@ -1445,6 +1448,7 @@ class App {
     }
     el.append(
       h('div', { class: 'section' }, h('h4', { text: 'Current activity' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
+      this.whySection(e.id),
       this.roeSection(e.id),
       this.reactionsSection(e.id, false),
       this.taskSection(e.id, e.domain),
@@ -1454,6 +1458,85 @@ class App {
       h('div', { class: 'section' }, h('h4', { text: 'Contacts' }), h('div', { 'data-bind': 'contacts' })),
       h('div', { class: 'section row' }, h('button', { text: 'Center', onclick: () => this.centerOn(e.id) }), h('button', { class: 'danger', text: 'Delete', onclick: () => this.deleteSelected() })),
     );
+  }
+
+  // ------------------------------------------------------------ why?
+
+  private whyAt = 0;
+  private whyBusy = false;
+  private whyOpen = false;
+
+  /** "Why?": the server's explanation of what the selection is doing and what stops it, kept fresh while shown. */
+  private whySection(id: string): HTMLElement {
+    const details = h('div', { class: 'why-details', 'data-why-details': id });
+    details.hidden = !this.whyOpen;
+    const toggle = h('button', { class: 'small', text: this.whyOpen ? 'Less' : 'Details', title: 'Every reason, with what you can do about it' });
+    toggle.addEventListener('click', () => {
+      this.whyOpen = !this.whyOpen;
+      details.hidden = !this.whyOpen;
+      toggle.textContent = this.whyOpen ? 'Less' : 'Details';
+    });
+    const sec = h('div', { class: 'section why' }, h('h4', {}, 'Why? ', toggle), h('div', { class: 'why-summary hint', 'data-why': id, text: '…' }), details);
+    this.whyAt = 0;
+    void this.refreshWhy(true);
+    return sec;
+  }
+
+  private async refreshWhy(force = false): Promise<void> {
+    const id = this.selectedId;
+    const summary = id ? document.querySelector<HTMLElement>(`[data-why="${id}"]`) : null;
+    if (!id || !summary || this.whyBusy) return;
+    if (!force && performance.now() - this.whyAt < 2000) return;
+    this.whyBusy = true;
+    this.whyAt = performance.now();
+    try {
+      const kind = this.unit(id) ? 'units' : 'entities';
+      const ex = await this.api.v1<Explanation>('GET', `/${kind}/${encodeURIComponent(id)}/explain`);
+      if (this.selectedId !== id) return;
+      this.renderWhy(id, ex);
+    } catch {
+      summary.textContent = '';
+    } finally {
+      this.whyBusy = false;
+    }
+  }
+
+  private renderWhy(id: string, ex: Explanation): void {
+    const summary = document.querySelector<HTMLElement>(`[data-why="${id}"]`);
+    const details = document.querySelector<HTMLElement>(`[data-why-details="${id}"]`);
+    if (!summary || !details) return;
+    const worst = [...(ex.unit ?? []), ...ex.movement, ...ex.fire].find((f) => f.severity === 'block') ?? [...ex.movement, ...ex.fire].find((f) => f.severity === 'warn');
+    summary.textContent = ex.summary;
+    summary.className = `why-summary ${worst ? `sev-${worst.severity}` : 'hint'}`;
+    const item = (f: Finding) => {
+      const li = h('li', { class: `sev-${f.severity}` }, h('span', { text: f.text }));
+      if (f.fix) li.append(h('div', { class: 'fix', text: `→ ${f.fix}` }));
+      if (f.at || f.aboutId) {
+        li.classList.add('clickable');
+        li.title = f.at ? 'Show on the map' : 'Select it';
+        li.addEventListener('click', () => {
+          if (f.at) this.showWhyMark(id, f);
+          else if (f.aboutId) this.select(f.aboutId);
+        });
+      }
+      return li;
+    };
+    const group = (title: string, fs: Finding[] | undefined) => (fs && fs.length ? [h('h5', { text: title }), h('ul', { class: 'why-list' }, ...fs.map(item))] : []);
+    clear(details);
+    details.append(...group('Unit', ex.unit), ...group('Moving', ex.movement), ...group('Shooting', ex.fire), ...group('Seeing', ex.sensing));
+  }
+
+  /** Mark what a finding points at (e.g. the crest that blocks a sight line), with the sight line. */
+  private showWhyMark(id: string, f: Finding): void {
+    const from = this.positionOf(id);
+    const to = f.aboutId ? this.positionOf(f.aboutId) : undefined;
+    this.map.explainMarks = [{ at: f.at!, label: f.text.split(':')[0].slice(0, 40), line: from && to ? [from, to] : undefined }];
+    this.map.centerOn(f.at!);
+    this.map.invalidate();
+    window.setTimeout(() => {
+      this.map.explainMarks = [];
+      this.map.invalidate();
+    }, 8000);
   }
 
   private pendingOrderText(id: string): string {
@@ -1496,6 +1579,7 @@ class App {
           ]
         : []),
       h('div', { class: 'section' }, h('h4', { text: 'Current activity' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
+      this.whySection(u.id),
       this.roeSection(u.id),
       this.reactionsSection(u.id, true),
       this.taskSection(u.id, lead?.domain ?? 'ground'),

@@ -37,6 +37,14 @@ Full details of one entity: kinematics, damage, ROE, task/plan, ammunition and c
 | --- | --- | --- | --- |
 | `id` | string | yes |  |
 
+## `explain` _(read-only)_
+
+Why an entity or unit is or is not moving, shooting or seeing the enemy: blockers (no line of sight and what blocks it, out of range, ROE, out of ammo or fuel, pinned, halted on contact, broken, order still on its way...) with suggested fixes. Use it whenever something does not do what you ordered.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | yes | Entity or unit id |
+
 ## `get_unit` _(read-only)_
 
 Details of a unit and its members.

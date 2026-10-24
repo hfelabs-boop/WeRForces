@@ -174,6 +174,23 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'explain',
+    'Why an entity or unit is or is not moving, shooting or seeing the enemy: blockers (no line of sight and what blocks it, out of range, ROE, out of ammo or fuel, pinned, halted on contact, broken, order still on its way...) with suggested fixes. Use it whenever something does not do what you ordered.',
+    { id: z.string().describe('Entity or unit id') },
+    async ({ id }) => {
+      const kind = id.startsWith('U') ? 'units' : 'entities';
+      const ex = await api<{ summary: string; activity: string; movement: unknown[]; fire: unknown[]; sensing: unknown[]; unit?: unknown[] }>('GET', `/api/v1/${kind}/${encodeURIComponent(id)}/explain`).catch(async (err) => {
+        // Unit ids normally start with U, but be lenient.
+        if (kind === 'units') throw err;
+        return api<never>('GET', `/api/v1/units/${encodeURIComponent(id)}/explain`);
+      });
+      const brief = (fs: unknown[]) => (fs as { severity: string; text: string; fix?: string }[]).map((f) => `${f.severity}: ${f.text}${f.fix ? ` Fix: ${f.fix}` : ''}`);
+      return { summary: ex.summary, activity: ex.activity, ...(ex.unit ? { unit: brief(ex.unit) } : {}), movement: brief(ex.movement), fire: brief(ex.fire), sensing: brief(ex.sensing) };
+    },
+    { readOnlyHint: true },
+  );
+
+  tool(
     'get_unit',
     'Details of a unit and its members.',
     { id: z.string() },

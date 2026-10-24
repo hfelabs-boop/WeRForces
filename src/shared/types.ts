@@ -519,6 +519,37 @@ export interface EnvironmentState extends Required<Environment> {
   period: 'day' | 'twilight' | 'night';
 }
 
+// ---------------------------------------------------------------- diagnostics
+
+/** One reason in an explanation. `block` stops the activity; `warn` hampers it; `info` explains it. */
+export interface Finding {
+  code: string;
+  severity: 'block' | 'warn' | 'info';
+  text: string;
+  /** What the operator can do about it, when there is something. */
+  fix?: string;
+  /** A place on the map the finding is about (e.g. what blocks the line of sight). */
+  at?: Vec2;
+  /** An entity the finding is about. */
+  aboutId?: string;
+}
+
+/** Why an entity or unit is (or is not) moving, shooting and seeing: the answer to "why isn't it doing that?". */
+export interface Explanation {
+  id: string;
+  name: string;
+  kind: 'entity' | 'unit';
+  /** One line: what it is doing, and the main thing stopping it. */
+  summary: string;
+  /** Its current task or plan step, in words. */
+  activity: string;
+  movement: Finding[];
+  fire: Finding[];
+  sensing: Finding[];
+  /** Units: members, morale, orders. */
+  unit?: Finding[];
+}
+
 // ---------------------------------------------------------------- runtime snapshots
 
 export interface EntitySnapshot {

@@ -178,6 +178,8 @@ export function buildOpenApi(baseUrl: string): Schema {
         delete: { tags: ['Entities'], summary: 'Delete an entity', parameters: [idParam()], responses: { '204': { description: 'Deleted' }, ...errors } },
       },
       '/api/v1/entities/{id}/path': { get: op('Entities', 'Remaining planned waypoints', { parameters: [idParam()] }) },
+      '/api/v1/entities/{id}/explain': { get: op('Entities', 'Why the entity is or is not moving, firing and detecting: findings by severity (block, warn, info), with fixes. Exercise control is also told about enemies the entity has not detected, and why', { parameters: [idParam()] }) },
+      '/api/v1/units/{id}/explain': { get: op('Units', "Why the unit is or is not moving and firing: its strength, morale and orders, its leader's findings, and how many members share each problem", { parameters: [idParam()] }) },
       ...taskable('entities', 'Entities'),
       '/api/v1/units': {
         get: op('Units', 'List units', { parameters: [{ name: 'force', in: 'query', schema: { type: 'string' } }] }),
