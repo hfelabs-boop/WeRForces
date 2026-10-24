@@ -75,6 +75,8 @@ class PathFollower {
   private waypoints: Vec2[] = [];
   private index = 0;
   private blockedTime = 0;
+  /** Obstacles version the path was planned with: replan when lanes or known minefields change. */
+  private obstacles = -1;
   goal: Vec2 | null = null;
 
   /** `covered`: route away from known enemies' fields of fire. */
@@ -83,6 +85,7 @@ class PathFollower {
   plan(e: Entity, engine: Engine, goal: Vec2): boolean {
     this.goal = { ...goal };
     const route = engine.planRoute(e, goal, e.domain, e.type.offroadFactor, e.force, this.covered);
+    this.obstacles = engine.obstacles.version;
     if (!route) return false;
     this.waypoints = route;
     this.index = 0;
@@ -97,6 +100,10 @@ class PathFollower {
   /** Steers along the path. Returns true when the final waypoint is reached. */
   step(e: Entity, engine: Engine, dt: number, speed: number, arrive = true): boolean {
     if (!this.goal) return true;
+    if (this.obstacles !== engine.obstacles.version && e.domain !== 'air' && e.domain !== 'surface') {
+      // A lane was breached, or a minefield found: the best way may have changed.
+      if (!this.plan(e, engine, this.goal)) return true;
+    }
     const r = arriveRadius(e);
     while (this.index < this.waypoints.length - 1 && dist2d(e, this.waypoints[this.index]) < r * 2.5) this.index++;
     const wp = this.waypoints[this.index];
@@ -391,11 +398,16 @@ export class OrbitTask extends Task {
 
 /** Unit subordinate behaviour: hold the assigned slot relative to the unit leader. */
 export class FormationTask extends Task {
+  /** Around minefields and obstacles: a planned path to the slot, through lanes. */
+  private detour: PathFollower | null = null;
+  private detourTo?: Vec2;
+  private detourAge = 0;
+
   constructor(readonly leaderId: string) {
     super({ type: 'formation', leaderId });
   }
 
-  protected tick({ engine, entity }: TaskContext): TaskStatus {
+  protected tick({ engine, entity, dt }: TaskContext): TaskStatus {
     const unit = entity.unit;
     const leader = engine.entities.get(this.leaderId);
     if (!unit || !leader || leader.destroyed) return 'done';
@@ -404,6 +416,20 @@ export class FormationTask extends Task {
     const catchUp = d > 15 ? Math.min(entity.type.maxSpeed, leader.speed * 1.2 + d * 0.05) : leader.speed;
     const speed = Math.max(catchUp, d > 15 ? Math.min(entity.cruiseSpeed, entity.type.maxSpeed) * 0.5 : 0);
     const stopped = leader.speed < 0.5;
+    // Straight to the slot, unless an obstacle or a known minefield is in the way.
+    if (engine.obstacles.any && d > 15 && engine.obstacles.barrierBetween(entity, slot, entity.force, entity.domain)) {
+      this.detourAge += dt;
+      if (!this.detour || !this.detourTo || dist2d(this.detourTo, slot) > 60 || this.detourAge > 10) {
+        this.detour = new PathFollower();
+        this.detourTo = { ...slot };
+        this.detourAge = 0;
+        if (!this.detour.plan(entity, engine, slot)) this.detour = null;
+      }
+      if (this.detour) {
+        this.detour.step(entity, engine, dt, Math.max(speed, entity.cruiseSpeed * 0.6), stopped);
+        return 'running';
+      }
+    } else this.detour = null;
     entity.steer = { x: slot.x, y: slot.y, speed, arrive: stopped, finalHeading: leader.heading };
     // If terrain blocks the slot, fall in behind the leader instead.
     if (entity.blocked) entity.steer = { x: leader.x, y: leader.y, speed, arrive: true };
@@ -584,6 +610,8 @@ export class BreachTask extends Task {
     const g = engine.graphics.get(this.graphicId);
     if (!entity.type.breachTime) this.fail('not an engineer');
     else if (!g || (g.kind !== 'minefield' && g.kind !== 'obstacle')) this.fail('not a minefield or obstacle');
+    // Engineers sent to clear a minefield know it is there, and so does their side.
+    else if (g.kind === 'minefield') engine.obstacles.reveal(g, entity.force);
   }
 
   protected tick({ engine, entity, dt }: TaskContext): TaskStatus {

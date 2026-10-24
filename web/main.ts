@@ -1783,14 +1783,15 @@ class App {
       h(
         'div',
         { class: 'kv' },
+        // Values in their own elements: two text nodes in a row would merge into one grid cell.
         'Points',
-        String(g.points.length),
+        h('span', { text: String(g.points.length) }),
         g.kind === 'area' ? 'Area' : g.kind === 'point' ? 'Location' : 'Length',
-        g.kind === 'area' ? `${(area / 1e6).toFixed(2)} km²` : g.kind === 'point' ? fmtGrid(g.points[0].x, g.points[0].y) : `${(len / 1000).toFixed(2)} km`,
+        h('span', { text: g.kind === 'area' ? `${(area / 1e6).toFixed(2)} km²` : g.kind === 'point' ? fmtGrid(g.points[0].x, g.points[0].y) : `${(len / 1000).toFixed(2)} km` }),
       ),
       ...(g.kind === 'minefield' ? [this.densityEditor(g)] : []),
       ...(g.kind === 'minefield' || g.kind === 'obstacle'
-        ? [h('div', { class: 'kv' }, 'Lanes', String(g.lanes?.length ?? 0), 'Known to', [g.force, ...(g.knownBy ?? [])].map((f) => FORCE_NAMES[f]).join(', '))]
+        ? [h('div', { class: 'kv' }, 'Lanes', h('span', { text: String(g.lanes?.length ?? 0) }), 'Known to', h('span', { text: [g.force, ...(g.knownBy ?? [])].map((f) => FORCE_NAMES[f]).join(', ') }))]
         : []),
       h('p', { class: 'hint', text: GRAPHIC_HINTS[g.kind] }),
       h('div', { class: 'section row' }, h('button', { text: 'Center', onclick: () => this.centerOn(g.id) }), h('button', { class: 'danger', text: 'Delete', onclick: () => this.deleteSelected() })),
@@ -1798,7 +1799,7 @@ class App {
   }
 
   private densityEditor(g: Graphic): HTMLElement {
-    const input = h('input', { type: 'number', min: '0.05', max: '5', step: '0.05', value: String(g.density ?? 0.5) }) as HTMLInputElement;
+    const input = h('input', { type: 'number', min: '0.05', max: '3', step: '0.05', value: String(g.density ?? 0.5) }) as HTMLInputElement;
     input.addEventListener('change', () => this.cmd({ cmd: 'updateGraphic', id: g.id, density: Number(input.value) }));
     return h('div', { class: 'kv' }, 'Density', input);
   }

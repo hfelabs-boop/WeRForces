@@ -239,7 +239,7 @@ export function buildOpenApi(baseUrl: string): Schema {
       '/api/v1/terrain/line-of-sight': {
         post: op(
           'Terrain',
-          'Line of sight between two entities or points',
+          'Line of sight between two entities or points, through terrain, forest, buildings and smoke (`radar: true` sees through smoke)',
           body({ type: 'object', required: ['from', 'to'], properties: { from: { oneOf: [{ type: 'string', description: 'entity id' }, ref('Position')] }, to: { oneOf: [{ type: 'string' }, ref('Position')] } } }),
         ),
       },

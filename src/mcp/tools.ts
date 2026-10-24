@@ -231,7 +231,7 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'check_line_of_sight',
-    'Whether two entities (by id) or points can see each other over terrain and forest.',
+    'Whether two entities (by id) or points can see each other over terrain, forest, buildings and smoke.',
     { from: z.union([z.string(), position]), to: z.union([z.string(), position]) },
     async (a) => api('POST', '/api/v1/terrain/line-of-sight', a),
     { readOnlyHint: true },

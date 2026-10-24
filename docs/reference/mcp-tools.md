@@ -73,7 +73,7 @@ Terrain at a point: elevation, water, forest, road, slope and nearest town.
 
 ## `check_line_of_sight` _(read-only)_
 
-Whether two entities (by id) or points can see each other over terrain and forest.
+Whether two entities (by id) or points can see each other over terrain, forest, buildings and smoke.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |

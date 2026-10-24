@@ -187,7 +187,7 @@ under `/s/{id}/api/v1`; the unprefixed paths are the `main` session.
 | GET | `/events` | `?since=<seq>&kinds=destroyed,damaged&limit=200`. Keep the highest `seq` you have seen and pass it as `since` to poll |
 | GET | `/terrain` | spec, towns, road polylines |
 | GET | `/terrain/point` | `?x=&y=` / `?lat=&lon=` / `?town=` → elevation, water, forest, road, slope, nearest town |
-| POST | `/terrain/line-of-sight` | `{"from": "E1" or position, "to": ...}`. Positions take an optional `height` above ground (default 2 m) |
+| POST | `/terrain/line-of-sight` | `{"from": "E1" or position, "to": ..., "radar"?: true}`. Positions take an optional `height` above ground (default 2 m). Terrain, forest, buildings and smoke block it (`radar` sees through smoke) |
 | POST | `/terrain/route` | `{"from", "to", "domain": "ground\|lifeform\|surface\|air", "force"?, "covered"?}` → waypoints and length. With `force`, round obstacles and the minefields it knows; with `covered` too, out of sight of the enemies it knows |
 | GET | `/catalog` · `/catalog/entity-types` · `/catalog/unit-templates` | see the [catalog](catalog.md) |
 | GET | `/terrains` | Imported terrain datasets ([Terrain import](../terrain-import.md)) |

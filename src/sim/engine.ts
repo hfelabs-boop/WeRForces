@@ -286,16 +286,18 @@ export class Engine {
     const tpl = this.catalog.templates.get(templateId);
     if (!tpl) throw new Error(`unknown unit template: ${templateId}`);
     const members: Entity[] = [];
+    // A headquarters keeps close together; the template's spacing is for its subordinate units.
+    const spacing = tpl.subunits?.length ? Math.min(tpl.spacing, 80) : tpl.spacing;
     // Place the leader at the point and followers at their formation slots.
     for (let k = 0; k < tpl.members.length; k++) {
-      const off = k === 0 ? { x: 0, y: 0 } : rotateSlot(tpl.formation, k, tpl.spacing, heading);
+      const off = k === 0 ? { x: 0, y: 0 } : rotateSlot(tpl.formation, k, spacing, heading);
       const slot = { x: clampTo(x + off.x, this.terrain.spec.size), y: clampTo(y + off.y, this.terrain.spec.size) };
       const domain = this.catalog.type(tpl.members[k]).domain;
       // Followers whose slot is unusable (e.g. in a lake) are placed at the nearest valid spot.
       const p = k === 0 ? slot : (this.findValidPosition(slot, domain) ?? this.findValidPosition({ x, y }, domain) ?? slot);
       members.push(this.createEntity({ typeId: tpl.members[k], force, x: p.x, y: p.y, heading }));
     }
-    const unit = this.groupUnit(members.map((m) => m.id), name ?? tpl.name, tpl.formation, tpl.spacing, tpl.echelon);
+    const unit = this.groupUnit(members.map((m) => m.id), name ?? tpl.name, tpl.formation, spacing, tpl.echelon);
     members.forEach((m, i) => (m.name = `${unit.name} ${i === 0 ? 'Lead' : i + 1}`));
     if (tpl.subunits?.length) {
       // The members are the HQ, set back behind the subordinate units' formation.
@@ -312,7 +314,8 @@ export class Engine {
         const off = rotateSlot(tpl.formation, k, tpl.spacing, heading);
         const echelon = this.catalog.templates.get(sid)!.echelon;
         const nth = `${k + 1}${k === 0 ? 'st' : k === 1 ? 'nd' : k === 2 ? 'rd' : 'th'}`;
-        const sub = this.createUnitFromTemplate(sid, force, clampTo(x + off.x, this.terrain.spec.size), clampTo(y + off.y, this.terrain.spec.size), heading, `${nth} ${echelon[0].toUpperCase()}${echelon.slice(1)}`);
+        // Named after the company, so two companies' platoons are told apart.
+        const sub = this.createUnitFromTemplate(sid, force, clampTo(x + off.x, this.terrain.spec.size), clampTo(y + off.y, this.terrain.spec.size), heading, `${unit.name} ${nth} ${echelon[0].toUpperCase()}${echelon.slice(1)}`);
         sub.parentId = unit.id;
       });
     }
@@ -901,7 +904,7 @@ export class Engine {
   private reportDetonation(det: Detonation): void {
     const shot = det.shot;
     if (det.smoke) {
-      this.log('detonation', `${shot.weapon.name} smoke at (${Math.round(det.location.x)}, ${Math.round(det.location.y)})`, shot.shooterId, undefined, { to: det.location, hit: false, weaponId: shot.weapon.id });
+      this.log('detonation', `${shot.weapon.name.replace(/\s*\([^)]*\)$/, '')} smoke round at (${Math.round(det.location.x)}, ${Math.round(det.location.y)})`, shot.shooterId, undefined, { to: det.location, hit: false, weaponId: shot.weapon.id });
       for (const fn of this.listeners.detonation) fn(det);
       return;
     }
@@ -1210,7 +1213,17 @@ export class Engine {
     this.time = s.startTime ?? 0;
     this.updateEnvironment();
     this.setHostilities(s.hostilities ?? [[1, 2]]);
-    for (const g of s.graphics ?? []) this.addGraphic(g.kind, g.points, g.name, g.force, g.id);
+    for (const g of s.graphics ?? []) {
+      const added = this.addGraphic(g.kind, g.points, g.name, g.force, g.id);
+      // Minefields and obstacles keep their density, breached lanes and who knows about them.
+      const pt = (p: unknown) => !!p && Number.isFinite((p as Vec2).x) && Number.isFinite((p as Vec2).y);
+      if (typeof g.density === 'number' && g.density > 0) added.density = Math.min(3, g.density);
+      const lanes = Array.isArray(g.lanes) ? g.lanes.filter((l) => pt(l?.from) && pt(l?.to)) : [];
+      if (lanes.length) added.lanes = lanes.map((l) => ({ from: { x: l.from.x, y: l.from.y }, to: { x: l.to.x, y: l.to.y } }));
+      const known = Array.isArray(g.knownBy) ? g.knownBy.filter((f) => [0, 1, 2, 3].includes(f)) : [];
+      if (known.length) added.knownBy = known;
+      if (added.density !== undefined || added.lanes || added.knownBy) this.obstacles.changed();
+    }
     for (const r of s.entities ?? []) {
       const e = this.createEntity({ id: r.id, typeId: r.typeId, force: r.force, x: r.x, y: r.y, heading: r.heading, name: r.name, altitude: r.altitude });
       if (r.roe) e.roe = r.roe;
@@ -1432,7 +1445,7 @@ export class Engine {
           lossesSeen: u.lossesSeen || undefined,
         },
       })),
-      graphics: [...this.graphics.values()],
+      graphics: [...this.graphics.values()].map((g) => JSON.parse(JSON.stringify(g)) as Graphic),
       shots: this.shots.length === 0 ? undefined : this.shots.map((sh) => ({
         eventNumber: sh.eventNumber,
         shooterId: sh.shooterId,

@@ -64,6 +64,30 @@ describe('obstacles', () => {
     eng.runFor(1);
     expect(tank.task?.message).toBe('not an engineer');
   });
+
+  it('a whole platoon goes through the lane, followers included', () => {
+    const eng = engine();
+    const ditch = eng.addGraphic('obstacle', [{ x: 0, y: 2000 }, { x: 4000, y: 2000 }], 'AT ditch', 2);
+    ditch.lanes = [{ from: { x: 2000, y: 1985 }, to: { x: 2000, y: 2015 } }];
+    eng.obstacles.changed();
+    const p = eng.createUnitFromTemplate('us-tank-platoon', 1, 1500, 1000);
+    eng.assignTask(p.id, { type: 'moveTo', target: { x: 1500, y: 3000 } });
+    eng.runFor(900);
+    for (const m of p.memberList) expect(m.y).toBeGreaterThan(2400);
+  });
+
+  it('minefield state survives undo checkpoints and reloads', () => {
+    const eng = engine();
+    const mf = eng.addGraphic('minefield', [{ x: 1500, y: 1800 }, { x: 2500, y: 1800 }, { x: 2500, y: 2200 }], 'MF 1', 2);
+    mf.density = 1.2;
+    mf.knownBy = [1];
+    mf.lanes = [{ from: { x: 2000, y: 1790 }, to: { x: 2000, y: 2210 } }];
+    const saved = eng.toScenario();
+    mf.lanes.push({ from: { x: 1600, y: 1790 }, to: { x: 1600, y: 2210 } });
+    expect(saved.graphics[0].lanes).toHaveLength(1); // a copy, not the live object
+    eng.loadScenario(saved);
+    expect(eng.graphics.get(mf.id)).toMatchObject({ density: 1.2, knownBy: [1], lanes: [{ from: { x: 2000, y: 1790 }, to: { x: 2000, y: 2210 } }] });
+  });
 });
 
 describe('minefields', () => {
@@ -86,6 +110,27 @@ describe('minefields', () => {
     expect(route.some(inside)).toBe(false);
     // Its own side always knew.
     expect(eng.planRoute({ x: 2000, y: 1000 }, { x: 2000, y: 3000 }, 'ground', 0.7, 2)!.some(inside)).toBe(false);
+  });
+
+  it('once found, the rest of a moving unit goes round it, and engineers sent to breach it know it', () => {
+    const eng = engine();
+    const mf = eng.addGraphic('minefield', [{ x: 1000, y: 1800 }, { x: 3000, y: 1800 }, { x: 3000, y: 2200 }, { x: 1000, y: 2200 }], 'MF 1', 2);
+    mf.density = 3;
+    const tanks = eng.createUnitFromTemplate('us-tank-platoon', 1, 2000, 1000);
+    eng.assignTask(tanks.id, { type: 'moveTo', target: { x: 2000, y: 3000 } });
+    const strikes: number[] = [];
+    eng.on('event', (ev) => /struck a mine/.test(ev.text) && strikes.push(ev.time));
+    eng.runFor(600);
+    expect(strikes.length).toBeGreaterThan(0);
+    // The first strike reveals it: those already in the field may hit more getting out,
+    // but the rest route round it instead of driving on through.
+    expect(strikes.filter((t) => t > strikes[0] + 20)).toEqual([]);
+    const sappers = engine();
+    const field = sappers.addGraphic('minefield', [{ x: 1000, y: 1800 }, { x: 3000, y: 1800 }, { x: 3000, y: 2200 }], 'MF 2', 2);
+    const abv = sappers.createEntity({ typeId: 'us-m1150', force: 1, x: 2000, y: 1500 });
+    sappers.assignTask(abv.id, { type: 'breach', graphicId: field.id });
+    sappers.step();
+    expect(field.knownBy).toContain(1);
   });
 });
 

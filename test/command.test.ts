@@ -19,8 +19,8 @@ describe('chain of command', () => {
     const eng = engine();
     const coy = eng.createUnitFromTemplate('us-tank-company', 1, 3000, 2000);
     const subs = eng.subordinatesOf(coy);
-    expect(subs.map((u) => u.name)).toEqual(['1st Platoon', '2nd Platoon', '3rd Platoon']);
-    expect(subs[0].memberList[0].name).toBe('1st Platoon Lead');
+    expect(subs.map((u) => u.name)).toEqual(['US Tank Company 1st Platoon', 'US Tank Company 2nd Platoon', 'US Tank Company 3rd Platoon']);
+    expect(subs[0].memberList[0].name).toBe('US Tank Company 1st Platoon Lead');
     expect(coy.memberList.map((m) => m.name)).toEqual(['US Tank Company HQ 1', 'US Tank Company HQ 2']);
     expect(eng.entities.size).toBe(14);
     const snap = eng.snapshot().units.find((u) => u.id === coy.id)!;

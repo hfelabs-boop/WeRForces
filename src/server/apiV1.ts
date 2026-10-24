@@ -584,7 +584,7 @@ export class ApiV1 {
       const b = obj(req.body);
       const a = this.endpoint(b.from, 'from');
       const c = this.endpoint(b.to, 'to');
-      return { json: { visible: this.engine.terrain.lineOfSight(a, c), distance: Math.round(Math.hypot(c.x - a.x, c.y - a.y, c.z - a.z)), from: a, to: c } };
+      return { json: { visible: this.engine.lineOfSight(a, c, b.radar === true), distance: Math.round(Math.hypot(c.x - a.x, c.y - a.y, c.z - a.z)), from: a, to: c } };
     });
     r.post(`${P}/terrain/route`, (req) => {
       const b = obj(req.body);

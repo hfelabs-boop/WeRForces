@@ -166,7 +166,9 @@ entities.
 
 A unit can have a **superior** unit (`parentId`; inspector *Superior*; REST
 `PATCH /units/{id}` with `superiorId`). Company templates build an HQ unit with
-three platoons under it. An order to a superior passes down:
+three platoons under it, named after the company (*US Tank Company 1st
+Platoon*), with the HQ vehicles close together behind them. An order to a
+superior passes down:
 
 - *Move to*: each subordinate moves to the target plus its current offset from
   the HQ, so the company keeps its shape;
@@ -421,8 +423,11 @@ of it (or all of it, if smaller) below its 25 m top. Radar sees through it.
 driven through (default 0.5). A strike kills or immobilises vehicles depending
 on their armour (an armoured vehicle: 10 % kill, 75 % mobility kill) and kills
 people half the time. The force that laid it, and any force that strikes a mine
-in it, **knows** it: their routes avoid it (25× the cost) unless there is no
-other way. Players only see enemy minefields they know about.
+in it, **knows** it: their routes avoid it, with a margin (25× the cost),
+unless there is no other way. Moving units replan as soon as a minefield
+becomes known, so after the first strike the rest go round. Engineers sent to
+breach a minefield make it known to their side. Players only see enemy
+minefields they know about.
 
 **Obstacles** are lines (anti-tank ditches, wire): vehicles stop at them and
 routes go round; infantry climb through at a third of their speed.
@@ -430,7 +435,8 @@ routes go round; infantry climb through at a third of their speed.
 **Engineers** (US Combat Engineer, M1150 Assault Breacher, RU Sapper) breach a
 30 m **lane** through a minefield or obstacle: 4 minutes for sappers on foot,
 90 s for the M1150, slower under fire. Lanes are safe passages; routes thread
-through them.
+through them, and a unit's followers find their own way through the lane to
+their place in formation.
 
 ## Fuel, ammunition and resupply
 

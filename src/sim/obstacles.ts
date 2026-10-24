@@ -79,6 +79,30 @@ export class Obstacles {
   }
 
   /**
+   * True when a straight move from a to b would hit something routes go round: an
+   * obstacle line (vehicles) or a minefield the force knows about, outside any lane.
+   */
+  barrierBetween(a: Vec2, b: Vec2, force: ForceId, domain: string): boolean {
+    if (domain === 'air' || domain === 'surface') return false;
+    if (domain !== 'lifeform' && this.crossing(a, b)) return true;
+    const fields = this.list('minefield').filter((g) => g.points.length >= 3 && knows(g, force));
+    if (!fields.length) return false;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.max(1, Math.ceil(len / 10));
+    for (let i = 1; i <= n; i++) {
+      const p = { x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n };
+      if (fields.some((g) => pointInPolygon(p, g.points) && !inLane(g, p))) return true;
+    }
+    return false;
+  }
+
+  /** True when there are minefields or obstacles at all (most scenarios have none). */
+  get any(): boolean {
+    for (const g of this.engine.graphics.values()) if (g.kind === 'minefield' || g.kind === 'obstacle') return true;
+    return false;
+  }
+
+  /**
    * Per-post route cost multipliers for a force and domain (null when nothing applies):
    * obstacles are impassable to vehicles and slow on foot; known minefields are avoided.
    */
@@ -113,10 +137,13 @@ export class Obstacles {
       if (force === undefined || !knows(g, force) || g.points.length < 3) continue;
       const xs = g.points.map((p) => p.x);
       const ys = g.points.map((p) => p.y);
-      for (let r = Math.max(0, Math.floor(Math.min(...ys) / cs)); r <= Math.min(t.rows - 1, Math.ceil(Math.max(...ys) / cs)); r++) {
-        for (let c = Math.max(0, Math.floor(Math.min(...xs) / cs)); c <= Math.min(t.cols - 1, Math.ceil(Math.max(...xs) / cs)); c++) {
+      // Keep routes a margin away from the edge: a path along it would clip the field.
+      const margin = cs * 0.75;
+      const nearEdge = (p: Vec2) => g.points.some((a, i) => distToSegment(p, a, g.points[(i + 1) % g.points.length]) < margin);
+      for (let r = Math.max(0, Math.floor((Math.min(...ys) - margin) / cs)); r <= Math.min(t.rows - 1, Math.ceil((Math.max(...ys) + margin) / cs)); r++) {
+        for (let c = Math.max(0, Math.floor((Math.min(...xs) - margin) / cs)); c <= Math.min(t.cols - 1, Math.ceil((Math.max(...xs) + margin) / cs)); c++) {
           const p = { x: c * cs, y: r * cs };
-          if (pointInPolygon(p, g.points) && !inLane(g, p)) mark(r * t.cols + c, MINEFIELD_COST);
+          if ((pointInPolygon(p, g.points) || nearEdge(p)) && !inLane(g, p, cs / 2)) mark(r * t.cols + c, MINEFIELD_COST);
         }
       }
     }
