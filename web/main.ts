@@ -836,10 +836,14 @@ class App {
           onclick: async () => {
             const next: Record<string, boolean> = {};
             for (const el of body.querySelectorAll<HTMLInputElement>('[data-rule]')) next[el.dataset.rule!] = el.checked;
-            const r = await this.cmd({ cmd: 'setRules', rules: next });
-            await this.cmd({ cmd: 'setPatternOfLife', vehicles: Number(cars.value) || 0, pedestrians: Number(people.value) || 0 });
             const [th, tm] = time.value.split(':').map(Number);
-            const e = await this.cmd({
+            // One edit: a single undo takes the whole dialog back.
+            const r = await this.cmd({
+              cmd: 'batch',
+              commands: [
+                { cmd: 'setRules', rules: next },
+                { cmd: 'setPatternOfLife', vehicles: Number(cars.value) || 0, pedestrians: Number(people.value) || 0 },
+                {
               cmd: 'setEnvironment',
               environment: {
                 date: date.value || env.date,
@@ -849,8 +853,10 @@ class App {
                 windSpeed: Number(windSpeed.value),
                 windFrom: Number(windFrom.value) % 360,
               },
+                },
+              ],
             });
-            if (r.ok && e.ok) close();
+            if (r.ok) close();
           },
         }),
         h('button', { text: 'Cancel', onclick: () => close() }),
@@ -2336,7 +2342,8 @@ class App {
           e.jamming === true ? 'JAMMING' : '',
           e.prepared === 'dugIn' ? 'DUG IN' : e.prepared === 'hullDown' ? 'HULL-DOWN' : '',
           e.plan,
-          e.task,
+          // A plan step already names its task ("QRF 3/3: Move to …").
+          e.plan && e.task && e.plan.endsWith(e.task) ? '' : e.task,
           this.travelText(e.travel),
         ]
           .filter(Boolean)
@@ -2397,7 +2404,7 @@ class App {
           this.pendingOrderText(u.id),
           lead?.halted ? 'HALTED (contact)' : '',
           u.plan,
-          u.task,
+          u.plan && u.task && u.plan.endsWith(u.task) ? '' : u.task,
           this.travelText(u.travel),
         ]
           .filter(Boolean)

@@ -118,6 +118,16 @@ function saveChoice(ids: string[]): void {
   }
 }
 
+const DOCK_STORE = 'werforces.quickbar.dock';
+
+function loadDockTop(): boolean {
+  try {
+    return localStorage.getItem(DOCK_STORE) === 'top';
+  } catch {
+    return false;
+  }
+}
+
 export class QuickBar {
   private choice = loadChoice();
   private shownFor = '';
@@ -147,6 +157,18 @@ export class QuickBar {
       this.el.append(b);
     });
     this.el.append(h('button', { class: 'quick config', title: 'Choose the buttons', text: '⚙', onclick: () => this.configure() }));
+    this.el.append(h('button', { class: 'quick config', title: 'Move the bar to the other edge of the map', text: '⇅', onclick: () => this.dock(!this.el.classList.contains('dock-top')) }));
+    this.dock(loadDockTop());
+  }
+
+  /** Keep the bar at the bottom (default) or the top of the map, so it can be moved off what is under it. */
+  private dock(top: boolean): void {
+    this.el.classList.toggle('dock-top', top);
+    try {
+      localStorage.setItem(DOCK_STORE, top ? 'top' : 'bottom');
+    } catch {
+      // Not remembered: fine.
+    }
   }
 
   /** Names of the things the bar orders (for the order line). */

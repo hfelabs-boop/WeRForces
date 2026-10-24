@@ -64,7 +64,9 @@ function movement(engine: Engine, e: Entity): Finding[] {
   const task = e.task;
   const plan = e.plan && !e.plan.finished ? e.plan : e.unit?.plan && !e.unit.plan.finished ? e.unit.plan : null;
   if (!task || task.status !== 'running') {
-    if (plan) {
+    if (order) {
+      // Covered by the "on its way" finding above.
+    } else if (plan) {
       const step = plan.describe(engine);
       if (/wait until/i.test(step)) add({ code: 'planWaiting', severity: 'info', text: `Its plan is waiting: ${step}.` });
     } else {

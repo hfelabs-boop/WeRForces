@@ -1296,6 +1296,11 @@ body.player [data-controller-only] {
   flex-wrap: wrap;
   justify-content: center;
 }
+.quickbar.dock-top {
+  bottom: auto;
+  top: 44px;
+}
+
 .quickbar.hidden {
   display: none;
 }
