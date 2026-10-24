@@ -7,3 +7,5 @@ recordings/
 test-results/
 playwright-report/
 .claude/worktrees/
+hla/vendor/
+hla/build/

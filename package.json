@@ -28,7 +28,8 @@
     "bench": "tsx scripts/bench.ts",
     "terrain:import": "tsx src/terrain/cli.ts",
     "e2e": "playwright test",
-    "golden:update": "tsx scripts/golden-update.ts"
+    "golden:update": "tsx scripts/golden-update.ts",
+    "hla:build": "bash hla/fetch-ohla.sh && bash hla/build.sh"
   },
   "engines": {
     "node": ">=20"

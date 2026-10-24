@@ -1,0 +1,12 @@
+<!-- Logging for the OHLA RTI and the bridge (OHLA logs everything at DEBUG by default). -->
+<configuration>
+  <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+    <target>System.err</target>
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level [%logger{0}] %msg%n</pattern>
+    </encoder>
+  </appender>
+  <root level="${ohla.log.level:-WARN}">
+    <appender-ref ref="STDERR" />
+  </root>
+</configuration>
