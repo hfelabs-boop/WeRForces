@@ -4,6 +4,7 @@
 import { angleDiff, bearing, clamp } from '../shared/math.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
+import { spotFactor } from './morale.js';
 
 export const SENSOR_INTERVAL = 1;
 const CONTACT_TIMEOUT = 15;
@@ -20,6 +21,7 @@ export function detectionProbability(engine: Engine, observer: Entity, target: E
   if (engine.time - target.lastFiredAt < 5) p *= 2;
   // Contacts already being tracked are easy to maintain.
   if (observer.contacts.has(target.id)) p = Math.max(p, 0.95);
+  p *= spotFactor(engine, observer);
   return clamp(p, 0, 0.99);
 }
 

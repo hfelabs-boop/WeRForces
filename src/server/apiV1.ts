@@ -194,6 +194,11 @@ export class ApiV1 {
       for (let left = seconds; left > 1e-9; left -= 600) this.run({ cmd: 'step', seconds: Math.min(600, left) });
       return { json: this.simulationSummary() };
     });
+    r.get(`${P}/simulation/rules`, () => ({ json: this.engine.rules }));
+    r.put(`${P}/simulation/rules`, (req) => {
+      this.run({ cmd: 'setRules', rules: obj(req.body) as never });
+      return { json: this.engine.rules };
+    });
     r.put(`${P}/simulation/time-scale`, (req) => {
       this.run({ cmd: 'setTimeScale', scale: num(obj(req.body).scale, 'scale') });
       return { json: this.simulationSummary() };

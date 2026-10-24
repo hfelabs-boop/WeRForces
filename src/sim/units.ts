@@ -1,7 +1,7 @@
 // Units (aggregates of entities) with a leader, a formation and unit-level tasking.
 
 import { rotateOffset } from '../shared/math.js';
-import type { ForceId, Formation, Plan, PlanStatement, Reactions, TaskSpec, UnitTemplate, Vec2 } from '../shared/types.js';
+import type { ForceId, Formation, MoraleState, Plan, PlanStatement, Reactions, TaskSpec, UnitTemplate, Vec2 } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import type { PlanExecutor, Taskable } from './plans.js';
@@ -37,6 +37,11 @@ export class Unit implements Taskable {
   assignedTask?: TaskSpec;
   reactions: Reactions = {};
   withdrawn = false;
+  /** 0..1 cohesion. */
+  morale = 1;
+  moraleState: MoraleState = 'steady';
+  /** Members already counted as lost by the morale model. */
+  lossesSeen = 0;
   leader: Entity | undefined;
   /** The task instance currently executing the unit task on the leader. */
   leaderTask: Task | null = null;

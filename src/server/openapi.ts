@@ -75,6 +75,18 @@ export function buildOpenApi(baseUrl: string): Schema {
       '/api/v1/scenarios/{name}/load': { post: op('Scenario', 'Load a stored scenario', { parameters: [idParam('name')] }) },
       '/api/v1/terrains': { get: op('Terrain', 'Imported real-world terrain datasets (use one with POST /scenario/new {"terrain":{"dataset":name}})') },
       '/api/v1/terrains/{name}': { put: op('Terrain', 'Upload a terrain dataset made with werforces-terrain', { parameters: [idParam('name')], ...body({ type: 'object' }) }) },
+      '/api/v1/simulation/rules': {
+        get: op('Simulation', 'Which optional models are on'),
+        put: op('Simulation', 'Turn optional models on or off', {
+          ...body({
+            type: 'object',
+            properties: {
+              suppression: { type: 'boolean', description: 'incoming fire suppresses: less accurate, slower, worse at spotting; infantry get pinned' },
+              morale: { type: 'boolean', description: 'units become shaken and break under losses and fire' },
+            },
+          }),
+        }),
+      },
       '/api/v1/recording': { get: op('Recording', 'Recording summary: time span, frames, bookmarks, live or reviewing a loaded recording') },
       '/api/v1/recording/data': { get: op('Recording', 'The whole recording (frames, events, bookmarks) as JSON, for saving or replaying elsewhere') },
       '/api/v1/recording/report': { get: op('Recording', 'After-action report: strength per force, losses, kills with killer and weapon, rounds fired, strength over time') },

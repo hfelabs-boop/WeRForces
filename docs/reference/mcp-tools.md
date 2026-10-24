@@ -178,6 +178,15 @@ Set rules of engagement for an entity or unit: fireAtWill, returnFire or holdFir
 | `targetId` | string | yes |  |
 | `roe` | `"fireAtWill"` \| `"returnFire"` \| `"holdFire"` | yes |  |
 
+## `set_simulation_rules` _(idempotent)_
+
+Turn optional parts of the model on or off for this scenario (all are on by default): suppression (fire pins and degrades the target) and morale (units become shaken and break under losses). Useful for comparison runs.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `suppression` | boolean |  |  |
+| `morale` | boolean |  |  |
+
 ## `set_reactions` _(idempotent)_
 
 Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out; callForFire makes it request fire missions from idle friendly artillery in range on hostiles it sees (not within 150 m of friendly troops).

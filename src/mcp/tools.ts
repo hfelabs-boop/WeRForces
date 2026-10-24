@@ -396,6 +396,14 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'set_simulation_rules',
+    'Turn optional parts of the model on or off for this scenario (all are on by default): suppression (fire pins and degrades the target) and morale (units become shaken and break under losses). Useful for comparison runs.',
+    { suppression: z.boolean().optional(), morale: z.boolean().optional() },
+    async (rules) => api('PUT', '/api/v1/simulation/rules', rules),
+    { idempotentHint: true },
+  );
+
+  tool(
     'set_reactions',
     'Automatic behaviours that run alongside tasks: onContact "halt" makes the entity/unit stop and fight while a hostile is within weapon range, then resume its task; withdrawBelow (0-1) makes a unit abandon its plan and fall back (to withdrawTo, default its current position) when its strength drops below that fraction, or an entity when its weapons are knocked out; callForFire makes it request fire missions from idle friendly artillery in range on hostiles it sees (not within 150 m of friendly troops).',
     {

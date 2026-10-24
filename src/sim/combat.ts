@@ -5,6 +5,7 @@ import { dist2d } from '../shared/math.js';
 import type { ArmorClass, Vec2, Vec3, WeaponDef } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
+import { accuracyFactor, exposureFactor, reloadFactor, suppress } from './morale.js';
 
 export interface Shot {
   eventNumber: number;
@@ -41,6 +42,8 @@ export function effectivePk(engine: Engine, shooter: Entity | undefined, target:
     if (target.speed > 8) pk *= 0.8;
   }
   if ((target.domain === 'ground' || target.domain === 'lifeform') && engine.terrain.isForest(target.x, target.y)) pk *= 0.75;
+  if (shooter) pk *= accuracyFactor(engine, shooter);
+  pk *= exposureFactor(target);
   return pk;
 }
 
@@ -120,7 +123,7 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
 function fire(engine: Engine, shooter: Entity, target: Entity, w: WeaponDef, range: number): void {
   const now = engine.time;
   shooter.ammo.set(w.id, (shooter.ammo.get(w.id) ?? 0) - 1);
-  shooter.weaponReadyAt.set(w.id, now + w.reloadTime * engine.rng.range(0.9, 1.1));
+  shooter.weaponReadyAt.set(w.id, now + w.reloadTime * engine.rng.range(0.9, 1.1) * reloadFactor(engine, shooter));
   shooter.lastFiredAt = now;
   shooter.engagingId = target.id;
   const shot: Shot = {
@@ -144,7 +147,7 @@ function fire(engine: Engine, shooter: Entity, target: Entity, w: WeaponDef, ran
 export function fireIndirect(engine: Engine, shooter: Entity, w: WeaponDef, point: Vec2): void {
   const now = engine.time;
   shooter.ammo.set(w.id, (shooter.ammo.get(w.id) ?? 0) - 1);
-  shooter.weaponReadyAt.set(w.id, now + w.reloadTime * engine.rng.range(0.9, 1.1));
+  shooter.weaponReadyAt.set(w.id, now + w.reloadTime * engine.rng.range(0.9, 1.1) * reloadFactor(engine, shooter));
   shooter.lastFiredAt = now;
   const range = dist2d(shooter, point);
   engine.launch({
@@ -184,6 +187,7 @@ export function applyBlast(engine: Engine, w: WeaponDef, at: Vec3, shooterId?: s
     if (!e.remote) {
       if (shooterId) e.attackers.set(shooterId, engine.time);
       e.underFireUntil = engine.time + 15;
+      suppress(engine, e, 0.8 * (1 - d / (radius * 3)));
     }
     if (d > radius || e.remote) continue;
     let pk = (w.pk[e.type.armor] ?? 0) * (1 - d / radius) ** 2;
@@ -243,7 +247,10 @@ export function resolveImpact(engine: Engine, shot: Shot): Detonation {
   // Wire/command-guided missiles need the launcher to keep guiding them to impact.
   if (shot.weapon.commandGuided) {
     const guiding = shooter && shooter.alive && !shooter.firepowerKill && engine.losCached(shooter, target);
-    if (!guiding) return { shot, location: scatter(engine, target.position), hit: false, outcome: 'miss', guidanceLost: true };
+    if (!guiding) {
+      suppress(engine, target, 0.15);
+      return { shot, location: scatter(engine, target.position), hit: false, outcome: 'miss', guidanceLost: true };
+    }
   }
   // Guided munitions track the target; ballistic rounds land at the launch aim point.
   const moved = dist2d(target, shot.to);
@@ -256,6 +263,8 @@ export function resolveImpact(engine: Engine, shot: Shot): Detonation {
     const loc = hit ? target.position : scatter(engine, shot.to);
     return { shot, location: loc, hit, outcome: 'noEffect' };
   }
+  // Rounds landing on or around a target keep its head down.
+  suppress(engine, target, hit ? 0.35 : 0.25);
   if (!hit) return { shot, location: scatter(engine, shot.to), hit: false, outcome: 'miss' };
   // Given a hit, the kill probability is pk / hitChance so overall P(kill) == pk.
   const outcome = applyDamage(engine, target, pk / hitChance);

@@ -22,6 +22,7 @@ import type {
   SimEventKind,
   SimState,
   TaskSpec,
+  SimulationRules,
   TerrainData,
   TerrainSpec,
   UnitSnapshot,
@@ -34,6 +35,7 @@ import { CatalogIndex, DEFAULT_CATALOG } from './catalog.js';
 import { applyBlast, applyDamage, type Detonation, effectivePk, resolveImpact, type Shot, updateCombat } from './combat.js';
 import { Entity } from './entity.js';
 import { checkCallsForFire } from './fires.js';
+import { decaySuppression, isPinned, updateMorale } from './morale.js';
 import { stepMovement } from './movement.js';
 import { PlanExecutor, type Taskable } from './plans.js';
 import { Rng } from './rng.js';
@@ -44,6 +46,7 @@ import { DEFAULT_TERRAIN, Terrain } from './terrain.js';
 import { formationOffset, perMemberTask, Unit } from './units.js';
 
 export const DEFAULT_DT = 0.1;
+export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true };
 const MAX_EVENTS = 1000;
 
 type Listener<T> = (value: T) => void;
@@ -133,6 +136,8 @@ export class Engine {
   private sensorDue = new Map<string, number>();
   private initialScenario: ScenarioFile | null = null;
 
+  /** Optional model parts (see SimulationRules); all on unless a scenario turns them off. */
+  rules: Required<SimulationRules> = { ...DEFAULT_RULES };
   /** Loads imported terrain datasets by name (set by the server from its terrains folder). */
   terrainLoader?: (name: string) => TerrainData;
 
@@ -726,6 +731,17 @@ export class Engine {
     }
   }
 
+  /** Turn optional model parts on or off. */
+  setRules(rules: SimulationRules): void {
+    for (const k of Object.keys(DEFAULT_RULES) as (keyof SimulationRules)[]) if (typeof rules[k] === 'boolean') this.rules[k] = rules[k]!;
+    if (!this.rules.suppression) for (const e of this.entities.values()) e.suppression = 0;
+  }
+
+  /** Give an entity a task without changing what was assigned to it (internal behaviours). */
+  assignTaskInternal(e: Entity, spec: TaskSpec): void {
+    this.setEntityTask(e, createTask(spec));
+  }
+
   /** Catalog weapon with a given DIS munition type, if any. */
   weaponForMunition(munition: { kind: number; domain: number; country: number; category: number; subcategory: number }): WeaponDef | undefined {
     return this.catalog.catalog.weapons.find(
@@ -803,6 +819,7 @@ export class Engine {
     // Round so repeated 0.1 s steps don't accumulate floating-point noise (900.0000000001).
     this.time = Math.round((this.time + dt) * 1e6) / 1e6;
     this.spatial.invalidate();
+    decaySuppression(this, dt);
     for (const u of this.units.values()) u.update(this);
     for (const u of this.units.values()) u.plan?.update(this, u);
 
@@ -817,7 +834,12 @@ export class Engine {
         e.halted = halt;
         if (!e.unit || e.unit.leader === e) this.log('task', `${e.name}: ${halt ? 'halted on contact' : 'resuming'}`, e.id);
       }
-      if (halt) {
+      const pinned = isPinned(this, e);
+      if (pinned !== e.pinned) {
+        e.pinned = pinned;
+        if (!e.unit || e.unit.leader === e) this.log('info', `${e.name}: ${pinned ? 'pinned down' : 'moving again'}`, e.id);
+      }
+      if (halt || pinned) {
         // Stop and fight; the task keeps its progress and resumes afterwards.
         e.steer = { x: e.x, y: e.y, speed: 0, arrive: true };
       } else if (task && task.status === 'running') {
@@ -849,7 +871,10 @@ export class Engine {
         updateSensors(this, e);
       }
     }
-    if (Math.round(this.time * 10) % 10 === 0) checkCallsForFire(this);
+    if (Math.round(this.time * 10) % 10 === 0) {
+      checkCallsForFire(this);
+      updateMorale(this);
+    }
     for (const e of this.entities.values()) updateCombat(this, e);
     this.processImpacts();
     for (const fn of this.listeners.step) fn(this.time);
@@ -911,6 +936,8 @@ export class Engine {
       this.terrainVersion++;
     }
     this.rng = new Rng(spec.seed);
+    this.rules = { ...DEFAULT_RULES };
+    this.setRules(s.rules ?? {});
     this.events = [];
     this.scenarioName = s.name;
     this.description = s.description ?? '';
@@ -927,6 +954,9 @@ export class Engine {
       const unit = this.groupUnit(u.memberIds, u.name, u.formation, u.spacing, u.echelon, u.id);
       if (u.reactions) unit.reactions = { ...u.reactions };
       unit.withdrawn = !!u.state?.withdrawn;
+      if (u.state?.morale !== undefined) unit.morale = u.state.morale;
+      if (u.state?.moraleState) unit.moraleState = u.state.moraleState;
+      if (u.state?.lossesSeen !== undefined) unit.lossesSeen = u.state.lossesSeen;
       const leader = u.state?.leaderId ? this.entities.get(u.state.leaderId) : undefined;
       if (leader && unit.memberList.includes(leader)) {
         unit.leader = leader;
@@ -997,6 +1027,9 @@ export class Engine {
     e.withdrawn = !!st.withdrawn;
     if (st.embarkedIn) e.embarkedIn = st.embarkedIn;
     if (st.callForFireAt !== undefined) e.callForFireAt = st.callForFireAt;
+    if (st.suppression !== undefined) e.suppression = st.suppression;
+    if (st.morale !== undefined) e.morale = st.morale;
+    if (st.moraleState) e.moraleState = st.moraleState;
   }
 
   private authoredState(e: Entity): EntityRecord['state'] {
@@ -1043,6 +1076,9 @@ export class Engine {
         embarkedIn: e.embarkedIn,
         taskDone: (!!e.assignedTask && !(e.task && e.task.status === 'running')) || undefined,
         callForFireAt: finite(e.callForFireAt),
+        suppression: e.suppression || undefined,
+        morale: e.morale < 1 ? e.morale : undefined,
+        moraleState: e.moraleState !== 'steady' ? e.moraleState : undefined,
       },
     };
   }
@@ -1099,6 +1135,9 @@ export class Engine {
           leaderId: u.leader?.id,
           withdrawn: u.withdrawn || undefined,
           taskDone: (!!u.assignedTask && u.taskStatus() !== 'running') || undefined,
+          morale: u.morale < 1 ? u.morale : undefined,
+          moraleState: u.moraleState !== 'steady' ? u.moraleState : undefined,
+          lossesSeen: u.lossesSeen || undefined,
         },
       })),
       graphics: [...this.graphics.values()],
@@ -1114,6 +1153,7 @@ export class Engine {
         range: sh.range,
       })),
       rngState: this.time === 0 ? undefined : this.rng.state,
+      rules: Object.values(this.rules).every((v) => v) ? undefined : { ...this.rules },
     };
   }
 
@@ -1151,6 +1191,10 @@ export class Engine {
       withdrawn: e.withdrawn || undefined,
       embarkedIn: e.embarkedIn,
       passengers: riders?.length ? riders : undefined,
+      suppression: e.suppression ? Math.round(e.suppression * 100) / 100 : undefined,
+      pinned: e.pinned || undefined,
+      morale: e.unit || !this.rules.morale ? undefined : Math.round(e.morale * 100) / 100,
+      moraleState: e.unit || !this.rules.morale || e.moraleState === 'steady' ? undefined : e.moraleState,
     };
   }
 
@@ -1179,6 +1223,8 @@ export class Engine {
         plan: u.plan?.describe(this),
         reactions: Object.keys(u.reactions).length ? u.reactions : undefined,
         withdrawn: u.withdrawn || undefined,
+        morale: this.rules.morale ? Math.round(u.morale * 100) / 100 : undefined,
+        moraleState: this.rules.morale ? u.moraleState : undefined,
       };
     });
     return {

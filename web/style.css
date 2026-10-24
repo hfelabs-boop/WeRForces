@@ -1006,3 +1006,32 @@ body.player [data-controller-only] {
   color: var(--neutral);
   border-color: var(--neutral);
 }
+
+/* ------------------------------------------------ suppression & settings */
+
+.meter {
+  display: inline-block;
+  width: 90px;
+  height: 7px;
+  background: var(--panel-2);
+  border-radius: 4px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+}
+
+.settings .setting {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 8px 0;
+}
+
+.settings .setting small {
+  display: block;
+  color: var(--muted);
+}

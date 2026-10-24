@@ -43,6 +43,20 @@ function paletteForce(country: number): ForceId {
 }
 const LOG_LIMIT = 600;
 
+/** A small bar for suppression (0..1). */
+function suppressionBar(v: number): HTMLElement {
+  return h(
+    'span',
+    { class: 'meter', title: `${Math.round(v * 100)}%` },
+    h('span', { style: `width:${Math.round(v * 100)}%;background:${v >= 0.6 ? 'var(--bad)' : v >= 0.3 ? 'var(--warn)' : 'var(--accent)'}` }),
+  );
+}
+
+function moraleText(m: number | undefined, state: string | undefined): string {
+  if (m === undefined) return 'off';
+  return `${Math.round(m * 100)}% · ${state ?? 'steady'}`;
+}
+
 type PlanStepKind =
   | 'moveTo'
   | 'followRoute'
@@ -331,6 +345,7 @@ class App {
       if (action === 'export') this.exportScenario();
       if (action === 'save-server') this.saveOnServer();
       if (action === 'review-recording') void this.reviewRecordingDialog();
+      if (action === 'settings') void this.settingsDialog();
     });
     ($('#file-input') as HTMLInputElement).addEventListener('change', async (e) => {
       const input = e.target as HTMLInputElement;
@@ -416,6 +431,38 @@ class App {
     if (this.selectedId && !this.exists(this.selectedId)) this.select(null);
     this.updateInspector();
     this.renderTree();
+  }
+
+  /** Optional model parts (and, later, the environment) for the current scenario. */
+  private async settingsDialog(): Promise<void> {
+    const rules = await this.api.v1<Record<string, boolean>>('GET', '/simulation/rules');
+    const box = (key: string, label: string, hint: string) =>
+      h('label', { class: 'setting' }, h('input', { type: 'checkbox', checked: rules[key] !== false, 'data-rule': key }), h('span', {}, h('strong', { text: label }), h('small', { text: hint })));
+    let close = () => {};
+    const body = h(
+      'div',
+      { class: 'settings' },
+      h('h3', { text: 'Simulation settings' }),
+      h('h4', { text: 'Models' }),
+      box('suppression', 'Suppression', 'Incoming fire makes targets less accurate, slower to fire and spot; infantry get pinned down'),
+      box('morale', 'Morale', 'Units become shaken and break under losses and fire, then rally'),
+      h(
+        'div',
+        { class: 'row' },
+        h('button', {
+          class: 'primary',
+          text: 'Apply',
+          onclick: async () => {
+            const next: Record<string, boolean> = {};
+            for (const el of body.querySelectorAll<HTMLInputElement>('[data-rule]')) next[el.dataset.rule!] = el.checked;
+            const r = await this.cmd({ cmd: 'setRules', rules: next });
+            if (r.ok) close();
+          },
+        }),
+        h('button', { text: 'Cancel', onclick: () => close() }),
+      ),
+    );
+    close = this.modal(body);
   }
 
   private async reviewRecordingDialog(): Promise<void> {
@@ -1148,6 +1195,10 @@ class App {
         this.bind('speed'),
         'Damage',
         this.bind('damage'),
+        'Suppression',
+        this.bind('suppression'),
+        e.unitId ? null : 'Morale',
+        e.unitId ? null : this.bind('morale'),
         e.unitId ? 'Unit' : null,
         e.unitId ? h('a', { href: '#', text: this.unit(e.unitId)?.name ?? e.unitId, onclick: (ev: Event) => (ev.preventDefault(), this.select(e.unitId!)) }) : null,
       ),
@@ -1175,7 +1226,7 @@ class App {
     el.append(
       this.nameEditor(u.id, u.name, lead ? symbolCanvas(u.force, lead.domain, lead.symbol, 24, u.echelon) : null),
       h('div', { class: 'sub', text: `${u.echelon} · ${FORCE_NAMES[u.force]} · ${u.id}` }),
-      h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Strength', this.bind('strength'), 'Leader', this.bind('leader'), 'Formation', formation),
+      h('div', { class: 'kv' }, 'Grid', this.bind('grid'), 'Strength', this.bind('strength'), 'Morale', this.bind('morale'), 'Leader', this.bind('leader'), 'Formation', formation),
       h('div', { class: 'section' }, h('h4', { text: 'Current activity' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
       this.roeSection(u.id),
       this.reactionsSection(u.id, true),
@@ -1625,9 +1676,21 @@ class App {
       set('damage', e.damage === 'none' ? 'operational' : e.damage === 'destroyed' ? 'destroyed' : `${e.damage} kill`, `damage-${e.damage}`);
       set(
         'activity',
-        [e.embarkedIn ? `MOUNTED in ${this.entity(e.embarkedIn)?.name ?? e.embarkedIn}` : '', e.withdrawn ? 'WITHDRAWING' : '', e.halted ? 'HALTED (contact)' : '', e.plan, e.task].filter(Boolean).join(' — ') ||
+        [
+          e.embarkedIn ? `MOUNTED in ${this.entity(e.embarkedIn)?.name ?? e.embarkedIn}` : '',
+          e.moraleState === 'broken' || this.unit(e.unitId)?.moraleState === 'broken' ? 'BROKEN' : '',
+          e.pinned ? 'PINNED' : '',
+          e.withdrawn ? 'WITHDRAWING' : '',
+          e.halted ? 'HALTED (contact)' : '',
+          e.plan,
+          e.task,
+        ]
+          .filter(Boolean)
+          .join(' — ') ||
           (e.damage === 'destroyed' ? 'destroyed' : 'idle'),
       );
+      set('suppression', suppressionBar(e.suppression ?? 0));
+      if (!e.unitId) set('morale', moraleText(e.morale, e.moraleState));
       const cap = this.capacityOf(e.id);
       if (cap) set('passengers', `Passengers ${e.passengers?.length ?? 0}/${cap}`);
       syncReactions(e.reactions);
@@ -1668,7 +1731,21 @@ class App {
       set('strength', `${alive.length}/${members.length}`);
       set('leader', lead?.name ?? '—');
       const mounted = alive.filter((m) => m.embarkedIn).length;
-      set('activity', [mounted ? `MOUNTED ${mounted}/${alive.length}` : '', u.withdrawn ? 'WITHDRAWING' : '', lead?.halted ? 'HALTED (contact)' : '', u.plan, u.task].filter(Boolean).join(' — ') || 'idle (in formation)');
+      set(
+        'activity',
+        [
+          mounted ? `MOUNTED ${mounted}/${alive.length}` : '',
+          u.moraleState === 'broken' ? 'BROKEN' : '',
+          alive.some((m) => m.pinned) ? `PINNED ${alive.filter((m) => m.pinned).length}/${alive.length}` : '',
+          u.withdrawn ? 'WITHDRAWING' : '',
+          lead?.halted ? 'HALTED (contact)' : '',
+          u.plan,
+          u.task,
+        ]
+          .filter(Boolean)
+          .join(' — ') || 'idle (in formation)',
+      );
+      set('morale', moraleText(u.morale, u.moraleState));
       const seats = u.memberIds.reduce((n, m) => n + this.capacityOf(m), 0);
       if (seats) set('passengers', `Passengers ${this.passengerCount(u.id)}/${seats}`);
       syncReactions(u.reactions);

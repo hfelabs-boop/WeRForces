@@ -588,6 +588,14 @@ export class MapView {
           ctx.stroke();
         }
         const inSelUnit = (selUnit && e.unitId === selUnit.id) || (selEntityUnit && e.unitId === selEntityUnit && e.id !== this.selectedId);
+        if (e.suppression && e.suppression >= 0.15 && e.damage !== 'destroyed') {
+          // Red halo: how hard the entity is being suppressed.
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, symSize * 1.35, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255,70,50,${Math.min(0.9, e.suppression)})`;
+          ctx.lineWidth = e.pinned ? 3 : 2;
+          ctx.stroke();
+        }
         drawSymbol(ctx, p.x, p.y, symSize, e.force, e.domain, e.symbol, {
           selected: e.id === this.selectedId,
           destroyed: e.damage === 'destroyed',

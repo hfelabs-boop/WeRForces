@@ -1,6 +1,6 @@
 // Remote-control command dispatcher shared by the REST and WebSocket APIs.
 
-import type { Command, CommandResult, Condition, ForceId, Formation, Plan, PlanStatement, Reactions, Roe, TaskSpec, Vec2 } from '../shared/types.js';
+import type { Command, CommandResult, Condition, ForceId, Formation, Plan, PlanStatement, Reactions, Roe, SimulationRules, TaskSpec, Vec2 } from '../shared/types.js';
 import type { SimRunner } from './runner.js';
 
 const FORCES = new Set([0, 1, 2, 3]);
@@ -264,6 +264,12 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
       case 'setReactions':
         engine.setReactions(str(c.targetId, 'targetId'), validateReactions(c.reactions));
         return;
+      case 'setRules': {
+        const r = (c.rules ?? {}) as Record<string, unknown>;
+        if (typeof r !== 'object' || Object.values(r).some((v) => typeof v !== 'boolean')) throw new ValidationError('rules must be an object of booleans');
+        engine.setRules(r as SimulationRules);
+        return;
+      }
       case 'embark': {
         engine.embarkNow(str(c.passengerId, 'passengerId'), str(c.carrierId, 'carrierId'));
         return;

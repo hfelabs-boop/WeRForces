@@ -334,6 +334,9 @@ export interface EntityState {
   taskDone?: boolean;
   /** Simulation time this observer may call for fire again. */
   callForFireAt?: number;
+  suppression?: number;
+  morale?: number;
+  moraleState?: MoraleState;
 }
 
 export interface UnitRecord {
@@ -348,7 +351,7 @@ export interface UnitRecord {
   task?: TaskSpec;
   reactions?: Reactions;
   /** Runtime state, present in checkpoints. */
-  state?: { planIndex?: number; taskState?: TaskSpec; leaderId?: string; withdrawn?: boolean; taskDone?: boolean };
+  state?: { planIndex?: number; taskState?: TaskSpec; leaderId?: string; withdrawn?: boolean; taskDone?: boolean; morale?: number; moraleState?: MoraleState; lossesSeen?: number };
 }
 
 /** A munition in flight, saved in checkpoints. */
@@ -379,7 +382,19 @@ export interface ScenarioFile {
   /** Checkpoint only: munitions in flight and the random number generator state. */
   shots?: ShotRecord[];
   rngState?: number;
+  /** Which optional models are on (all default to on). */
+  rules?: SimulationRules;
 }
+
+/** Optional parts of the model, for comparison runs. Missing fields mean on. */
+export interface SimulationRules {
+  /** Incoming fire suppresses: less accurate, slower to fire and spot; infantry get pinned. */
+  suppression?: boolean;
+  /** Units lose cohesion with losses and suppression, and can break and fall back. */
+  morale?: boolean;
+}
+
+export type MoraleState = 'steady' | 'shaken' | 'broken';
 
 // ---------------------------------------------------------------- runtime snapshots
 
@@ -418,6 +433,13 @@ export interface EntitySnapshot {
   passengers?: string[];
   /** Fog of war: this is another force's entity known only as a sensor contact, last seen this many seconds ago. */
   contactAge?: number;
+  /** 0..1: how hard incoming fire is pressing it. */
+  suppression?: number;
+  /** Infantry pinned down by fire: not moving. */
+  pinned?: boolean;
+  /** Morale of an entity that is not in a unit. */
+  morale?: number;
+  moraleState?: MoraleState;
 }
 
 export interface UnitSnapshot {
@@ -434,6 +456,9 @@ export interface UnitSnapshot {
   plan?: string;
   reactions?: Reactions;
   withdrawn?: boolean;
+  /** 0..1 cohesion; see moraleState. */
+  morale?: number;
+  moraleState?: MoraleState;
 }
 
 export type SimEventKind =
@@ -528,6 +553,8 @@ export type Command =
   | { cmd: 'embark'; passengerId: string; carrierId: string }
   /** Let a carrier's passengers out now. */
   | { cmd: 'disembark'; carrierId: string }
+  /** Turn optional model parts (suppression, morale, …) on or off. */
+  | { cmd: 'setRules'; rules: SimulationRules }
   | { cmd: 'setFormation'; unitId: string; formation: Formation }
   | { cmd: 'rename'; id: string; name: string }
   | { cmd: 'createGraphic'; kind: GraphicKind; name?: string; points: Vec2[]; force?: ForceId }
