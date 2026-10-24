@@ -9,7 +9,7 @@ const PATH: Record<Section, string> = { entityTypes: 'entity-types', weapons: 'w
 const TITLE: Record<Section, string> = { entityTypes: 'Entity types', weapons: 'Weapons', sensors: 'Sensors', unitTemplates: 'Unit templates' };
 
 const DOMAINS = ['ground', 'lifeform', 'air', 'surface'];
-const ARMOR = ['lifeform', 'soft', 'light', 'armored', 'air', 'ship'];
+const ARMOR = ['lifeform', 'soft', 'light', 'armored', 'air', 'ship', 'drone'];
 const SYMBOLS = ['armor', 'mech', 'infantry', 'recon', 'wheeled', 'air-defense', 'artillery', 'engineer', 'supply', 'ew', 'rotary', 'fixed-wing', 'uav', 'ugv', 'legged', 'ship', 'boat', 'generic'];
 
 interface Field {
@@ -83,6 +83,15 @@ export class CatalogEditor {
           { key: 'jammer.range', label: 'Jammer reach (m)', kind: 'number' },
           { key: 'jammer.radio', label: 'Jams radios', kind: 'bool' },
           { key: 'jammer.radar', label: 'Jams radars', kind: 'bool' },
+          { key: 'jammer.spoof', label: 'Spoofs GNSS (with GNSS jamming)', kind: 'bool' },
+          { key: 'aps.name', label: 'Active protection: name', kind: 'text' },
+          { key: 'aps.charges', label: 'Active protection: charges', kind: 'number' },
+          { key: 'aps.pk', label: 'Active protection: chance to defeat (0-1)', kind: 'number' },
+          { key: 'aps.arc', label: 'Active protection: arc (°, about the front)', kind: 'number', hint: '360 all round' },
+          { key: 'aps.top', label: 'Active protection: also against top attack', kind: 'bool' },
+          { key: 'decoys.salvos', label: 'Flare/chaff salvos, aircraft', kind: 'number' },
+          { key: 'decoys.pkFactor', label: 'Flares/chaff: missile kill chance × (0-1)', kind: 'number' },
+          { key: 'insDrift', label: 'Inertial drift without GNSS (m/s)', kind: 'number', hint: 'GNSS navigators; default 1' },
           { key: 'cruiseAltitude', label: 'Cruise altitude (m), aircraft', kind: 'number' },
           { key: 'minSpeed', label: 'Stall speed (km/h), aircraft', kind: 'kmh' },
           { key: 'sidc', label: 'MIL-STD-2525C code (optional)', kind: 'text' },
@@ -106,6 +115,8 @@ export class CatalogEditor {
           { key: 'topAttack', label: 'Top attack', kind: 'bool' },
           { key: 'spreadMrad', label: 'Spread (mrad), unguided', kind: 'number', hint: 'Turns on gravity drop and spread with range' },
           { key: 'rangeError', label: 'Range estimate error (0-1)', kind: 'number', hint: '0.01 laser rangefinder, 0.1 by eye' },
+          { key: 'gnss', label: 'GNSS-guided', kind: 'bool', hint: 'Misses by more under GNSS jamming' },
+          { key: 'antiRadiation', label: 'Anti-radiation (homes on radars and jammers)', kind: 'bool' },
           { key: 'smoke.radius', label: 'Smoke cloud radius (m)', kind: 'number' },
           { key: 'smoke.duration', label: 'Smoke duration (s)', kind: 'number' },
         ];
@@ -120,6 +131,7 @@ export class CatalogEditor {
           { key: 'refRcs', label: 'Radar: reference RCS (m²)', kind: 'number' },
           { key: 'thermal', label: 'Thermal', kind: 'bool' },
           { key: 'nightVision', label: 'Night vision', kind: 'bool' },
+          { key: 'df.bearingError', label: 'Direction finder: bearing error (rad)', kind: 'number', hint: 'Takes bearings to enemy emitters instead of seeing; 0.035 is 2°' },
         ];
       case 'unitTemplates':
         return [

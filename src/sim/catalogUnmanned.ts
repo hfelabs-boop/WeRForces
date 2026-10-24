@@ -44,10 +44,10 @@ const sensors: SensorDef[] = [
   { id: 'ugv-sight', name: 'UGV remote weapon sight (EO/IR)', maxRange: 3500, fov: 120 * DEG, detects: ['ground', 'lifeform', 'surface', 'air'], thermal: true },
 ];
 
-/** Common figures of small electric rotary drones. */
-const quad = { domain: 'air', symbol: 'uav', armor: 'air', minSpeed: 0, offroadFactor: 1, sensorHeight: 0, crew: 0, gnss: true } as const;
+/** Common figures of small electric rotary drones (armour class `drone`: what counter-drone weapons are rated against). */
+const quad = { domain: 'air', symbol: 'uav', armor: 'drone', minSpeed: 0, offroadFactor: 1, sensorHeight: 0, crew: 0, gnss: true } as const;
 /** Common figures of drone operator teams. */
-const operator = { domain: 'lifeform', symbol: 'recon', sidc: 'S-G-UCVU--', armor: 'lifeform', maxSpeed: 4, cruiseSpeed: 1.5, acceleration: 2, turnRate: 180 * DEG, offroadFactor: 0.85, sensorHeight: 1.7, crew: 2, controlStation: true } as const;
+const operator = { domain: 'lifeform', symbol: 'recon', sidc: 'S-G-UCVU--', armor: 'lifeform', maxSpeed: 4, cruiseSpeed: 1.5, acceleration: 2, turnRate: 180 * DEG, offroadFactor: 0.85, sensorHeight: 1.7, crew: 2, groundControl: { range: 50000 } } as const;
 
 const entityTypes: EntityTypeDef[] = [
   // ---------------------------------------------------------------- operators
@@ -185,7 +185,7 @@ const entityTypes: EntityTypeDef[] = [
     domain: 'air',
     symbol: 'uav',
     sidc: 'S-A-MFQA--',
-    armor: 'air',
+    armor: 'drone',
     rcs: 0.01,
     size: 0.6,
     dis: dis(1, 2, 225, 50, 20, 1),
@@ -212,7 +212,7 @@ const entityTypes: EntityTypeDef[] = [
     domain: 'air',
     symbol: 'uav',
     sidc: 'S-A-MFQA--',
-    armor: 'air',
+    armor: 'drone',
     rcs: 0.05,
     size: 1.3,
     dis: dis(1, 2, 225, 50, 21, 1),
@@ -239,7 +239,7 @@ const entityTypes: EntityTypeDef[] = [
     domain: 'air',
     symbol: 'uav',
     sidc: 'S-A-MFQA--',
-    armor: 'air',
+    armor: 'drone',
     rcs: 0.05,
     size: 1.6,
     dis: dis(1, 2, 222, 50, 21, 1),
@@ -268,7 +268,7 @@ const entityTypes: EntityTypeDef[] = [
     domain: 'air',
     symbol: 'uav',
     sidc: 'S-A-MFQR--',
-    armor: 'air',
+    armor: 'drone',
     rcs: 0.05,
     size: 1.4,
     dis: dis(1, 2, 225, 50, 3, 1),
@@ -296,7 +296,7 @@ const entityTypes: EntityTypeDef[] = [
     domain: 'air',
     symbol: 'uav',
     sidc: 'S-A-MFQR--',
-    armor: 'air',
+    armor: 'drone',
     rcs: 0.3,
     size: 3.1,
     dis: dis(1, 2, 222, 50, 3, 1),

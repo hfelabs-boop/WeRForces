@@ -32,7 +32,7 @@ function unitReady(u: Unit): boolean {
 }
 
 /** True when a mission is already firing at, or rounds are falling on, this point. */
-function covered(engine: Engine, p: Vec2): boolean {
+export function covered(engine: Engine, p: Vec2): boolean {
   for (const s of engine.shotsInFlight) if (s.weapon.indirect && dist2d(s.to, p) < MISSION_COVERAGE) return true;
   for (const e of engine.entities.values()) {
     if (e.task instanceof FireMissionTask && e.task.status === 'running' && dist2d(e.task.mission.target, p) < MISSION_COVERAGE) return true;
@@ -40,7 +40,7 @@ function covered(engine: Engine, p: Vec2): boolean {
   return false;
 }
 
-function dangerClose(engine: Engine, force: number, p: Vec2): boolean {
+export function dangerClose(engine: Engine, force: number, p: Vec2): boolean {
   for (const e of engine.entities.values()) {
     if (e.force === force && e.alive && !e.embarkedIn && e.domain !== 'air' && dist2d(e, p) < DANGER_CLOSE) return true;
   }

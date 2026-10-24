@@ -65,7 +65,23 @@ export function catalogMarkdown(): string {
     const wh = u.warhead ? `${weapon(u.warhead).name} (${u.terminalRange ?? DEFAULT_TERMINAL_RANGE} m)` : '—';
     lines.push(`| \`${t.id}\` | ${u.link} | ${range} | ${u.antiJam ? `${Math.round(u.antiJam * 100)} %` : '—'} | ${u.relay ? 'yes' : 'no'} | ${u.lostLink ?? 'hover'} | ${u.autonomy ?? 'remote'} | ${esc(wh)} | ${t.size !== undefined ? `${t.size} m` : '—'} |`);
   }
-  lines.push('', `Drone operators and ground control stations (datalinks end at them): ${c.entityTypes.filter((t) => t.controlStation).map((t) => `\`${t.id}\``).join(', ')}. Legged (they move as troops on foot do): ${c.entityTypes.filter((t) => t.mobility === 'legged').map((t) => `\`${t.id}\``).join(', ')}.`, '');
+  lines.push('', `Drone operators and ground control stations (datalinks end at them): ${c.entityTypes.filter((t) => t.groundControl).map((t) => `\`${t.id}\``).join(', ')}. Legged (they move as troops on foot do): ${c.entityTypes.filter((t) => t.mobility === 'legged').map((t) => `\`${t.id}\``).join(', ')}.`, '');
+  lines.push(
+    '## Electronic warfare and protection',
+    '',
+    'Jammers, ground control stations, active protection, flares and chaff, and satellite navigation (see [Concepts](../concepts.md#electronic-warfare)).',
+    '',
+    '| Id | Name | Jams (reach) | Protection | Navigation and control |',
+    '| --- | --- | --- | --- | --- |',
+  );
+  for (const t of c.entityTypes) {
+    const j = t.jammer;
+    const jams = j ? `${[j.radio && 'radios', j.radar && 'radars', j.datalink && 'datalinks', j.gnss && (j.spoof ? 'GNSS (spoofing)' : 'GNSS')].filter(Boolean).join(', ')} (${j.range / 1000} km)` : '';
+    const prot = [t.aps && `${t.aps.name ?? 'APS'}: ${t.aps.charges} charges, ${t.aps.pk}${t.aps.arc && t.aps.arc < 360 ? `, ${t.aps.arc}° arc` : ''}${t.aps.top ? ', top' : ''}`, t.decoys && `flares/chaff: ${t.decoys.salvos} salvos, pk × ${t.decoys.pkFactor}`].filter(Boolean).join('<br>');
+    const nav = [t.unmanned && `unmanned (${t.unmanned.link})`, t.gnss && 'GNSS', t.groundControl && `ground control station (${t.groundControl.range / 1000} km)`].filter(Boolean).join(', ');
+    if (jams || prot || nav) lines.push(`| \`${t.id}\` | ${esc(t.name)} | ${jams || '—'} | ${prot || '—'} | ${nav || '—'} |`);
+  }
+  lines.push('');
 
   lines.push(
     '## Weapons',
@@ -78,7 +94,8 @@ export function catalogMarkdown(): string {
     const pk = Object.entries(w.pk)
       .map(([k, v]) => `${k} ${v}`)
       .join(', ');
-    const guided = w.guided ? `yes${w.topAttack ? ' (top attack)' : ''}` : w.topAttack ? 'no (top attack)' : 'no';
+    const notes = [w.topAttack && 'top attack', w.gnss && 'GNSS', w.antiRadiation && 'anti-radiation'].filter(Boolean).join(', ');
+    const guided = `${w.guided ? 'yes' : 'no'}${notes ? ` (${notes})` : ''}`;
     const pen = w.penetration ? `${w.penetration} mm` : '—';
     const spread = w.spreadMrad !== undefined ? `${w.spreadMrad} mrad / ${Math.round((w.rangeError ?? DEFAULT_RANGE_ERROR) * 100)} %` : '—';
     lines.push(`| \`${w.id}\` | ${esc(w.name)} | ${w.minRange}–${w.maxRange} m | ${w.projectileSpeed} m/s | ${w.reloadTime} s | ${w.ammo} | ${guided} | ${w.targets.join(', ')} | ${pk} | ${pen} | ${spread} |`);
@@ -89,7 +106,8 @@ export function catalogMarkdown(): string {
   lines.push('| Id | Name | Range | Field of view | Detects | Radar |', '| --- | --- | --- | --- | --- | --- |');
   for (const s of c.sensors) {
     const ref = s.refRange ? ` (${s.refRange} m against ${s.refRcs ?? DEFAULT_REFERENCE_RCS} m²)` : '';
-    lines.push(`| \`${s.id}\` | ${esc(s.name)} | ${s.maxRange} m${ref} | ${deg(s.fov)}° | ${s.detects.join(', ')} | ${s.radar ? 'yes' : 'no'} |`);
+    const detects = s.df ? `emitters: ${(s.df.bands ?? ['radar', 'jammer', 'radio', 'datalink']).join(', ')} (bearing ±${Math.round(((s.df.bearingError ?? (2 * Math.PI) / 180) * 1800) / Math.PI) / 10}°)` : s.detects.join(', ');
+    lines.push(`| \`${s.id}\` | ${esc(s.name)} | ${s.maxRange} m${ref} | ${deg(s.fov)}° | ${detects} | ${s.radar ? 'yes' : 'no'} |`);
   }
   lines.push('');
 

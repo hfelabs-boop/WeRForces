@@ -1,6 +1,7 @@
 // WebSocket client for the WeRForces remote-control API.
 
 import type { Catalog, Command, CommandResult, Role, ServerMessage, SimEvent, SimState, TerrainData } from '../src/shared/types.js';
+import { decodeTile, type TerrainTile } from '../src/shared/terrainTiles.js';
 
 
 /** Path prefix of the session this page belongs to ("/s/{id}"), or "" for the main session. */
@@ -148,6 +149,13 @@ export class Api {
   async terrain(): Promise<TerrainData> {
     const r = await fetch(BASE + '/api/terrain', { headers: this.headers() });
     return r.json();
+  }
+
+  /** One tile of a tiled terrain (the server sends it gzipped; fetch unpacks it). */
+  async tile(z: number, x: number, y: number, version: number): Promise<TerrainTile> {
+    const r = await fetch(`${BASE}/api/v1/terrain/tiles/${z}/${x}/${y}?v=${version}`, { headers: this.headers() });
+    if (!r.ok) throw new Error(`tile ${z}/${x}/${y}: HTTP ${r.status}`);
+    return decodeTile(new Uint8Array(await r.arrayBuffer()));
   }
 
   async plannedPath(id: string): Promise<{ x: number; y: number }[]> {

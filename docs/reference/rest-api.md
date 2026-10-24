@@ -44,7 +44,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | POST | `/simulation/run` · `/pause` · `/rewind` | | Status |
 | POST | `/simulation/step` | `{"seconds": 300}` (≤ 3600) | Status after stepping immediately |
 | PUT | `/simulation/time-scale` | `{"scale": 8}` | Status |
-| GET / PUT | `/simulation/rules` | `{"suppression": true, "morale": true, "fuel": true, "orderDelay": false}` (any subset) | The rules ([optional models](../concepts.md#optional-models)) |
+| GET / PUT | `/simulation/rules` | `{"suppression": true, "morale": true, "fuel": true, "orderDelay": false, "curvature": true}` (any subset) | The rules ([optional models](../concepts.md#optional-models)) |
 | GET / PUT | `/simulation/pattern-of-life` | `{"vehicles": 20, "pedestrians": 40}` (0–300 each; either) | The numbers of background civilians kept on the map ([pattern of life](../concepts.md#pattern-of-life)) |
 | GET / PUT | `/simulation/aggregation` | `{"autoDisaggregate": true, "disaggregateRange": 3000, "autoReaggregate": true, "reaggregateRange": 5000, "reaggregateDelay": 120}` (any subset) | The [aggregation policy](../concepts.md#aggregate-level): when aggregates split up near enemy entities, and when units that split by themselves join up again |
 | GET / PUT | `/simulation/environment` | `{"date": "2026-06-21", "time": 4.5, "visibility": 800, "precipitation": "rain", "windSpeed": 6, "windFrom": 270}` (any subset) | The environment plus `localDate`, `localTime`, `sunAltitude`, `light`, `period` |
@@ -69,7 +69,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | --- | --- | --- |
 | GET | `/entities` | `?force=1\|blue&domain=air&unit=U1&alive=true&remote=false` |
 | POST | `/entities` | `{"typeId", "force", "position", "heading"?, "name"?, "altitude"?}` |
-| GET / PATCH / DELETE | `/entities/{id}` | PATCH: `{"name"?, "roe"?, "reactions"?, "position"?, "heading"?, "jamming"?}` (`jamming`: switch a jammer on or off) |
+| GET / PATCH / DELETE | `/entities/{id}` | PATCH: `{"name"?, "roe"?, "reactions"?, "position"?, "heading"?, "jamming"?, "emcon"?}` (`jamming`: switch a jammer on or off; `emcon`: [emission control](#emission-control-and-direction-finding)) |
 | POST | `/entities/{id}/task` | a [task](#tasks) |
 | POST | `/entities/{id}/plan` | a [plan](#plans) |
 | POST | `/entities/{id}/stop` | |
@@ -80,7 +80,7 @@ introduction see [Tutorial 4](../tutorials/04-scripting-with-the-rest-api.md).
 | POST | `/entities/{id}/drive` | direct control: `{"throttle"?: 0..1, "turn"?: -1..1, "targetId"?: "E12" or null}`. The first call replaces its task and plan with a `manual` task; a turn is let go after 1.5 s without another call; any other order ends it. Returns the entity |
 | GET | `/units` | `?force=` |
 | POST | `/units` | `{"templateId", "force", "position", "heading"?, "name"?}` or `{"entityIds": [...], "name"?, "formation"?}` |
-| GET / PATCH / DELETE | `/units/{id}` | PATCH: `{"name"?, "formation"?, "roe"?, "reactions"?, "superiorId"?}` (`superiorId`: put under another unit, `null` for none). DELETE removes the members too; its subordinates become independent |
+| GET / PATCH / DELETE | `/units/{id}` | PATCH: `{"name"?, "formation"?, "roe"?, "reactions"?, "superiorId"?, "emcon"?}` (`superiorId`: put under another unit, `null` for none; `emcon`: for its members and subordinate units). DELETE removes the members too; its subordinates become independent |
 | POST | `/units/{id}/task` · `/plan` · `/stop` · `/embark` · `/disembark` | as for entities. A unit embarking into a carrier unit shares out the seats |
 | POST | `/units/{id}/aggregate` · `/units/{id}/disaggregate` | Simulate the unit and the units under it as aggregates ([aggregate level](../concepts.md#aggregate-level)), or split them back into their entities. 400 with the reason when it cannot be done (aircraft, mounted or immobilised members, a task an aggregate cannot do, already aggregated). Returns the unit |
 | GET / POST | `/graphics` | POST `{"kind": "route\|area\|phaseLine\|point\|minefield\|obstacle", "points": [...], "name"?, "force"?, "density"?}` (`density`: minefields, strikes per 100 m) |
@@ -90,8 +90,14 @@ Entity and unit responses carry `travel` while moving along a planned path:
 `{"remaining": 1378, "eta": 252.4, "etaLocal": "10:04"}` (metres left, the
 simulation time and local time of arrival), or `{"remaining": ..., "stalled":
 "out of fuel"}` ([travel estimates](../concepts.md#travel-estimates)). Jammers
-carry `jamming` (on or off), and entities whose radio or radar is jammed
-`jammed: ["radio"]`. Background civilians carry `ambient: true`.
+carry `jamming` (on or off), and entities that enemy jamming denies something
+`jammed` (`radio`, `radar`, `datalink`, `gnss`). Entities also carry, when
+they apply: `emcon` (`{"radioSilence": true, "radarOff": true}`), `emitting`
+(what it radiates now: `radar`, `jammer`, `radio`, `datalink`), `aps`
+(`{"left": 6, "charges": 8}`, active protection), `decoys` (`{"left": 10,
+"salvos": 12}`, flare and chaff salvos), and while satellite navigation is
+lost `gnss` (`denied`, or `spoofed` for exercise control only) with `navError`
+(m). Background civilians carry `ambient: true`.
 
 An aggregated unit carries `aggregate`: `alive` and `total` members,
 `strength` per entity type (`alive`, `effective`: less losses still being
@@ -102,6 +108,26 @@ not in `/entities` and not in the unit's `members`; wrecks are. For players,
 enemy aggregates their force has seen are listed by `/units` as contacts
 (`enemy platoon (U6)`, with `contactAge`), with the types and numbers seen and
 nothing else.
+
+### Emission control and direction finding
+
+| Method | Path | Body / query |
+| --- | --- | --- |
+| PATCH | `/entities/{id}` · `/units/{id}` | `{"emcon": {"radioSilence"?: true, "radarOff"?: true, "jamming"?: false}}`: settings left out stay as they are; on a unit they apply to its members and subordinate units. Players: their own force |
+| GET | `/df-contacts` | Enemy emitters located by direction finding: the caller's force's (exercise control: every force's, or `?force=`) |
+
+```json
+{"id":"E4","force":1,"bands":["radar"],"x":9032.5,"y":12418.2,"lat":50.86,"lon":10.03,
+ "major":412.6,"minor":131.9,"orientation":0.48,"orientationDeg":28,"stations":2,"lastSeen":42,"age":0.4}
+```
+
+`id` is the emitter, `force` the force that located it. `major` and `minor` are
+the semi-axes (m) of the uncertainty ellipse (about 86 % likely to hold the
+emitter), `orientation` the bearing of its major axis. One station gives a long
+ellipse along its bearing (`stations: 1`); two or more cross their bearings.
+Fire on one with a fire mission at `x`, `y` (radius about `major / 2`). See
+[Concepts](../concepts.md#direction-finding). The full state (`/simulation`
+over WebSocket) carries them as `dfContacts`.
 
 ### Tasks
 
@@ -229,6 +255,35 @@ task is turned into one when the matrix is stored, and a 400 names the unit and
 phase it could not understand. Up to 20 phases of 100 orders. See
 [Concepts](../concepts.md#synchronization-matrix).
 
+### Commanders
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/commanders` | Forces run by a commander (players: their own), with status and latest decisions |
+| GET | `/forces/{force}/commander` | One force's commander (`kind: "none"` when it has none), and `llm: {available, reason?}`: whether a language model is configured |
+| PUT | `/forces/{force}/commander` | `{"kind": "rules", "options": {"aggressiveness": 0.7}}` sets it; `{"kind": "none"}` takes the force back. Players: their own force, not `llm`. Returns the commander |
+| POST | `/forces/{force}/commander/decide` | 202: a decision at the next simulated second |
+
+```json
+{"force":2,"name":"Red","kind":"rules","options":{"aggressiveness":0.7},"state":"ready","next":946,
+ "decisions":[{"time":901,"trigger":"contact","summary":"Attack (2 contacts, enemy power 2.4 against our 6.1); concentrating on BMP-2 (E10).",
+   "orders":["RU Mech Platoon: attack BMP-2 (E10)","RU Mortar Battery: fire 4 rounds on 2 contacts at (6667, 6640)"]}],
+ "llm":{"available":false,"reason":"no language model is configured on this server (set WERFORCES_AI_API_KEY and WERFORCES_AI_MODEL)"}}
+```
+
+`kind`: `none`, `rules` or `llm`. `options`: `interval` (10–600 s, default 45),
+`aggressiveness` (0–1, default 0.5), `holdOff` (0–3600 s, default 300),
+`seed`, and for an LLM `intent` (up to 500 characters), `maxCallsPerMinute`
+(default 4), `maxTokens` (per call, default 2048), `maxToolCalls` (per
+decision, default 12) and `tokenBudget` (default 500000). `state` is `ready`,
+`thinking` (a model call under way), `error` (with `error`) or `unavailable`.
+A decision's `trigger` is `start`, `scheduled`, `contact`, `losses`, `phase`,
+`idle` or `asked`; `rejected` lists refused orders with the reason. LLM
+commanders add `usage: {calls, inputTokens, outputTokens}`. The same command
+over `/api/command` or a `batch`: `{"cmd": "setCommander", "force": 2, "kind":
+"rules", "options": {}}`. Scenario files keep commanders in `commanders`. See
+[Concepts](../concepts.md#commanders).
+
 ### Alerts
 
 | Method | Path | Notes |
@@ -242,7 +297,8 @@ phase it could not understand. Up to 20 phases of 100 orders. See
 ```
 
 `kind` is `taskFailed`, `idle`, `broken`, `outOfFuel`, `lowFuel`, `outOfAmmo`,
-`leaderLost`, `losses`, `underFire`, `contact` or `jammed`; `severity` is
+`leaderLost`, `losses`, `underFire`, `contact`, `jammed`, `gnssDenied` or
+`apsSpent`; `severity` is
 `critical`, `warning` or `info`; `count` is how many times it was raised while
 open. See [Concepts](../concepts.md#explanations-and-alerts).
 
@@ -273,7 +329,7 @@ side knows.
  "blue": {"nation": "us", "composition": "combined", "size": "platoon", "support": ["artillery"]},
  "red": {"nation": "ru", "composition": "mech", "size": "platoon", "support": ["engineers"]},
  "time": 10, "weather": "clear", "distance": 3000, "civilians": false,
- "terrain": {"seed": 7, "size": 16000}, "name": "Attack at dawn"}
+ "terrain": {"seed": 7, "size": 16000}, "name": "Attack at dawn", "commander": {"red": "rules"}}
 ```
 
 `mission`: `meeting`, `attack` (default), `defend`, `delay` or `recon`, from
@@ -282,8 +338,9 @@ Blue's side. `composition`: `armor`, `mech` (default), `infantry` or `combined`.
 `recon`, `engineers`, `supply`, `air`, `airDefense`. `weather`: `clear`,
 `haze`, `fog` or `rain`. `distance` 1000–20000 m (default 3000, or 5000 with a
 company). `terrain` as for `/scenario/new` (default: the current terrain).
-Without `seed` a random one is used and returned. A 400 says why a battle could
-not be placed.
+`commander`: `{"blue"?: "none" | "rules", "red"?: ...}`, a side run by the
+rule-based commander instead of a phase plan. Without `seed` a random one is
+used and returned. A 400 says why a battle could not be placed.
 
 ### Recording and after-action review
 
@@ -331,7 +388,9 @@ under `/s/{id}/api/v1`; the unprefixed paths are the `main` session.
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/events` | `?since=<seq>&kinds=destroyed,damaged&limit=200`. Keep the highest `seq` you have seen and pass it as `since` to poll |
-| GET | `/terrain` | spec, towns, road polylines |
+| GET | `/terrain` | spec, towns, road polylines (for a tiled terrain, its main roads), and `tiles` (as below) when the terrain is tiled |
+| GET | `/terrain/tiles` | How the terrain is tiled: `tiled` (a tiled dataset, or tiles cut from a small terrain), `tileSize` (cells per tile side; tiles have one more post per side and share their edge posts), `cols` (posts per side of the whole grid), `cellSize`, `maxZoom`, `levels` (per level `z`: tiles `across`, `cellSize` between posts, `span` of a tile in metres), `layers`, `elevation` range, `url` template, and for tiled datasets the server's tile `cache` (tiles, bytes, capacity, loads, evictions) |
+| GET | `/terrain/tiles/{z}/{x}/{y}` | One tile: level `z` (0 is one tile over the whole terrain; `maxZoom` holds every post; each level between keeps every second post of the one below), column `x` from the west and row `y` from the south. Binary (`application/vnd.werforces.tile`), sent gzipped (`Content-Encoding: gzip`). Layout in [Terrain import](../terrain-import.md#tile-format). 404 outside the pyramid |
 | GET | `/terrain/point` | `?x=&y=` / `?lat=&lon=` / `?town=` → elevation, water, forest, road, slope, nearest town |
 | POST | `/terrain/line-of-sight` | `{"from": "E1" or position, "to": ..., "radar"?: true}`. Positions take an optional `height` above ground (default 2 m). Terrain, forest, buildings and smoke block it (`radar` sees through smoke) |
 | POST | `/terrain/viewshed` | `{"from": "E2" or position, "radius"?: 3000, "targetHeight"?: 2, "radar"?: false}` → a grid of cells around the eye (`x0`, `y0`, `cell`, `cols`, `rows`, `cellsB64`: one byte per cell, row by row from the south-west, 0 out of range or water, 1 hidden, 2 seen), `eye`, `radius` and `visibleFraction`. From an entity the radius defaults to its best sensor's range now (1–10 km); from a point (2 m above the ground, or `height`), 3 km. 100–20000 m. At most 161 cells across |
@@ -362,7 +421,8 @@ See [Integrations](integrations.md) for the payload formats.
 The browser app uses a few unversioned endpoints, which you can also use:
 
 - `GET /api/state` returns the full snapshot;
-- `GET /api/terrain` returns the terrain grid (base64);
+- `GET /api/terrain` returns the terrain grid (base64); for a tiled terrain, only
+  its description and `tiles` (the GUI then fetches tiles for what is in view);
 - `GET /api/path/{id}`;
 - `POST /api/command` takes a command object (see `Command` in
   `src/shared/types.ts`). `{"cmd": "batch", "commands": [...]}` runs several
@@ -396,7 +456,7 @@ The browser app uses a few unversioned endpoints, which you can also use:
   civilians) answers **403**. The routes a player may use are the object,
   task, plan, drive, explain, graphics, events, terrain (with viewshed) and
   catalog reading routes, plus orders, alerts, codewords and their own force's
-  synchronization matrix.
+  synchronization matrix and (rule-based) commander.
 - **OpenID Connect.** With `--oidc-issuer`, browsers sign in with your identity
   provider and get an HttpOnly, SameSite=Lax session cookie, accepted on `/api`,
   `/ws` and `/mcp` with the role their claims map to (see

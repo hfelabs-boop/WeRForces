@@ -14,7 +14,7 @@ export const SUPPRESSION_HALF_LIFE = 6;
 /** Infantry at or above this suppression are pinned down. */
 export const PINNED_AT = 0.6;
 /** How much of a suppressive effect gets through, by armour. */
-const EXPOSURE: Record<ArmorClass, number> = { lifeform: 1, soft: 0.7, light: 0.45, armored: 0.2, air: 0.4, ship: 0.2 };
+const EXPOSURE: Record<ArmorClass, number> = { lifeform: 1, soft: 0.7, light: 0.45, armored: 0.2, air: 0.4, ship: 0.2, drone: 0.4 };
 /** Distance a broken unit falls back from the enemy. */
 const FALL_BACK = 1500;
 

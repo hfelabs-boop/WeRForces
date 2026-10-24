@@ -88,12 +88,35 @@ the more so the closer it is, so the route goes behind ridges, woods and
 buildings or round the enemy's reach. It replans every 15 s as contacts change.
 Broken units, withdrawing units and screens falling back take covered routes.
 
-**Line of sight.** Line of sight is sampled every 25 m along the line from the
-observer's eyes to the target. Terrain blocks it outright. Forest canopy (15 m)
-blocks it only once the line has passed through **more than 150 m of
-forest**, so vehicles at a wood's edge, or close together inside a wood, can
-still see each other. Smoke clouds block it too (except for radar), and so do
-buildings (above).
+**Line of sight.** Line of sight is sampled every half grid cell (25 m on a
+50 m grid) along the line from the observer's eyes to the target. Terrain blocks
+it outright. Forest canopy (15 m) blocks it only once the line has passed through
+**more than 150 m of forest**, so vehicles at a wood's edge, or close together
+inside a wood, can still see each other. Smoke clouds block it too (except for
+radar), and so do buildings (above).
+
+**Earth curvature.** Over long distances the earth curves away below a sight
+line. A point at distance *d* lies *d*² / (2*kR*) below the observer's horizontal,
+with *R* = 6371 km and *k* = 4/3 for standard atmospheric refraction, which bends
+light and radar a little round the earth; a sight line of length *d* therefore
+clears the ground by up to *d*² / (8*kR*) less in its middle than on a flat earth.
+That is 6 cm at 2 km, 1.5 m at 10 km and 13 m at 30 km, so the effect is
+applied to lines longer than 2 km (shorter ones are unchanged). It sets the
+horizon: an eye 2 m up sees ground out to about 5.8 km, and another 2 m eye out
+to about 11.7 km over flat ground; a 100 m mast sees a 2 m eye 47 km away; an
+aircraft 100 m up is below a 10 m radar's horizon beyond about 54 km. The same
+correction applies to radar line of sight, the viewshed and the covered-route
+threat map. It is a [rule](#optional-models) (`curvature`), on by default.
+
+**Large terrain.** Terrain bigger than one grid can hold (for example 200 km ×
+200 km at 30 m, 44 million posts) comes as a **tiled dataset**: tiles of 256 ×
+256 cells read on demand into a memory-bounded cache (see
+[Terrain import](terrain-import.md#large-areas-tiled-datasets)). Everything above
+works the same on it, with identical results for the same posts. Long sight
+lines skip tiles they pass high above without reading them. Long routes are
+planned on a coarser level of the tiles first, then refined leg by leg on the
+full grid in windows along that route, so a 250 km route takes a few seconds
+rather than a search over the whole grid.
 
 ## Forces and hostility
 
@@ -534,10 +557,11 @@ gun (1650 m/s, laser rangefinder) over 0.9 at 2 km.
 
 ### Models
 
-The hit/kill (armour by aspect), ballistic and radar models are named functions
-in `src/sim/models.ts`, each behind one small interface (`HitKillModel`,
-`BallisticModel`, `RadarModel`). An engine uses `engine.models`, which starts
-with the defaults (`aspect-armour`, `drop-and-spread`, `radar-equation`); a
+The hit/kill (armour by aspect), ballistic, radar and navigation models are
+named functions in `src/sim/models.ts`, each behind one small interface
+(`HitKillModel`, `BallisticModel`, `RadarModel`, `NavigationModel`). An engine
+uses `engine.models`, which starts with the defaults (`aspect-armour`,
+`drop-and-spread`, `radar-equation`, `inertial-drift`); a
 study can put its own in, e.g.
 `engine.models = { ...engine.models, ballistic: myModel }`.
 
@@ -571,6 +595,7 @@ on and off per scenario, for comparison runs:
 | `morale` | on | Shaken and broken units (above) |
 | `fuel` | on | Fuel use and running out (below) |
 | `orderDelay` | off | Orders take time to pass down the [chain of command](#chain-of-command) |
+| `curvature` | on | [Earth curvature and refraction](#terrain) in line of sight and radar horizon, beyond 2 km |
 
 ## Night and weather
 
@@ -642,6 +667,12 @@ until *fuel below* or *ammunition below* a level.
 | R-330Zh Zhitel (`ru-r330zh`) | radios | 15 km |
 | 1L269 Krasukha-2 (`ru-krasukha`) | radars | 25 km |
 | M1133 Stryker EW, MFEW (`us-mfew`) | radios | 10 km |
+| Pole-21 (`ru-pole21`) | satellite navigation (GNSS) | 25 km |
+| Shipovnik-Aero (`ru-shipovnik`) | drone datalinks; GNSS, spoofing | 10 km |
+| Silok (`ru-silok`) | drone datalinks, GNSS | 4 km |
+| L-MADIS (`us-lmadis`) | drone datalinks, GNSS | 3 km |
+| Stupor anti-drone rifle team (`ru-stupor-team`) | drone datalinks, GNSS | 1.5 km |
+| DroneBuster team (`us-dronebuster-team`) | drone datalinks, GNSS | 1 km |
 
 A jammer starts switched on. It jams while it is alive, switched on, not
 firepower-killed and not mounted, and only entities of forces hostile to it,
@@ -670,6 +701,151 @@ the jammer as a share of the jammer's reach, and never less than 30 %, of the
 range it would have against that target (see [Radar range](#radar-range)).
 Closing on the jammer burns through. The inspector shows *RADAR JAMMED*.
 
+**Datalink jamming** cuts a radio-linked unmanned system's control link
+(`unmanned.link: "rf"`; fibre-optic and autonomous ones cannot be jammed, and
+`antiJam` makes the jammer come closer). What a drone does without its link is
+set out in [Unmanned systems](#unmanned-systems-and-swarms). The inspector shows *DATALINK JAMMED*.
+
+### Satellite navigation (GNSS)
+
+Entity types with `gnss: true`, and unmanned systems, navigate by satellite. A
+GNSS jammer hostile to them denies it within its reach, and they fall back on
+**inertial navigation**: where they think they are drifts away from where they
+are. The default navigation model (`inertial-drift`) puts the error after *t*
+seconds without satellites at
+
+> error = drift × *t* × (1 + *t* / 300 s), at most 5 km
+
+with `drift` the type's `insDrift` (default 1 m/s, a small drone's MEMS unit):
+70 m after a minute, 170 m after two, 1 km after eight. The error points in a
+direction drawn when the fix is lost. Tasks steer by the believed position, so
+a move ends that far off its destination and a route, orbit or search is flown
+that far off track. Tasks that keep station by sight (formation, follow,
+attack, mount, resupply) are not thrown off. When the jamming stops (the
+jammer is switched off, destroyed or left behind) the fix comes back at once.
+The event log notes *Scout drone: GNSS jammed, navigating by inertial* and
+*GNSS back*, the [alerts](#explanations-and-alerts) list *GNSS denied*, the
+inspector shows *GNSS DENIED (~120 m)*, and Why? says *GNSS denied: navigating
+by inertial for 90 s, error ~120 m*.
+
+A jammer with `spoof: true` **spoofs** instead: the receiver keeps a fix, but a
+false one that walks away from the spoofer at 5 m/s, up to 3 km. The navigator
+does not know: it raises no alert, and its own side is not told (exercise
+control sees *GNSS SPOOFED*). Steering by the false fix, it ends up displaced
+toward the spoofer.
+
+**GNSS-guided munitions** (`gnss: true` on the weapon: Excalibur, GMLRS,
+9M544) land within a few metres with satellites. When their path, as a
+straight line from the launcher to the aim point, comes within reach of a GNSS
+jammer hostile to the shooter, they fly the rest of the way on inertial
+guidance and add its error (`insDrift`, default 3 m/s) to their dispersion: an
+Excalibur round flying its last 27 s into a jammed area is about 90 m off.
+Against an entity target, the kill chance is multiplied by the chance the
+error still puts the round within its blast radius of the target.
+
+### Emission control
+
+Each unit or entity has **emission control** (EMCON) settings, in the
+inspector, `PATCH /api/v1/entities/{id}` or `/units/{id}` with `{"emcon":
+{...}}`, or MCP `set_emcon` (on a unit they apply to its members and
+subordinate units):
+
+- **Radio silence**: it transmits nothing, so enemy direction finders cannot
+  find it by its radio. The price is the radio itself, as if jammed: orders
+  reach it a minute late, it shares no contacts, calls no fire, hears no
+  codewords and sends no reports. The inspector shows *RADIO SILENCE*.
+- **Radar off**: its radars neither radiate nor detect. It cannot be found by
+  its radar, sends no Electromagnetic Emission PDU for it, and an
+  anti-radiation missile on its way loses it.
+- **Jamming** on or off (as the **Jamming** switch).
+
+What an entity **radiates** (`emitting` in its state): its radars while on,
+its jammer while jamming, its **radio** for 10 s after each transmission (a
+contact report, a call for fire, acknowledging an order, a codeword), and the
+**datalink** of a radio-linked unmanned system and of a ground control station
+(`groundControl`) flying one within its reach.
+
+### Direction finding
+
+Direction finders are sensors with `df`: the Prophet (`us-prophet`) and R-381T
+Taran (`ru-r381t`) take bearings to enemy radars, jammers, radios and
+datalinks out to 30 km with a 1.5° error; the ARM targeting receiver of the
+F-16CJ and Su-34 to radars and jammers out to 120 km with a 1° error. Once a
+second each station takes a bearing to every enemy emitter it hears within
+range and line of sight, and reports it on the radio: a station that is radio
+jammed or keeps radio silence adds nothing. A force's bearings are pooled into
+**DF contacts**, one per emitter:
+
+- **one station** gives a fix along its bearing, at a range estimated from the
+  signal strength (good to about 35 %): a long, thin ellipse;
+- **two or more** stations cross their bearings (weighted least squares, each
+  bearing weighted by the cross-track error it implies): a much tighter fix,
+  best when the bearings cross near a right angle. Two Prophets 10 km apart fix
+  an emitter 9 km away to a few hundred metres.
+
+Each contact has an **uncertainty ellipse** about 86 % likely to hold the
+emitter, drawn on the map; it is dropped 30 s after the last bearing, or when
+the emitter is destroyed. DF contacts belong to the force that found them
+(`GET /api/v1/df-contacts`, MCP `get_df_contacts`). They are not sensor
+contacts: nothing shoots at them directly. Instead:
+
+- a DF station with the **call for fire** reaction (Prophet and Taran have it)
+  calls for fire on a fix of a ground emitter no longer than 1 km
+  (semi-major), with the rounds spread over half its length; or give a **fire
+  mission** at the fix yourself;
+- anti-radiation missiles are fired at them (below).
+
+### Anti-radiation missiles
+
+An anti-radiation missile (`antiRadiation`: AGM-88 HARM on the F-16CJ, Kh-31P
+on the Su-34) is fired at a radar or jammer its force has located and still
+hears, within its range, and never at anything else. It homes on the emission:
+if the emitter still radiates when it arrives, it is hit as by any guided
+missile. If the emitter has fallen silent (radar off, jammer off), the missile
+flies on to where it last heard it and bursts there with a 30 m error of its
+own: a stationary SA-8 that switches its radar off just after launch is
+rarely hurt. The event log says *AGM-88 HARM anti-radiation missile lost its
+emitter and burst at (x, y)*.
+
+### Counter-UAS
+
+Small drones have their own armour class, `drone`: small (a radar sees one of
+0.01 m² at a third of the range it sees a 1 m² target), and killed or missed
+outright. Against them:
+
+- **counter-drone jammers** cut their datalinks and GNSS: L-MADIS and Silok
+  vehicles (3–4 km), the handheld DroneBuster and the Stupor rifle (1–1.5 km,
+  carried by an infantry team), Shipovnik-Aero (10 km, spoofing);
+- **gun air defence** with a radar that sees small drones (`cuas-radar`,
+  3.5 km against 0.01 m²; `spaag-radar`, 4 km): Stryker M-SHORAD (30 mm
+  proximity rounds, kill chance 0.45 a burst at short range, and Stinger) and
+  2K22 Tunguska (twin 30 mm, 0.4, and 9M311 missiles);
+- **interceptors**: the Coyote launcher (Block 2 interceptors out to 10 km,
+  0.85) and an FPV interceptor-drone team (3 km, 0.6);
+- existing air-defence weapons have a kill chance against drones too (Stinger
+  0.5, Osa 0.45; a 12.7 mm machine gun 0.08).
+
+### Active protection and decoys
+
+**Active protection systems** (`aps` on a type: Trophy on the M1A2 SEPv3, 8
+charges, 0.9; Arena-M on the T-72B3 variant, 22 charges, 0.75, over the 270°
+about the front) fire a charge at an incoming guided missile, slow rocket
+(RPG, AT4) or loitering munition just before it strikes, if it comes from
+inside the protected arc (and, for top attack, only if the system covers the
+roof). The charge defeats it with the system's probability: the event log
+says *M1A2 SEPv3 Abrams (Trophy) 3: Trophy defeated an incoming RPG-7 (5
+charges left)* and *RPG-7 intercepted short of …*. Charges run out; kinetic
+rounds and artillery are not engaged. The inspector shows the charges left,
+and an *APS spent* alert is raised when the last one is used.
+
+**Flares and chaff** (`decoys` on aircraft: AH-64E, Mi-24P, F-16CJ, Su-34) are
+released automatically when a guided missile is fired at the aircraft, one
+salvo a missile while salvos last, multiplying that missile's kill chance by
+the type's `pkFactor` (0.35–0.4).
+
+Both act on the shot and leave the armour and ballistic models alone: a
+missile that gets through is adjudicated as before. Plain M1A2, T-72B3, AH-64D
+and Mi-24V have neither, so existing scenarios play out as they did.
 ## Unmanned systems and swarms
 
 **Unmanned systems** are entity types with `unmanned` set (see the
@@ -677,24 +853,28 @@ Closing on the jammer burns through. The inspector shows *RADAR JAMMED*.
 one-way attack drones on a radio link or a fibre-optic cable, loitering
 munitions (Switchblade 300 / 600, Lancet-3), small fixed-wing UAVs (Raven,
 Orlan-10), a swarm drone, the MQ-9, armed and logistics UGVs (THeMIS, Uran-9,
-S-MET) and robot dogs. **Drone operator teams** (`us-uas-operator`,
-`ru-uas-operator`) are control stations: datalinks end at them. The drone
-templates (`us-uas-team`, `ru-fpv-team`, `us-drone-swarm`, …) place an operator
-team 60 m behind the drones, outside the unit, and assign the drones to it.
+S-MET) and robot dogs. Small drones have the armour class `drone`, which
+counter-drone weapons are rated against. **Ground control stations** are types
+with `groundControl` (its `range`): the drone operator teams (`us-uas-operator`,
+`ru-uas-operator`, 50 km) and the control station vehicles (`us-uas-gcs`,
+`ru-uas-gcs`). Datalinks end at them, and they radiate on the datalink (enemy
+direction finders can find them). The drone templates (`us-uas-team`,
+`ru-fpv-team`, `us-drone-swarm`, …) place an operator team 60 m behind the
+drones, outside the unit, and assign the drones to it.
 
 **The datalink.** Once a simulated second every unmanned system works out its
 link:
 
 | Link | Up when |
 | --- | --- |
-| `rf` (radio) | its operator (or a relay) is within its `linkRange` with line of sight (a crest, more than 150 m of forest or a block of buildings cuts it; smoke does not), and no enemy datalink jammer reaches it |
+| `rf` (radio) | its operator (or a relay) is within its `linkRange` (and the station's `groundControl.range`) with line of sight (a crest, more than 150 m of forest or a block of buildings cuts it; smoke does not), and no enemy datalink jammer reaches it |
 | `rf` with `satcom` (MQ-9) | no enemy datalink jammer reaches it: the ground station is far behind the lines |
 | `fiber` | its operator is alive and within the cable's length. Jamming cannot touch it; once it flies past the end of the cable, the fibre breaks and the link is gone for good |
 | `autonomous` | always: it needs no link |
 
 Its operator is the one it is assigned to (templates assign it; inspector
 **Datalink**, `PATCH /api/v1/entities/{id}` with `controllerId`, MCP
-`set_drone_control`), or, if none is assigned, any operator team of its force,
+`set_drone_control`), or, if none is assigned, any ground control station of its force,
 or the leader of its unit if that is not a drone (a squad leader working its
 robot dog). If the assigned operator is killed, the link is lost. A fibre-optic
 drone is tied to the operator nearest to it within the cable's length.
@@ -736,8 +916,10 @@ by …)* and *datalink back* (once per unit), the [alerts](#explanations-and-ale
 list *datalink lost*, the inspector shows the link and **Why?** says why it is
 down and what to do. Snapshots have `link`: `mode`, `up`, `reason` (`jammed`,
 `range`, `terrain`, `noController`, `controllerLost`, `tether`), `controllerId`,
-`hops`, `lostFor`, `autonomy` and `lostLink`. Satellite navigation (GNSS)
-denial is reported in `jammed` (`gnss`). Unmanned units have no morale.
+`operatorId` (the one it is assigned to), `hops`, `lostFor`, `autonomy` and
+`lostLink`. Satellite navigation denial is the [navigation
+model's](#satellite-navigation-gnss): a drone's moves, searches and loiters are
+flown that far off. Unmanned units have no morale.
 
 **One-way attack.** FPV drones, loitering munitions and the swarm drone carry a
 **warhead** (`unmanned.warhead`), not a gun: *Strike* (or *Attack*) flies at the
@@ -746,9 +928,10 @@ target at top speed, leading it, and dives in from its `terminalRange` (FPV
 then a guided shot from where the drone is, through the usual weapon path: the
 hit, the armour of the face it strikes (loitering munitions and the swarm
 drone's warheads attack the top, an FPV the face it comes in on) and the
-damage. The drone is spent: it leaves the map (`expended` in snapshots), is
-not counted as a loss, and is credited with the kill. Tanks fire no smoke
-grenades at drones. A remotely piloted drone needs its link until it dives.
+damage. Active protection (Trophy, Arena) fires at it as at a missile, but
+only systems that cover the roof stop a top attack. The drone is spent: it
+leaves the map (`expended` in snapshots), is not counted as a loss, and is
+credited with the kill. Tanks fire no smoke grenades at drones. A remotely piloted drone needs its link until it dives.
 
 **Loiter and search.** *Loiter* (`loiter`) keeps a drone over an area,
 sweeping it again and again (or circling a point at `radius`), for `duration`
@@ -988,6 +1171,108 @@ gives each player key a **player role**:
 
 This applies to the GUI, the REST API and MCP alike.
 
+## Commanders
+
+A force can be run by software: a **commander**. It decides at an interval
+(default every 45 simulated seconds) and sooner when something happens:
+a new enemy contact, a loss, a new phase of the force's
+[synchronization matrix](#synchronization-matrix), or one of its units done
+with the commander's order. Such early decisions come at most once every 10
+seconds, or every quarter of the interval if that is longer.
+
+Each decision starts from the **force's view**, the same one a
+[player](#fog-of-war-and-roles) of that force gets: its own units in full
+(strength, combat power, fuel, ammunition, morale, under fire or pinned, what
+each is doing and whose order that is), the enemy only as the force's contacts
+at their last seen positions with their age, its graphics, the towns, its
+phases and codewords, and the time. The orders go through the **same commands
+and permission check as a player of that force** (`checkCommand`): own units
+only, enemy entities only if the force has seen them, no editing or time
+control. Typed orders are read by the [order line](user-guide.md#typed-orders)
+parser. Refused orders are recorded with the reason.
+
+Orders a commander did not give (a person's, a plan's or a phase's) are left
+alone for `holdOff` seconds (default 300) while they last, so people can
+**override** it: order a unit by hand and the commander works around it.
+Its decisions go to the event log as *Red commander: Attack (3 contacts, enemy
+power 2.4 against our 6.1); concentrating on BMP-2 (E15). Orders: …*, from the
+force's headquarters, so only that force's players (and exercise control) see
+them. The latest decisions are kept with the commander's status (in the
+**Commander** dialog, `GET /api/v1/forces/{force}/commander`, MCP
+`get_commander`). Commanders are saved with the scenario (settings only, plus
+where each is in its cycle in checkpoints) and are off unless set.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `interval` | 45 | Seconds between decisions (10–600) |
+| `aggressiveness` | 0.5 | 0 cautious … 1 bold: how strong the force must feel before attacking |
+| `holdOff` | 300 | Seconds an order the commander did not give is left alone (0–3600) |
+| `seed` | from the terrain seed and force | The commander's own random choices |
+| `intent` | — | LLM: the commander's intent, added to what the model is told |
+| `maxCallsPerMinute` | 4 | LLM: model calls per simulated minute |
+| `maxTokens` | 2048 | LLM: output tokens per call |
+| `maxToolCalls` | 12 | LLM: tool calls per decision |
+| `tokenBudget` | 500000 | LLM: tokens in and out in all; it stops when they are spent |
+
+### Rule-based commander
+
+The doctrinal commander works offline and is deterministic: the same scenario
+and seed give the same decisions, also after loading a checkpoint. It weighs
+**combat power**: each entity type's best direct-fire weapon (mostly its
+lethality against armour), scaled by its reach, times how hard the type is to
+kill (an M1A2 counts about 2.8, a T-72B3 1.9, an M2A3 or BMP-2 1.2, a rifleman
+0.08), less for damage and low ammunition. Enemy contacts count fully for a
+minute after they were last seen and fade to 30 % over 15 minutes, after which
+it forgets them. What is seen is rarely all there is, so it allows for more:
+the enemy's power it knows times 1 + 1 / (1 + *n*/2) for *n* contacts (half as
+much again with two, a fifth more with eight). The ratio of its power to that
+estimate sets the posture; holding an objective it has taken, or a battle
+position, it needs half as much again to attack:
+
+| Posture | When | What the force does |
+| --- | --- | --- |
+| Advance | No enemy known and an objective to take | Scouts go ahead to watch the objective from 1.5 km short of it; the main body waits until they are there (or 2 minutes) and then moves on the objective, units side by side, set to halt on contact |
+| Attack | Ratio ≥ 2.2 − 1.4 × aggressiveness (1.5 by default) | The longest-reaching, strongest element supports by fire from a flank; the others concentrate on the strongest contact of the group nearest the objective (or close on where it was last seen) |
+| Defend | Ratio ≥ 0.6 − 0.35 × aggressiveness | Hold the objective once taken, a battle position (*BP …*) or the ground it stands on, in a line facing the enemy; the element least engaged reinforces one facing a group over 1.5 times its strength |
+| Delay | Weaker still | Screen and fall back to the next phase line away from the enemy (or 2 km back), then defend there |
+| Hold | Nothing to do | Defend where it is, facing the expected enemy |
+
+Objectives are its own force's areas and points named *OBJ …*, nearest first;
+one is taken when its units are within 450 m of it and no enemy has been seen
+within a kilometre of it in the last two minutes. Whatever the posture:
+
+- **Fires**: artillery and mortars fire on the group of contacts (within 500 m
+  of one another, seen in the last 90 s) worth most, 3–6 rounds over 50 m, never
+  within 450 m of its own units nor where rounds went in 90 s ago, each battery
+  at most once in 45 s;
+- **Resupply**: units below 25 % fuel or 30 % ammunition go to a supply vehicle
+  when no enemy is within 2.5 km; supply vehicles follow 1.5 km behind the main
+  body;
+- **Casualties**: broken units, and units down to a third with the enemy within
+  3 km, pull back 1.5 km by a covered route;
+- **Helicopters** attack the strongest ground contact more than 4.5 km from any
+  known air defence, else hold behind the main body.
+
+It does not order units with subordinates (orders to them would pass down and
+replace the subordinates' own).
+
+### LLM commander
+
+The LLM commander gets the same situation, as JSON in the first message of a
+short conversation with a large language model through the Messages API, and
+answers with tools: `give_order` (an order in words, as on the order line),
+`set_roe`, `call_fire`, `start_phase`, `send_codeword` and `report` (its
+assessment, which becomes the decision's rationale). Each tool call is carried
+out as the force's player would give it, and the result (the order as
+understood, or why it was refused) goes back to the model, until it ends its
+turn or reaches `maxToolCalls`. The model calls run in the background: the
+simulation goes on, and the orders are carried out at the next simulated second
+after the reply arrives (while paused, they wait). Calls are limited per
+simulated minute and by the token budget; errors (no answer, a refusal, a bad
+reply) are logged, and it tries again after twice its interval. It needs a key
+and a model configured on the server ([Deployment](deployment.md#llm-commanders));
+without them it shows as *unavailable*. Only exercise control can start one.
+
 ## Recording and after-action review
 
 The server records the run as it goes: every entity's position, heading, speed
@@ -1014,8 +1299,8 @@ finding has a `severity`:
 | Severity | Meaning | Examples |
 | --- | --- | --- |
 | `block` | Stops the activity | destroyed, immobilised, out of fuel, pinned, halted on contact, broken, hold fire, out of range, no line of sight (and what blocks it, where) |
-| `warn` | Hampers it | low fuel, stuck, return-fire ROE, suppressed, radio or radar jammed, datalink lost (a supervised or autonomous drone carrying on), sensors cut by darkness or weather, no task |
-| `info` | Explains it | waiting for a plan condition, keeping formation, holding a position, slowed by forest, reloading, engaging |
+| `warn` | Hampers it | low fuel, stuck, return-fire ROE, suppressed, radio or radar jammed, radio silence, radar off, GNSS denied (*navigating by inertial for 90 s, error ~120 m*), active protection spent, datalink lost (a supervised or autonomous drone carrying on), sensors cut by darkness or weather, no task |
+| `info` | Explains it | waiting for a plan condition, keeping formation, holding a position, slowed by forest, reloading, engaging, what it radiates, active protection and decoys left, emitters located by direction finding |
 
 Most come with a `fix` (*Set ROE to "fire at will"*), and those about a place
 or another entity give `at` (x, y) and `aboutId`. Exercise control is also told
@@ -1028,7 +1313,7 @@ run: the random generator is not touched.
 **Alerts** are the attention queue: idle after its orders (10 s with nothing to
 do), task failed, broken, out of fuel or low on fuel, out of ammunition,
 leader lost, losses, under fire or first contact after a quiet minute, radio
-jammed, and datalink lost (unmanned systems). Each is about a unit or a loose entity, with a severity
+jammed, GNSS denied, active protection spent, and datalink lost (unmanned systems). Each is about a unit or a loose entity, with a severity
 (critical, warning, info), the time it was last raised and a count. An alert
 about a lasting condition (broken, fuel, ammunition, jammed) closes by itself
 when the condition clears. Acknowledged while the condition lasts, it is not

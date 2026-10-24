@@ -1,4 +1,5 @@
-import type { DamageState, Domain, EntityTypeDef, ForceId, MoraleState, Plan, Reactions, Roe, TaskSpec, Vec2, Vec3 } from '../shared/types.js';
+
+import type { DamageState, Domain, EntityTypeDef, ForceId, MoraleState, NavState, Plan, Reactions, Roe, TaskSpec, Vec2, Vec3 } from '../shared/types.js';
 import type { PlanExecutor } from './plans.js';
 import type { Task } from './tasks.js';
 import type { Unit } from './units.js';
@@ -93,6 +94,18 @@ export class Entity {
 
   /** Jammers: switched on (they start on). */
   jamming = true;
+  /** Emission control: no radio transmissions. */
+  radioSilent = false;
+  /** Emission control: radars switched off. */
+  radarOff = false;
+  /** Simulation time of its last radio transmission (direction finders hear it for a while). */
+  lastTransmitAt = -Infinity;
+  /** Active protection charges left. */
+  apsLeft = 0;
+  /** Flare and chaff salvos left. */
+  decoysLeft = 0;
+  /** Satellite navigation lost or spoofed (GNSS navigators only). */
+  nav?: NavState;
   /** A background civilian the pattern-of-life model adds and removes. */
   ambient?: boolean;
   /** Unmanned systems: control and datalink state (see unmanned.ts). */

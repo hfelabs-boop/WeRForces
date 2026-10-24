@@ -4,6 +4,7 @@
 import { pointInPolygon } from '../shared/math.js';
 import type { Catalog, ForceId, ScenarioFile, TerrainData } from '../shared/types.js';
 import { Engine } from './engine.js';
+import type { Terrain } from './terrain.js';
 
 export interface BatchOptions {
   runs: number;
@@ -160,7 +161,7 @@ export function outcomesCsv(outcomes: RunOutcome[]): string {
 export function runBatch(
   scenario: ScenarioFile,
   opts: BatchOptions,
-  env: { catalog?: Catalog; terrainLoader?: (name: string) => TerrainData } = {},
+  env: { catalog?: Catalog; terrainLoader?: (name: string) => TerrainData | Terrain } = {},
   progress?: (done: number, outcome: RunOutcome) => boolean | void,
 ): { outcomes: RunOutcome[]; summary: BatchSummary } {
   const started = Date.now();

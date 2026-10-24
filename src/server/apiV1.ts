@@ -15,6 +15,8 @@ import type { BatchManager } from './batch.js';
 import { attachment, eventsCsv, killsCsv, reportPdf, strengthCsv } from './reports.js';
 import { DATASET_NAME, listDatasets } from '../terrain/store.js';
 import { Terrain } from '../sim/terrain.js';
+import { TiledTerrain } from '../sim/tiledTerrain.js';
+import { TileServer } from './tileServer.js';
 import { CONTROLLER, canSee, checkCommand, filterEvents, filterState, ForbiddenError } from './fog.js';
 import { FORCE_NAMES } from '../shared/types.js';
 import { executeCommand } from './commands.js';
@@ -52,11 +54,12 @@ function num(v: unknown, what: string): number {
 /** Routes a player may use (everything else is exercise control only). */
 const PLAYER_ROUTES: [string, RegExp][] = [
   ['GET', /^\/api\/v1\/?$/],
-  ['GET', /^\/api\/v1\/(openapi\.json|simulation|catalog(\/[\w-]+)?|entities|units|graphics|events|terrain(\/point)?)\/?$/],
+  ['GET', /^\/api\/v1\/(openapi\.json|simulation|catalog(\/[\w-]+)?|entities|units|graphics|events|terrain(\/point|\/tiles(\/\d+\/\d+\/\d+)?)?)\/?$/],
   ['GET', /^\/api\/v1\/(entities|units|graphics)\/[^/]+\/?$/],
   ['GET', /^\/api\/v1\/entities\/[^/]+\/path\/?$/],
   ['GET', /^\/api\/v1\/(entities|units)\/[^/]+\/explain\/?$/],
   ['GET', /^\/api\/v1\/alerts\/?$/],
+  ['GET', /^\/api\/v1\/df-contacts\/?$/],
   ['POST', /^\/api\/v1\/orders\/?$/],
   ['POST', /^\/api\/v1\/entities\/[^/]+\/drive\/?$/],
   ['GET', /^\/api\/v1\/codewords\/?$/],
@@ -64,6 +67,10 @@ const PLAYER_ROUTES: [string, RegExp][] = [
   ['PUT', /^\/api\/v1\/sync-matrix\/[^/]+\/?$/],
   ['POST', /^\/api\/v1\/sync-matrix\/[^/]+\/phases\/[^/]+\/start\/?$/],
   ['POST', /^\/api\/v1\/codewords\/?$/],
+  ['GET', /^\/api\/v1\/commanders\/?$/],
+  ['GET', /^\/api\/v1\/forces\/[^/]+\/commander\/?$/],
+  ['PUT', /^\/api\/v1\/forces\/[^/]+\/commander\/?$/],
+  ['POST', /^\/api\/v1\/forces\/[^/]+\/commander\/decide\/?$/],
   ['POST', /^\/api\/v1\/alerts\/([^/]+\/)?acknowledge\/?$/],
   ['POST', /^\/api\/v1\/(entities|units)\/[^/]+\/(task|plan|stop|embark|disembark)\/?$/],
   ['POST', /^\/api\/v1\/units\/[^/]+\/(aggregate|disaggregate)\/?$/],
@@ -76,6 +83,7 @@ export class ApiV1 {
   readonly router = new Router();
   /** Role of the request being handled (handlers run synchronously, one at a time). */
   private role: Role = CONTROLLER;
+  private readonly tiles = new TileServer();
 
   constructor(readonly ctx: ApiContext) {
     this.routes();
@@ -129,6 +137,12 @@ export class ApiV1 {
   private geo(p: { x: number; y: number }) {
     const g = frameFor(this.engine.terrain.spec).toGeodetic({ x: p.x, y: p.y, z: 0 });
     return { lat: Math.round(((g.lat * 180) / Math.PI) * 1e7) / 1e7, lon: Math.round(((g.lon * 180) / Math.PI) * 1e7) / 1e7 };
+  }
+
+  /** `{radioSilence?, radarOff?, jamming?}` from a request body. */
+  private emcon(v: unknown): { radioSilence?: boolean; radarOff?: boolean; jamming?: boolean } {
+    const o = obj(v);
+    return { radioSilence: o.radioSilence as boolean | undefined, radarOff: o.radarOff as boolean | undefined, jamming: o.jamming as boolean | undefined };
   }
 
   entityView(e: EntitySnapshot) {
@@ -344,12 +358,17 @@ export class ApiV1 {
       if (scenario.format !== 'werforces-scenario') throw new HttpError(400, 'not a WeRForces scenario');
       const terrains: Record<string, TerrainData> = {};
       const ds = scenario.terrain?.dataset;
-      if (ds) terrains[ds] = this.engine.terrain.spec.dataset === ds ? this.engine.terrain.toData() : this.engine.terrainLoader!(ds);
+      if (ds) {
+        // Tiled datasets are read from the terrains folder by the batch run itself.
+        const t = this.engine.terrain.spec.dataset === ds ? this.engine.terrain : this.engine.terrainLoader!(ds);
+        if (!(t instanceof TiledTerrain)) terrains[ds] = t instanceof Terrain ? t.toData() : t;
+      }
       const j = batch().start({
         scenario,
         options: { runs, duration, seed: b.seed === undefined ? 1000 : Math.floor(num(b.seed, 'seed')), stopWhenDestroyed: b.stopWhenDestroyed !== false },
         catalog: this.engine.catalog.catalog,
         terrains,
+        terrainDir: terrainDir(),
       });
       return { status: 202, json: { ...j, outcomes: undefined } };
     });
@@ -522,6 +541,7 @@ export class ApiV1 {
       if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
       if (b.jamming !== undefined) this.run({ cmd: 'setJamming', id, on: b.jamming as boolean });
       if (b.controllerId !== undefined || b.lostLink !== undefined || b.autonomy !== undefined) this.run({ cmd: 'setUnmanned', id, controllerId: b.controllerId as string | null | undefined, lostLink: b.lostLink as never, autonomy: b.autonomy as never });
+      if (b.emcon !== undefined) this.run({ cmd: 'setEmcon', targetId: id, ...this.emcon(b.emcon) });
       if (b.position !== undefined || b.x !== undefined || b.lat !== undefined) {
         const p = this.point(b.position ?? b);
         this.run({ cmd: 'moveEntity', id, x: p.x, y: p.y, heading: b.heading as number | undefined });
@@ -579,6 +599,14 @@ export class ApiV1 {
       });
     }
 
+    // Enemy emitters located by direction finding: the caller's force's (exercise control: all, or ?force=).
+    r.get(`${P}/df-contacts`, (req) => {
+      let list = this.state().dfContacts ?? [];
+      const f = req.query.get('force');
+      if (f) list = list.filter((c) => String(c.force) === f || FORCE_NAMES[c.force].toLowerCase() === f.toLowerCase());
+      return { json: list.map((c) => ({ ...c, ...this.geo(c), orientationDeg: Math.round((((c.orientation * 180) / Math.PI) % 360 + 360) % 360), age: Math.round((this.engine.time - c.lastSeen) * 10) / 10 })) };
+    });
+
     // ---------------------------------------------------------------- units
     r.get(`${P}/units`, (req) => {
       let list = this.state().units;
@@ -628,6 +656,7 @@ export class ApiV1 {
       if (b.reactions !== undefined) this.run({ cmd: 'setReactions', targetId: id, reactions: this.resolveReactions(b.reactions) as never });
       if (b.superiorId !== undefined) this.run({ cmd: 'setSuperior', unitId: id, superiorId: b.superiorId as string | null });
       if (b.controllerId !== undefined || b.lostLink !== undefined || b.autonomy !== undefined) this.run({ cmd: 'setUnmanned', id, controllerId: b.controllerId as string | null | undefined, lostLink: b.lostLink as never, autonomy: b.autonomy as never });
+      if (b.emcon !== undefined) this.run({ cmd: 'setEmcon', targetId: id, ...this.emcon(b.emcon) });
       return { json: this.unitView(this.unit(id)) };
     });
     r.delete(`${P}/units/{id}`, (req) => {
@@ -698,6 +727,36 @@ export class ApiV1 {
       this.run({ cmd: 'sendCodeword', force, codeword: String(b.codeword ?? '') });
       return { status: 201, json: { force, codeword: String(b.codeword).trim().toUpperCase(), time: this.engine.time } };
     });
+    // ---------------------------------------------------------------- commanders
+    const commanderForce = (v: string) => {
+      const force = this.forceParam(v);
+      if (this.role.kind === 'player' && force !== this.role.force) throw new HttpError(403, 'players see and set their own force\'s commander only');
+      return force;
+    };
+    const commanderView = (force: ForceId) => {
+      const llm = this.engine.commanders.llm;
+      return { force, name: FORCE_NAMES[force], kind: 'none', ...this.engine.commanders.get(force), llm: { available: !!llm?.transport, ...(llm?.transport ? {} : { reason: llm?.unavailable ?? 'no language model is configured on this server' }) } };
+    };
+    r.get(`${P}/commanders`, () => {
+      const list = this.engine.commanders.status() ?? [];
+      return { json: this.role.kind === 'player' ? list.filter((c) => c.force === (this.role as { force: ForceId }).force) : list };
+    });
+    r.get(`${P}/forces/{force}/commander`, (req) => ({ json: commanderView(commanderForce(req.params.force)) }));
+    r.put(`${P}/forces/{force}/commander`, (req) => {
+      const force = commanderForce(req.params.force);
+      const b = obj(req.body);
+      this.run({ cmd: 'setCommander', force, kind: b.kind as never, options: b.options as never });
+      return { json: commanderView(force) };
+    });
+    r.post(`${P}/forces/{force}/commander/decide`, (req) => {
+      const force = commanderForce(req.params.force);
+      try {
+        this.engine.commanders.requestDecision(force);
+      } catch (err) {
+        throw new HttpError(404, (err as Error).message);
+      }
+      return { status: 202, json: commanderView(force) };
+    });
     r.post(`${P}/orders`, (req) => {
       const b = obj(req.body);
       const text = typeof b.text === 'string' ? b.text : '';
@@ -735,8 +794,10 @@ export class ApiV1 {
     // ---------------------------------------------------------------- terrain
     r.get(`${P}/terrain`, () => {
       const t = this.engine.terrain;
-      return { json: { spec: t.spec, towns: t.towns, roads: t.roads, data: '/api/terrain' } };
+      return { json: { spec: t.spec, towns: t.towns, roads: t.roads, data: '/api/terrain', tiles: t instanceof TiledTerrain ? this.tiles.info(t) : undefined } };
     });
+    r.get(`${P}/terrain/tiles`, () => ({ json: this.tiles.info(this.engine.terrain) }));
+    r.get(`${P}/terrain/tiles/{z}/{x}/{y}`, (req) => this.tiles.tile(this.engine.terrain, req.params.z, req.params.x, req.params.y));
     r.get(`${P}/terrain/point`, (req) => {
       const p = this.point(Object.fromEntries(req.query));
       const t = this.engine.terrain;

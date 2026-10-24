@@ -2,6 +2,7 @@
 
 import { LocalFrame } from '../src/dis/geodesy.js';
 import { TerrainGrid } from '../src/shared/terrainGrid.js';
+import { TiledGrid } from './tiledGrid.js';
 import type {
   AggregateSnapshot,
   AggregationPolicy,
@@ -44,6 +45,7 @@ import { QuickBar } from './quickbar.js';
 import { PlanEditor } from './planeditor.js';
 import { SyncMatrixDialog } from './syncmatrix.js';
 import { QuickBattleDialog } from './quickbattle.js';
+import { CommanderDialog } from './commander.js';
 import { DriveMode } from './drive.js';
 import { CatalogEditor } from './catalogeditor.js';
 import { OrderLine } from './orderline.js';
@@ -88,6 +90,7 @@ class App {
   readonly map: MapView;
   private quick!: QuickBar;
   private syncDialog!: SyncMatrixDialog;
+  private commanderDialog!: CommanderDialog;
   private driveMode!: DriveMode;
   private orderLine!: OrderLine;
   catalog: Catalog | null = null;
@@ -214,6 +217,13 @@ class App {
       toast: (m, info) => this.toast(m, info),
     });
     $('#btn-sync').addEventListener('click', () => void this.syncDialog.open());
+    this.commanderDialog = new CommanderDialog({
+      v1: (m, path, body) => this.api.v1(m, path, body),
+      modal: (c) => this.modal(c),
+      toast: (m, info) => this.toast(m, info),
+      playerForce: () => (this.role.kind === 'player' ? this.role.force : undefined),
+    });
+    $('#btn-commander').addEventListener('click', () => void this.commanderDialog.open());
     this.driveMode = new DriveMode($('#drive-hud'), {
       entity: (id) => this.entity(id),
       cmd: (c) => this.cmd(c),
@@ -313,9 +323,11 @@ class App {
   private async loadTerrain(version: number): Promise<void> {
     this.terrainVersion = version;
     const data = await this.api.terrain();
-    this.grid = TerrainGrid.fromData(data);
+    // Large terrain comes in tiles, fetched for what is in view.
+    this.grid = data.tiles ? await TiledGrid.open(data, (z, x, y) => this.api.tile(z, x, y, version)) : TerrainGrid.fromData(data);
+    if (version !== this.terrainVersion) return;
     this.frame = new LocalFrame(data.spec.origin.lat, data.spec.origin.lon);
-    this.map.setTerrain(data);
+    this.map.setTerrain(data, this.grid);
     this.terrainData = data;
     if (this.view3d && this.grid && this.map.terrainImage) this.view3d.setTerrain(data, this.grid, this.map.terrainImage);
   }
@@ -343,6 +355,10 @@ class App {
     this.renderAlerts();
     this.quick.update();
     this.renderPhase(s);
+    const cmdr = $('#btn-commander');
+    const cmdrText = CommanderDialog.label(s);
+    if (cmdr.textContent !== cmdrText) cmdr.textContent = cmdrText;
+    this.commanderDialog.update(s);
     this.driveMode.update();
     this.checkCatalog(s);
     $('#scenario-name').textContent = s.scenarioName;
@@ -841,6 +857,7 @@ class App {
       box('suppression', 'Suppression', 'Incoming fire makes targets less accurate, slower to fire and spot; infantry get pinned down'),
       box('morale', 'Morale', 'Units become shaken and break under losses and fire, then rally'),
       box('orderDelay', 'Order delay', 'Orders take time to reach units: about 5 s for an entity, 15 s a section, 30 s a platoon, 60 s a company; orders to a superior pass down level by level'),
+      box('curvature', 'Earth curvature', 'Long sight lines and radar are blocked by the curve of the earth (with standard refraction): two people with eyes 2 m up cannot see each other beyond about 12 km over flat ground'),
       box('fuel', 'Fuel', 'Vehicles and aircraft burn fuel; out of fuel, vehicles stop and aircraft come down. Supply trucks refuel and rearm.'),
       h('h4', { text: 'Time and weather (at the scenario start)' }),
       h(
@@ -1781,6 +1798,10 @@ class App {
         e.fuel === undefined ? null : this.bind('fuel'),
         e.supplies === undefined ? null : 'Supplies',
         e.supplies === undefined ? null : this.bind('supplies'),
+        e.aps || e.decoys ? 'Protection' : null,
+        e.aps || e.decoys ? this.bind('protection') : null,
+        t?.gnss || t?.unmanned ? 'Navigation' : null,
+        t?.gnss || t?.unmanned ? this.bind('nav') : null,
         e.unitId ? 'Unit' : null,
         e.unitId ? h('a', { href: '#', text: this.unit(e.unitId)?.name ?? e.unitId, onclick: (ev: Event) => (ev.preventDefault(), this.select(e.unitId!)) }) : null,
       ),
@@ -1797,11 +1818,12 @@ class App {
             'div',
             { class: 'section row' },
             h('h4', { text: 'Jamming' }),
-            h('span', { class: 'hint', text: `${t.jammer.radio ? 'radios' : ''}${t.jammer.radio && t.jammer.radar ? ' and ' : ''}${t.jammer.radar ? 'radars' : ''} within ${(t.jammer.range / 1000).toFixed(0)} km` }),
+            h('span', { class: 'hint', text: `${jamBands(t.jammer)} within ${(t.jammer.range / 1000).toFixed(t.jammer.range < 10000 ? 1 : 0)} km` }),
             h('button', { text: e.jamming === false ? 'Switch on' : 'Switch off', onclick: () => void this.cmd({ cmd: 'setJamming', id: e.id, on: this.entity(e.id)?.jamming === false }).then(() => (this.inspectorFor = null)) }),
           )
         : '',
       this.datalinkSection(e.id),
+      this.emconSection(e.id, [e.id]),
       this.roeSection(e.id),
       this.reactionsSection(e.id, false),
       this.taskSection(e.id, e.domain),
@@ -1951,6 +1973,7 @@ class App {
       h('div', { class: 'section' }, h('h4', { text: 'Current activity' }), h('div', { class: 'status-line', 'data-bind': 'activity' })),
       this.whySection(u.id),
       this.datalinkSection(u.id),
+      u.aggregate ? '' : this.emconSection(u.id, u.memberIds),
       this.roeSection(u.id),
       this.reactionsSection(u.id, true),
       this.taskSection(u.id, lead?.domain ?? 'ground'),
@@ -2331,7 +2354,7 @@ class App {
   private datalinkSection(id: string): HTMLElement | string {
     if (!this.isDrone(id)) return '';
     const lead = this.entity(id) ?? this.entity(this.unit(id)?.leaderId);
-    const ops = (this.state?.entities ?? []).filter((x) => x.force === lead?.force && x.damage !== 'destroyed' && this.types.get(x.typeId)?.controlStation);
+    const ops = (this.state?.entities ?? []).filter((x) => x.force === lead?.force && x.damage !== 'destroyed' && this.types.get(x.typeId)?.groundControl);
     const set = (change: Record<string, string | null>) => void this.cmd({ cmd: 'setUnmanned', id, ...change } as Command);
     const choose = (key: string, options: [string, string][], onPick: (v: string) => void) =>
       h('select', { 'data-bind-value': key, onchange: (ev: Event) => onPick((ev.target as HTMLSelectElement).value) }, options.map(([v, text]) => h('option', { value: v, text })));
@@ -2350,6 +2373,33 @@ class App {
         'Autonomy',
         choose('autonomy', [['remote', 'remote (piloted)'], ['supervised', 'supervised'], ['autonomous', 'autonomous']], (v) => set({ autonomy: v })),
       ),
+    );
+  }
+
+  /**
+   * Emission control: radio silence, radars off and jammers on or off, for an entity or a
+   * unit (members and subordinates). Shown for what the members have.
+   */
+  private emconSection(id: string, memberIds: string[]): HTMLElement | '' {
+    const members = memberIds.map((m) => this.entity(m)).filter((m): m is EntitySnapshot => !!m && !m.remote);
+    if (!members.length) return '';
+    const types = members.map((m) => this.types.get(m.typeId));
+    const radar = types.some((t) => t?.sensors.some((sid) => this.catalog?.sensors.find((x) => x.id === sid)?.radar));
+    const jammer = types.some((t) => t?.jammer);
+    const box = (label: string, title: string, checked: boolean, key: 'radioSilence' | 'radarOff' | 'jamming') => {
+      const input = h('input', { type: 'checkbox', checked }) as HTMLInputElement;
+      input.addEventListener('change', () => void this.cmd({ cmd: 'setEmcon', targetId: id, [key]: input.checked }).then(() => (this.inspectorFor = null)));
+      return h('label', { class: 'setting', title }, input, h('span', { text: label }));
+    };
+    const emitting = [...new Set(members.flatMap((m) => m.emitting ?? []))];
+    return h(
+      'div',
+      { class: 'section' },
+      h('h4', { text: 'Emission control' }),
+      box('Radio silence', 'Transmit nothing: enemy direction finders cannot find it by its radio, but it shares no contacts, calls no fire, hears no codewords, and orders reach it a minute late', members.every((m) => m.emcon?.radioSilence), 'radioSilence'),
+      radar ? box('Radar off', 'Radars neither radiate nor detect; anti-radiation missiles lose them', members.every((m) => m.emcon?.radarOff), 'radarOff') : '',
+      jammer && memberIds.length > 1 ? box('Jamming', 'Switch the jammers on or off', members.some((m) => m.jamming === true), 'jamming') : '',
+      h('div', { class: 'hint', text: emitting.length ? `Radiating: ${emitting.join(', ')}` : 'Radiating nothing' }),
     );
   }
 
@@ -2508,9 +2558,13 @@ class App {
           this.pendingOrderText(e.id),
           e.halted ? 'HALTED (contact)' : '',
           e.jammed?.includes('radio') ? 'RADIO JAMMED' : '',
-          e.link && !e.link.up ? 'DATALINK LOST' : '',
+          e.link && !e.link.up && !e.jammed?.includes('datalink') ? 'DATALINK LOST' : '',
           e.jammed?.includes('radar') ? 'RADAR JAMMED' : '',
           e.jamming === true ? 'JAMMING' : '',
+          e.emcon?.radioSilence ? 'RADIO SILENCE' : '',
+          e.emcon?.radarOff ? 'RADAR OFF' : '',
+          e.gnss === 'denied' ? `GNSS DENIED (~${e.navError ?? 0} m)` : e.gnss === 'spoofed' ? `GNSS SPOOFED (${e.navError ?? 0} m off)` : '',
+          e.jammed?.includes('datalink') ? 'DATALINK JAMMED' : '',
           e.prepared === 'dugIn' ? 'DUG IN' : e.prepared === 'hullDown' ? 'HULL-DOWN' : '',
           e.plan,
           // A plan step already names its task ("QRF 3/3: Move to …").
@@ -2525,6 +2579,9 @@ class App {
       if (!e.unitId) set('morale', moraleText(e.morale, e.moraleState));
       if (e.fuel !== undefined) set('fuel', levelBar(e.fuel));
       if (e.supplies !== undefined) set('supplies', `${e.supplies.toFixed(1)} vehicle loads`);
+      const et = this.types.get(e.typeId);
+      if (e.aps || e.decoys) set('protection', [e.aps ? `${et?.aps?.name ?? 'APS'} ${e.aps.left}/${e.aps.charges}` : '', e.decoys ? `flares/chaff ${e.decoys.left}/${e.decoys.salvos}` : ''].filter(Boolean).join(' · '));
+      if (et?.gnss || et?.unmanned) set('nav', e.gnss === 'denied' ? `inertial, error ~${e.navError ?? 0} m` : e.gnss === 'spoofed' ? `spoofed, ${e.navError ?? 0} m off` : 'GNSS');
       const cap = this.capacityOf(e.id);
       if (cap) set('passengers', `Passengers ${e.passengers?.length ?? 0}/${cap}`);
       syncReactions(e.reactions);
@@ -2746,4 +2803,10 @@ function batchResults(s: BatchView): HTMLElement {
       h('p', { text: `${a.name} held at the end: ${Object.entries(a.held).map(([f, p]) => `${FORCE_NAMES[Number(f) as ForceId]} ${Math.round((p ?? 0) * 100)}%`).join(', ') || 'by nobody'}` }),
     ),
   );
+}
+
+/** What a jammer jams, in words. */
+function jamBands(j: NonNullable<EntityTypeDef['jammer']>): string {
+  const bands = [j.radio ? 'radios' : '', j.radar ? 'radars' : '', j.datalink ? 'drone datalinks' : '', j.gnss ? (j.spoof ? 'GNSS (spoofing)' : 'GNSS') : ''].filter(Boolean);
+  return bands.length > 1 ? `${bands.slice(0, -1).join(', ')} and ${bands[bands.length - 1]}` : bands[0] ?? 'nothing';
 }

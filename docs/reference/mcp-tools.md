@@ -90,6 +90,27 @@ Send a codeword to a force (players: their own). Plans waiting for it ({type:"co
 | `codeword` | string | yes |  |
 | `force` | `"blue"` \| `"red"` \| `"neutral"` |  | default blue (exercise control only) |
 
+## `set_commander`
+
+Hand a force to a commander, or take it back. "rules": the offline doctrinal commander (attacks when strong enough, defends or delays when weak, calls fire on groups of contacts, resupplies, pulls back broken units, sends scouts first). "llm": a language model configured on the server. Either sees only what the force sees and orders through the same commands as a player; orders it did not give are left alone for holdOff seconds. Its decisions and reasons go to the event log and get_commander. "none" stands it down.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `force` | `"blue"` \| `"red"` \| `"neutral"` | yes |  |
+| `kind` | `"none"` \| `"rules"` \| `"llm"` | yes |  |
+| `aggressiveness` | number (0–1) |  | 0 cautious .. 1 bold (default 0.5) |
+| `interval` | number (10–600) |  | simulated seconds between decisions (default 45) |
+| `holdOff` | number (0–3600) |  | seconds an order it did not give is left alone (default 300) |
+| `intent` | string |  | LLM: the commander's intent |
+
+## `get_commander` _(read-only)_
+
+A force's commander: its kind, settings, state and latest decisions with their rationale and orders.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `force` | `"blue"` \| `"red"` \| `"neutral"` | yes |  |
+
 ## `get_alerts`
 
 The attention queue: what needs looking at now (units idle after finishing their orders, broken, out of fuel or ammunition, leader lost, losses, failed tasks, under fire, first contact), newest first. Pass acknowledge: true to clear them once handled.
@@ -280,7 +301,7 @@ When aggregated units split up and join up again. Defaults: an aggregate disaggr
 
 ## `set_simulation_rules` _(idempotent)_
 
-Turn optional parts of the model on or off for this scenario. Suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel) are on by default; orderDelay (orders take 5-60 s to pass down the chain of command, by echelon) is off by default. Useful for comparison runs.
+Turn optional parts of the model on or off for this scenario. Suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel) are on by default; orderDelay (orders take 5-60 s to pass down the chain of command, by echelon) is off by default; curvature (earth curvature and refraction in line of sight beyond 2 km) is on. Useful for comparison runs.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -288,6 +309,7 @@ Turn optional parts of the model on or off for this scenario. Suppression (fire 
 | `morale` | boolean |  |  |
 | `fuel` | boolean |  |  |
 | `orderDelay` | boolean |  |  |
+| `curvature` | boolean |  |  |
 
 ## `edit_catalog`
 
@@ -320,6 +342,25 @@ Unmanned systems (an entity, or every drone of a unit): assign the operator it i
 | `lostLink` | `"hover"` \| `"return"` \| `"continue"` \| `"land"` or null |  |  |
 | `autonomy` | `"remote"` \| `"supervised"` \| `"autonomous"` or null |  |  |
 
+## `set_emcon` _(idempotent)_
+
+Emission control for an entity, or a unit with its members and subordinate units. radioSilence: it transmits nothing, so enemy direction finders cannot locate it by its radio, but it shares no contacts, cannot call for fire or hear codewords, and orders reach it a minute late. radarOff: its radars neither radiate nor detect, and anti-radiation missiles lose them. jamming: switch its jammers on or off. Settings left out stay as they are.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | yes | entity or unit id |
+| `radioSilence` | boolean |  |  |
+| `radarOff` | boolean |  |  |
+| `jamming` | boolean |  |  |
+
+## `get_df_contacts` _(read-only)_
+
+Enemy emitters located by direction finding (SIGINT/ELINT stations such as Prophet or R-381T, and anti-radiation targeting receivers): radars, jammers, radios that transmitted in the last 10 s, drone datalinks and their ground control stations. Each has an estimated position with an uncertainty ellipse (semi-axes in m): one station gives a long ellipse along its bearing, two or more stations cross bearings into a tight fix. Fire a fire mission at a good fix (or let a DF station with call-for-fire do it).
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `force` | `1` or `2` or `3` or `0` |  | exercise control: only this force's contacts |
+
 ## `quick_battle`
 
 Replace the scenario with a generated, ready-to-run battle: pick the mission (from Blue's side), each force's nation, composition, size and support, time and weather. Both forces are placed on land either side of an objective (a town near the middle when there is one), with the mission's graphics and a synchronization matrix per force; start the simulation to fight it. Returns the mission brief.
@@ -333,6 +374,7 @@ Replace the scenario with a generated, ready-to-run battle: pick the mission (fr
 | `weather` | `"clear"` \| `"haze"` \| `"fog"` \| `"rain"` |  |  |
 | `distance` | number (1000–20000) |  | metres between the sides at the start |
 | `civilians` | boolean |  |  |
+| `commander` | {blue, red} |  | sides run by the rule-based commander instead of a phase plan, e.g. {red: "rules"} |
 | `seed` | integer (-9007199254740991–9007199254740991) |  | same seed and options, same battle |
 | `name` | string |  |  |
 

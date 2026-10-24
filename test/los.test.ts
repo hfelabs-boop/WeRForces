@@ -9,11 +9,13 @@ function reference(t: Terrain, a: Vec3, b: Vec3): boolean {
   if (d < 1) return true;
   const n = Math.ceil(d / (t.spec.cellSize / 2));
   let canopy = 0;
+  // Earth curvature with refraction (k = 4/3) beyond 2 km.
+  const bulge = d > 2000 ? (d * d) / (2 * (4 / 3) * 6371000) : 0;
   for (let k = 1; k < n; k++) {
     const f = k / n;
     const x = a.x + (b.x - a.x) * f;
     const y = a.y + (b.y - a.y) * f;
-    const z = a.z + (b.z - a.z) * f;
+    const z = a.z + (b.z - a.z) * f - bulge * f * (1 - f);
     const g = t.surfaceHeight(x, y);
     if (g > z) return false;
     if (g + 15 > z && t.isForest(x, y)) {

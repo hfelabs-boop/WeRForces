@@ -391,6 +391,7 @@ export class SimServer {
     if (this.sessions.has(sid)) throw new HttpError(409, `session ${sid} exists`);
     const main = this.main.runner;
     const engine = new Engine({ catalog: main.engine.catalog.catalog, terrainLoader: main.engine.terrainLoader });
+    engine.commanders.llm = main.engine.commanders.llm;
     if (scenario) engine.loadScenario(scenario);
     else engine.newScenario(`Session ${sid}`);
     const runner = new SimRunner(engine, main.dt, main.frameMs, main.recordInterval);

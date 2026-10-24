@@ -34,7 +34,7 @@ describe('unmanned systems: datalink', () => {
   it('loses the link out of radio range: it turns for home, and cannot be flown further out', () => {
     const eng = engine();
     const team = eng.createUnitFromTemplate('us-uas-team', 1, 2000, 1000);
-    const op = [...eng.entities.values()].find((e) => e.type.controlStation)!;
+    const op = [...eng.entities.values()].find((e) => e.type.groundControl)!;
     const quad = team.leader!;
     expect(quad.uxs!.controllerId).toBe(op.id);
     eng.runFor(1);
@@ -208,6 +208,27 @@ describe('unmanned systems: one-way attack', () => {
     expect(new Set(lm.aspects)).toEqual(new Set(['top']));
     // A 750 mm top-attack warhead on 60 mm of roof.
     expect(lm.kills).toBeGreaterThan(16);
+  });
+
+  it('active protection fires at a drone diving in, but Trophy does not cover the roof against top attack', () => {
+    const run = (type: string, n: number) => {
+      let intercepted = 0;
+      for (let i = 0; i < n; i++) {
+        const eng = engine(300 + i);
+        eng.createEntity({ typeId: 'us-uas-operator', force: 2, x: 6000, y: 1000 });
+        const drone = eng.createEntity({ typeId: type, force: 2, x: 6000, y: 1200 });
+        const tank = eng.createEntity({ typeId: 'us-m1a2-sepv3', force: 1, x: 6000, y: 4000, heading: Math.PI });
+        tank.roe = 'holdFire';
+        eng.assignTask(drone.id, { type: 'strike', targetId: tank.id });
+        const dets: Detonation[] = [];
+        eng.on('detonation', (d) => dets.push(d));
+        eng.runFor(200);
+        if (dets[0]?.intercepted) intercepted++;
+      }
+      return intercepted;
+    };
+    expect(run('us-fpv', 10)).toBeGreaterThanOrEqual(7);
+    expect(run('us-switchblade600', 5)).toBe(0);
   });
 
   it('a spent drone leaves the map without counting as a loss; the kill is credited to it', () => {

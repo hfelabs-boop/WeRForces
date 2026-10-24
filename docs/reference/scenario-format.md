@@ -67,7 +67,8 @@ The TypeScript definition is `ScenarioFile` in `src/shared/types.ts`.
 | `syncMatrices` | | One synchronization matrix per force ([below](#syncmatrices)) |
 | `aggregation` | | When aggregated units split up near enemy entities and join up again: `autoDisaggregate`, `disaggregateRange` (m), `autoReaggregate`, `reaggregateRange` (m), `reaggregateDelay` (s). Missing fields keep their defaults ([Concepts](../concepts.md#aggregate-level)) |
 | `codewords` | | Checkpoints: codewords sent so far, `{force, codeword, time}` |
-| `shots` | | Checkpoints: munitions in flight (`shooterId`, `targetId`, `weaponId`, `from`, `to`, `fireTime`, `impactTime`, `range`) |
+| `shots` | | Checkpoints: munitions in flight (`shooterId`, `targetId`, `weaponId`, `from`, `to`, `fireTime`, `impactTime`, `range`, and `decoyed: true` when the target released flares or chaff against it) |
+| `df` | | Checkpoints: direction-finding bearings behind each force's fixes, `{force, id, bands, bearings: [{stationId, x, y, bearing, sigma, range, time}]}` (the fixes are worked out again from them) |
 | `smoke` | | Checkpoints: smoke clouds (`id`, `x`, `y`, `radius`, `until`: the simulation time it is gone) |
 | `orders` | | Checkpoints: orders on their way down the chain of command (`targetId`, `task` or `plan`, `due`) |
 | `rngState` | | Checkpoints: random number generator state, so the run continues identically |
@@ -143,7 +144,7 @@ See [Concepts → Night and weather](../concepts.md#night-and-weather).
 | `roe` | `fireAtWill` (default), `returnFire`, `holdFire` |
 | `plan` / `task` | Optional. Assigned when the scenario loads. If both are given, the plan wins |
 | `reactions` | Optional: `onContact`, `withdrawBelow`, `withdrawTo`, `callForFire` ([Concepts](../concepts.md#reactions)) |
-| `state` | Optional. Saved at time 0 it holds only `destroyed`, `mobilityKill`, `firepowerKill`, `embarkedIn` (carrier id: starts mounted) and `jamming: false` (a jammer that starts switched off; jammers start on). Fields added by hand are applied on load too, for example `fuel` (litres), `ammo` (rounds by weapon id), `supplies` (supply loads left) or `prepared` (`dugIn` or `hullDown`: starts in a prepared position). Checkpoints add `speed`, `z`, `ammo`, `weaponReadyAt`, `contacts`, `attackers`, `underFireUntil`, `lastFiredAt`, `sensorDue`, `speedOverride`, `altitudeOverride`, `planIndex`, `taskState` (a task spec that resumes the running task), `taskDone`, `withdrawn`, `callForFireAt`, `smokeLeft`, `suppression`, `morale`, `moraleState`, and `ambient: true` for a background civilian (taken back under the pattern of life's control on load) |
+| `state` | Optional. Saved at time 0 it holds only `destroyed`, `mobilityKill`, `firepowerKill`, `embarkedIn` (carrier id: starts mounted), `jamming: false` (a jammer that starts switched off; jammers start on) and emission control: `radioSilence: true`, `radarOff: true`. Fields added by hand are applied on load too, for example `fuel` (litres), `ammo` (rounds by weapon id), `supplies` (supply loads left) or `prepared` (`dugIn` or `hullDown`: starts in a prepared position). Checkpoints add `speed`, `z`, `ammo`, `weaponReadyAt`, `contacts`, `attackers`, `underFireUntil`, `lastFiredAt`, `sensorDue`, `speedOverride`, `altitudeOverride`, `planIndex`, `taskState` (a task spec that resumes the running task), `taskDone`, `withdrawn`, `callForFireAt`, `smokeLeft`, `suppression`, `morale`, `moraleState`, `lastTransmitAt` (its last radio transmission, while direction finders can still hear it), `apsLeft` (active protection charges left), `decoysLeft` (flare and chaff salvos left), `nav` (satellite navigation lost: `{since, dir, spoofedBy?}`, the time it was lost, the direction of the drift in radians and the spoofer), and `ambient: true` for a background civilian (taken back under the pattern of life's control on load) |
 
 Ground and dismounted entities must be on land, and surface vessels on water.
 Otherwise loading fails and the previous scenario stays loaded.
@@ -285,6 +286,15 @@ Optional model fields (all may be left out; see
 | weapon | `topAttack` | `true`: hits the top armour (as indirect fire does) |
 | weapon | `spreadMrad`, `rangeError` | unguided direct fire: one-sigma angular spread (mrad) and range-estimate error (fraction, default 0.05); turn on the ballistic model |
 | sensor | `refRange`, `refRcs` | radar: detection range (m) against a target of `refRcs` m² (default 1); range scales with RCS^¼ up to `maxRange` |
+| entity type | `jammer` | `{range, radio?, radar?, datalink?, gnss?, spoof?}`: what it jams within `range` m; `spoof` (with `gnss`): a false satellite fix instead of none |
+| entity type | `unmanned`, `gnss`, `insDrift` | an unmanned system's link (`{link: "rf" \| "fiber" \| "autonomous", antiJam?}`); navigates by satellite; inertial drift rate (m/s, default 1) once GNSS is lost |
+| entity type | `groundControl` | `{range}`: a ground control station, radiating on the datalink while a friendly radio-linked drone is within `range` m |
+| entity type | `aps` | `{name?, charges, pk, arc?, top?}`: active protection, defeating an incoming missile or rocket from within `arc`° about the front (default 360) with chance `pk`, while charges last; `top`: also from above |
+| entity type | `decoys` | `{salvos, pkFactor}`: flares and chaff, released on missile launch warning, multiplying that missile's kill chance by `pkFactor` |
+| weapon | `gnss`, `insDrift` | GNSS-guided: misses by the inertial drift (m/s, default 3) gathered after its path enters a hostile GNSS jammer's reach |
+| weapon | `antiRadiation` | fired at radars and jammers located by direction finding; homes on their emission |
+| weapon | `apsDefeatable` | whether active protection can stop it (default: guided missiles and rockets slower than 400 m/s fired at ground targets) |
+| sensor | `df` | `{bearingError?, bands?}`: a direction finder: bearings (one-sigma error in radians, default 2°) to enemy emitters in `bands` (`radar`, `jammer`, `radio`, `datalink`; default all) |
 
 Every entry is checked as in the editor, and an entry with the id of a
 built-in one replaces it in this scenario. The same JSON works as a

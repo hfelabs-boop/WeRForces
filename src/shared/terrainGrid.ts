@@ -50,7 +50,8 @@ export class TerrainGrid {
   ) {
     this.cols = Math.round(spec.size / spec.cellSize) + 1;
     this.rows = this.cols;
-    if (heights.length !== this.cols * this.rows) throw new Error('terrain height grid size mismatch');
+    // Tiled terrain passes no posts and overrides the samplers.
+    if (heights.length && heights.length !== this.cols * this.rows) throw new Error('terrain height grid size mismatch');
   }
 
   static fromData(data: TerrainData): TerrainGrid {

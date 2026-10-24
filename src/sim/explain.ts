@@ -8,6 +8,7 @@ import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import { groundFactor, sensorRange } from './environment.js';
 import { radarRange, sizeFactor } from './sensors.js';
+import { emissions } from './emcon.js';
 import { AmbushTask, FormationTask, WaitTask } from './tasks.js';
 import { autonomyOf, fallbackText, reasonText, warheadOf } from './unmanned.js';
 import type { Unit } from './units.js';
@@ -74,7 +75,7 @@ function linkFindings(engine: Engine, e: Entity): Finding[] {
   ];
 }
 
-function movement(engine: Engine, e: Entity): Finding[] {
+function movement(engine: Engine, e: Entity, opts: ExplainOptions): Finding[] {
   const out: Finding[] = [];
   const add = (f: Finding) => out.push(f);
   if (e.destroyed) return [{ code: 'destroyed', severity: 'block', text: 'Destroyed.' }];
@@ -87,7 +88,18 @@ function movement(engine: Engine, e: Entity): Finding[] {
   const order = engine.pendingOrders.find((o) => o.targetId === e.id || o.targetId === e.unit?.id);
   if (order) add({ code: 'orderPending', severity: 'info', text: `A new order is on its way down the chain of command: it arrives in ${Math.max(0, Math.ceil(order.due - engine.time))} s.` });
   for (const f of linkFindings(engine, e)) add(f);
-  if (engine.ew.radioJammed(e)) add({ code: 'radioJammed', severity: 'warn', text: 'Radio jammed: orders reach it a minute late, and it cannot share contacts with its unit, call for fire or hear codewords.', fix: "Move it out of the jammer's reach, or destroy the jammer." });
+  if (engine.ew.radioSilent(e)) add({ code: 'radioSilence', severity: 'warn', text: 'Radio silence (emission control): enemy direction finders cannot find it by its radio, but orders reach it a minute late, and it cannot share contacts with its unit, call for fire or hear codewords.', fix: 'Lift radio silence (Emission control) when it needs to talk.' });
+  else if (engine.ew.radioJammed(e)) add({ code: 'radioJammed', severity: 'warn', text: 'Radio jammed: orders reach it a minute late, and it cannot share contacts with its unit, call for fire or hear codewords.', fix: "Move it out of the jammer's reach, or destroy the jammer." });
+  if (e.nav) {
+    const err = engine.nav.errorSize(e);
+    const since = Math.round(engine.time - e.nav.since);
+    if (!e.nav.spoofedBy) add({ code: 'gnssDenied', severity: 'warn', text: `GNSS denied: navigating by inertial for ${since} s, error ~${km(err)}; its moves and routes end that far off.`, fix: "Move it out of the GNSS jammer's reach (the fix comes back at once), or destroy the jammer." });
+    else if (opts.omniscient) {
+      const s = engine.entities.get(e.nav.spoofedBy);
+      add({ code: 'gnssSpoofed', severity: 'warn', text: `GNSS spoofed by ${s?.name ?? e.nav.spoofedBy}: it believes it is ${km(err)} from where it is, and does not know.`, aboutId: e.nav.spoofedBy, at: s ? { x: Math.round(s.x), y: Math.round(s.y) } : undefined });
+    }
+  }
+
   if (engine.rules.fuel && e.type.endurance && e.domain !== 'air') {
     if (e.fuel <= 0) add({ code: 'outOfFuel', severity: 'block', text: 'Out of fuel.', fix: 'Send it to a supply vehicle (Resupply), or turn the fuel model off in Simulation settings.' });
     else if (e.fuel < 0.2) add({ code: 'lowFuel', severity: 'warn', text: `Fuel low: ${pct(e.fuel)} left.`, fix: 'Resupply it soon.' });
@@ -158,6 +170,17 @@ function weaponsVerdict(engine: Engine, e: Entity, t: Entity): { ok: boolean; fi
   return { ok: true, weapon: ready };
 }
 
+/** Active protection and decoys left. */
+function protection(e: Entity, add: (f: Finding) => void): void {
+  const aps = e.type.aps;
+  if (aps) {
+    const arc = aps.arc && aps.arc < 360 ? `the ${aps.arc}° about its front` : 'all round';
+    add({ code: e.apsLeft > 0 ? 'activeProtection' : 'activeProtectionSpent', severity: e.apsLeft > 0 ? 'info' : 'warn', text: `Active protection (${aps.name ?? 'APS'}): ${e.apsLeft} of ${aps.charges} charges left, each defeating an incoming missile or rocket from ${arc}${aps.top ? ' or above' : ''} ${pct(aps.pk)} of the time.` });
+  }
+  const d = e.type.decoys;
+  if (d) add({ code: e.decoysLeft > 0 ? 'decoys' : 'decoysSpent', severity: e.decoysLeft > 0 ? 'info' : 'warn', text: `Flares and chaff: ${e.decoysLeft} of ${d.salvos} salvos left, released when a missile is fired at it (its kill chance × ${d.pkFactor}).` });
+}
+
 function fire(engine: Engine, e: Entity, opts: ExplainOptions): Finding[] {
   const out: Finding[] = [];
   const add = (f: Finding) => out.push(f);
@@ -181,6 +204,12 @@ function fire(engine: Engine, e: Entity, opts: ExplainOptions): Finding[] {
     return [{ code: 'unarmed', severity: 'info', text: 'Unarmed.' }];
   }
   if (e.firepowerKill) return [{ code: 'firepowerKill', severity: 'block', text: 'Its weapons are knocked out (firepower kill).' }];
+  protection(e, add);
+  const arms = direct.filter((w) => w.antiRadiation && (e.ammo.get(w.id) ?? 0) > 0);
+  if (arms.length) {
+    const emitters = engine.df.contacts(e.force).filter((c) => engine.time - c.lastSeen <= 2 && (c.bands.includes('radar') || c.bands.includes('jammer'))).length;
+    add({ code: 'antiRadiation', severity: 'info', text: `${arms.map((w) => w.name).join(', ')}: fired at radars and jammers its side has located by direction finding (${emitters} heard now); they home on the emission, and miss if it stops.` });
+  }
   const empty = direct.filter((w) => (e.ammo.get(w.id) ?? 0) <= 0);
   if (empty.length === direct.length) add({ code: 'noAmmo', severity: 'block', text: 'Out of ammunition.', fix: 'Send it to a supply vehicle (Resupply).' });
   else if (empty.length) add({ code: 'someAmmoOut', severity: 'warn', text: `Out of ammunition for ${empty.map((w) => w.name).join(', ')}.` });
@@ -238,7 +267,15 @@ function sensing(engine: Engine, e: Entity, opts: ExplainOptions): Finding[] {
   const why = env.period !== 'day' ? `${env.period === 'night' ? 'night' : 'twilight'}${env.visibility < 20000 ? ` and ${km(env.visibility)} visibility` : ''}` : env.visibility < 20000 ? `${km(env.visibility)} visibility` : env.precipitation !== 'none' ? env.precipitation : '';
   out.push({ code: 'sensors', severity: reduced ? 'warn' : 'info', text: `Sees with: ${list}${reduced && why ? `, cut down by ${why}` : ''}.`, fix: reduced && !sensors.some((s) => s.thermal) ? 'Thermal sights see in the dark: use a vehicle that has them.' : undefined });
   const radarJam = engine.ew.radarFactor(e);
-  if (radarJam < 1 && sensors.some((s) => s.radar)) out.push({ code: 'radarJammed', severity: 'warn', text: `Radar jammed: it sees ${pct(radarJam)} of its normal range (more as it closes on the jammer).` });
+  if (e.radarOff && sensors.some((s) => s.radar)) out.push({ code: 'radarOff', severity: 'warn', text: 'Radar off (emission control): it cannot be found by its radar, or hit by anti-radiation missiles, but its radar sees nothing.', fix: 'Switch the radar on (Emission control).' });
+  else if (radarJam < 1 && sensors.some((s) => s.radar)) out.push({ code: 'radarJammed', severity: 'warn', text: `Radar jammed: it sees ${pct(radarJam)} of its normal range (more as it closes on the jammer).` });
+  if (sensors.some((s) => s.df)) {
+    const located = engine.df.contacts(e.force).length;
+    if (engine.ew.radioJammed(e)) out.push({ code: 'dfCannotReport', severity: 'warn', text: `Direction finding: it cannot report its bearings with its radio ${engine.ew.radioSilent(e) ? 'silent' : 'jammed'}.` });
+    else out.push({ code: 'directionFinding', severity: 'info', text: `Direction finding: its side has located ${located} enemy emitter${located === 1 ? '' : 's'}. One station gives a long ellipse along its bearing; two or more cross bearings into a tight fix.` });
+  }
+  const radiates = emissions(engine, e);
+  if (radiates.length) out.push({ code: 'emitting', severity: 'info', text: `Radiating: ${radiates.join(', ')} (enemy direction finders can locate it).` });
   if (opts.omniscient) {
     const by = engine.ew.radioJammedBy(e.unit?.leader ?? e) ?? engine.ew.radioJammedBy(e);
     const j = by ? engine.entities.get(by) : undefined;
@@ -311,7 +348,7 @@ function activityOf(engine: Engine, e: Entity): string {
 
 export function explainEntity(engine: Engine, e: Entity, opts: ExplainOptions): Explanation {
   const activity = activityOf(engine, e);
-  const m = movement(engine, e);
+  const m = movement(engine, e, opts);
   const f = fire(engine, e, opts);
   const s = sensing(engine, e, opts);
   return { id: e.id, name: e.name, kind: 'entity', activity, summary: summarize(activity, [m, f]), movement: m, fire: f, sensing: s };

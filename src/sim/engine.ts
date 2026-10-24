@@ -62,9 +62,14 @@ import { Life } from './life.js';
 import { Ew, JAMMED_ORDER_DELAY } from './ew.js';
 import { Aggregation } from './aggregate.js';
 import { Unmanned } from './unmanned.js';
+import { Commanders } from './commander/manager.js';
+import { PostOverlay } from './postOverlay.js';
+import { Navigation } from './navigation.js';
+import { checkDfCallsForFire, DirectionFinding, emissions, RADIO_HEARD_FOR, updateAntiRadiation } from './emcon.js';
+import { releaseDecoys } from './protection.js';
 
 export const DEFAULT_DT = 0.1;
-export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false };
+export const DEFAULT_RULES: Required<SimulationRules> = { suppression: true, morale: true, fuel: true, orderDelay: false, curvature: true };
 
 /** Seconds for an order to reach and be acted on, by echelon (rules.orderDelay). */
 const ORDER_DELAY: Record<UnitTemplate['echelon'] | 'entity', number> = { entity: 5, team: 10, flight: 10, section: 15, platoon: 30, company: 60, group: 60 };
@@ -167,12 +172,18 @@ export class Engine {
   readonly life = new Life(this);
   /** Electronic warfare: who is jammed. */
   readonly ew = new Ew(this);
+  /** Navigation of GNSS navigators under jamming and spoofing. */
+  readonly nav = new Navigation(this);
+  /** Direction finding: enemy emitters each force has located. */
+  readonly df = new DirectionFinding(this);
   /** Hit/kill, ballistic and radar models in use (see models.ts). */
   models: Models = { ...DEFAULT_MODELS };
   /** Aggregate-level units: units simulated as one object, and the policy for splitting them up. */
   readonly aggregates = new Aggregation(this);
   /** Unmanned systems: datalinks and lost-link behaviour. */
   readonly unmanned = new Unmanned(this);
+  /** Forces run by a commander (rule-based or LLM). */
+  readonly commanders = new Commanders(this);
 
   private hostilities = new Set<string>(['1-2']);
   private losMemo = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; v: number; visible: boolean }>();
@@ -193,14 +204,15 @@ export class Engine {
   environment: Required<Environment> = { ...DEFAULT_ENVIRONMENT };
   /** The environment now (clock and light), updated once a simulated second. */
   env: EnvironmentState = environmentAt(DEFAULT_ENVIRONMENT, 0, 0);
-  /** Loads imported terrain datasets by name (set by the server from its terrains folder). */
-  terrainLoader?: (name: string) => TerrainData;
+  /** Loads imported terrain datasets by name (set by the server from its terrains folder); tiled datasets come as a Terrain. */
+  terrainLoader?: (name: string) => TerrainData | Terrain;
 
-  constructor(opts: { catalog?: Catalog; terrain?: Terrain; seed?: number; terrainLoader?: (name: string) => TerrainData } = {}) {
+  constructor(opts: { catalog?: Catalog; terrain?: Terrain; seed?: number; terrainLoader?: (name: string) => TerrainData | Terrain } = {}) {
     this.terrainLoader = opts.terrainLoader;
     this.baseCatalog = opts.catalog ?? DEFAULT_CATALOG;
     this.catalog = new CatalogIndex(this.baseCatalog);
     this.terrain = opts.terrain ?? Terrain.generate();
+    this.terrain.curvature = this.rules.curvature;
     this.rng = new Rng(opts.seed ?? this.terrain.spec.seed);
   }
 
@@ -310,6 +322,8 @@ export class Engine {
     e.smokeLeft = type.smokeGrenades ?? 0;
     e.supplies = type.supply?.capacity ?? 0;
     this.unmanned.init(e);
+    e.apsLeft = type.aps?.charges ?? 0;
+    e.decoysLeft = type.decoys?.salvos ?? 0;
     this.spatial.invalidate();
     if (type.domain === 'air') {
       e.altitudeOverride = opts.altitude;
@@ -486,11 +500,13 @@ export class Engine {
     if (base <= 0 && !jam && !unlinked) {
       if (order.plan) this.assignPlan(targetId, order.plan);
       else if (order.task) this.assignTask(targetId, order.task);
+      // Acknowledging it goes out on the radio (direction finders hear it).
+      if (lead && !lead.remote) lead.lastTransmitAt = this.time;
       return 0;
     }
     const delay = (base > 0 ? Math.round(base * (0.8 + 0.4 * this.rng.next())) : 0) + jam;
     this.pendingOrders.push({ targetId, task: order.task, plan: order.plan, due: Math.round((this.time + delay) * 10) / 10, waitLink: unlinked || undefined });
-    const when = unlinked && !delay ? 'waits for its datalink' : `arrives in ${delay} s${jam ? ', radio jammed' : ''}${unlinked ? ', once its datalink is back' : ''}`;
+    const when = unlinked && !delay ? 'waits for its datalink' : `arrives in ${delay} s${jam ? (this.ew.radioSilent(lead!) ? ', radio silence' : ', radio jammed') : ''}${unlinked ? ', once its datalink is back' : ''}`;
     this.log('task', `Order to ${t.name}: ${this.describeOrder(order)} (${when})`, t.id);
     return delay;
   }
@@ -519,7 +535,35 @@ export class Engine {
     if (from.remote || !from.alive) return;
     // A jammed radio gets nothing out.
     if (this.ew.radioJammed(from)) return;
+    from.lastTransmitAt = this.time;
     this.log('radio', text, from.id, aboutId);
+  }
+
+  /**
+   * Emission control for an entity, or a unit with its members and subordinate units:
+   * radio silence, radars off, jammers on or off. Settings left out stay as they are.
+   */
+  setEmcon(targetId: string, emcon: { radioSilence?: boolean; radarOff?: boolean; jamming?: boolean }): void {
+    const t = this.resolveTarget(targetId);
+    const members: Entity[] = [];
+    const add = (u: Unit) => {
+      members.push(...u.memberList);
+      for (const sub of this.subordinatesOf(u)) add(sub);
+    };
+    if (t instanceof Unit) add(t);
+    else members.push(t);
+    for (const m of members) {
+      if (emcon.radioSilence !== undefined) m.radioSilent = emcon.radioSilence;
+      if (emcon.radarOff !== undefined) m.radarOff = emcon.radarOff;
+      if (emcon.jamming !== undefined && m.type.jammer) m.jamming = emcon.jamming;
+    }
+    const said = [
+      emcon.radioSilence === undefined ? '' : emcon.radioSilence ? 'radio silence' : 'radio free',
+      emcon.radarOff === undefined ? '' : emcon.radarOff ? 'radars off' : 'radars on',
+      emcon.jamming === undefined || !members.some((m) => m.type.jammer) ? '' : emcon.jamming ? 'jamming on' : 'jamming off',
+    ].filter(Boolean);
+    if (said.length) this.log('info', `${t.name}: ${said.join(', ')}`, t.id);
+    if (emcon.jamming !== undefined) this.ew.update();
   }
 
   private describeOrder(o: { task?: TaskSpec; plan?: Plan }): string {
@@ -1008,6 +1052,8 @@ export class Engine {
       this.smoke.add({ x: target.x + ((shot.from.x - target.x) / d) * 30, y: target.y + ((shot.from.y - target.y) / d) * 30 }, 25, 45);
       this.log('info', `${target.name} fired smoke grenades`, target.id);
     }
+    // An aircraft warned of a missile releases flares and chaff.
+    releaseDecoys(this, shot);
     const at = target?.name ?? (shot.targetId ? 'target' : `(${Math.round(shot.to.x)}, ${Math.round(shot.to.y)})`);
     this.log('fire', `${shooter?.name ?? shot.shooterId} fired ${shot.weapon.name} at ${at} (${Math.round(shot.range)} m)`, shot.shooterId, shot.targetId, {
       from: shot.from,
@@ -1046,7 +1092,7 @@ export class Engine {
   planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number, force?: ForceId, avoidThreats = false): Vec2[] | null {
     let overlay = this.obstacles.overlay(force, domain);
     const threat = avoidThreats && force !== undefined ? this.threats.overlay(force, domain) : null;
-    if (threat) overlay = overlay ? overlay.map((v, i) => v * threat[i]) : threat;
+    if (threat) overlay = overlay ? PostOverlay.product(overlay, threat) : threat;
     const route = this.terrain.planRoute(from, to, domain, offroadFactor, overlay);
     return route && overlay && domain !== 'lifeform' ? this.obstacles.threadLanes(route, from) : route;
   }
@@ -1099,7 +1145,8 @@ export class Engine {
     if (det.effects) {
       const names = det.effects.map((f) => `${this.nameOf(f.entityId)}${f.outcome === 'kill' ? ' destroyed' : ` ${f.outcome} kill`}`);
       const at = `(${Math.round(det.location.x)}, ${Math.round(det.location.y)})`;
-      this.log('detonation', `${shot.weapon.name} impact at ${at}: ${names.length ? names.join(', ') : 'no effect'}`, shot.shooterId, det.effects[0]?.entityId, {
+      const lead = det.emitterLost ? `${shot.weapon.name} lost its emitter and burst at ${at}` : `${shot.weapon.name} impact at ${at}`;
+      this.log('detonation', `${lead}: ${names.length ? names.join(', ') : 'no effect'}`, shot.shooterId, det.effects[0]?.entityId ?? (det.emitterLost ? shot.targetId : undefined), {
         to: det.location,
         hit: det.hit,
         weaponId: shot.weapon.id,
@@ -1113,7 +1160,9 @@ export class Engine {
     const tname = target?.name ?? 'target';
     const text = det.guidanceLost
       ? `${shot.weapon.name} lost guidance and missed ${tname}`
-      : det.outcome === 'kill'
+      : det.intercepted
+        ? `${shot.weapon.name} intercepted short of ${tname}`
+        : det.outcome === 'kill'
         ? `${shot.weapon.name} destroyed ${tname}`
         : det.outcome === 'mobility'
           ? `${shot.weapon.name} hit ${tname}: mobility kill`
@@ -1157,6 +1206,7 @@ export class Engine {
   setRules(rules: SimulationRules): void {
     for (const k of Object.keys(DEFAULT_RULES) as (keyof SimulationRules)[]) if (typeof rules[k] === 'boolean') this.rules[k] = rules[k]!;
     if (!this.rules.suppression) for (const e of this.entities.values()) e.suppression = 0;
+    this.terrain.curvature = this.rules.curvature;
   }
 
   /** Change the time of day and weather. `time` is the time of day at the scenario's start. */
@@ -1279,7 +1329,20 @@ export class Engine {
       } else if (e.uxs && !e.uxs.up && this.unmanned.overrides(e, dt)) {
         // Lost link: its lost-link behaviour steers it; the task waits for the link.
       } else if (task && task.status === 'running') {
+        // Without satellites, it steers by where it thinks it is.
+        const off = e.nav ? this.nav.taskOffset(e, task) : undefined;
+        const tx = e.x;
+        const ty = e.y;
+        if (off) {
+          e.x += off.x;
+          e.y += off.y;
+        }
         const status = task.update({ engine: this, entity: e, dt });
+        if (off) {
+          e.x = tx;
+          e.y = ty;
+          if (e.steer) e.steer = { ...e.steer, x: e.steer.x - off.x, y: e.steer.y - off.y };
+        }
         if (status !== 'running') {
           if (status === 'failed') this.log('task', `${e.name}: ${task.describe(this)} failed${task.message ? `: ${task.message}` : ''}`, e.id);
           if (e.task === task) e.steer = null;
@@ -1333,9 +1396,14 @@ export class Engine {
       updateResupply(this);
       this.ew.update();
       this.unmanned.update();
+      this.nav.update();
+      this.df.update();
+      checkDfCallsForFire(this);
+      updateAntiRadiation(this);
       this.life.update();
       this.alerts.update();
       this.sync.update();
+      this.commanders.update();
     }
     for (const e of this.entities.values()) updateCombat(this, e);
     this.processImpacts();
@@ -1359,8 +1427,10 @@ export class Engine {
     this.pendingOrders = [];
     this.codewords.clear();
     this.sync.clear();
+    this.commanders.clear();
     this.life.clear();
     this.ew.clear();
+    this.df.clear();
     this.aggregates.clear();
     this.sensorDue.clear();
     this.losMemo.clear();
@@ -1393,7 +1463,8 @@ export class Engine {
       // Real-world terrain: everything but the dataset name comes from the dataset.
       if (this.terrain.spec.dataset !== spec.dataset) {
         if (!this.terrainLoader) throw new Error(`terrain dataset "${spec.dataset}" cannot be loaded here`);
-        terrain = Terrain.fromData(this.terrainLoader(spec.dataset));
+        const data = this.terrainLoader(spec.dataset);
+        terrain = data instanceof Terrain ? data : Terrain.fromData(data);
         spec = terrain.spec;
       } else {
         spec = this.terrain.spec;
@@ -1460,14 +1531,20 @@ export class Engine {
     for (const c of s.codewords ?? []) this.codewords.set(`${c.force}|${c.codeword.toUpperCase()}`, c.time);
     for (const m of s.syncMatrices ?? []) this.sync.set({ force: m.force, phases: m.phases }, m.started);
     this.life.set(s.patternOfLife ?? {});
+    this.commanders.load(s.commanders);
     // Tasks and plans last, since they can reference any object. Checkpoints resume them part-way.
     for (const r of s.entities ?? []) {
       const e = this.entities.get(r.id);
       // Members of aggregated units are not in the entity-level simulation.
       if (!e || e.destroyed || e.embarkedIn) continue;
-      if (r.plan) {
+      // A checkpoint without a plan position: the plan was dropped (broke or withdrew); keep its task.
+      const dropped = !!r.plan && !!r.state && r.state.planIndex === undefined;
+      if (r.plan && !dropped) {
         this.assignPlan(r.id, r.plan);
         if (r.state?.planIndex !== undefined) e.plan!.resume(r.state.planIndex, r.state.taskState);
+      } else if (dropped) {
+        e.assignedPlan = r.plan;
+        if (r.state?.taskState) this.assignTask(r.id, r.state.taskState, false);
       } else if (r.task && !r.state?.taskDone) {
         this.assignTask(r.id, r.state?.taskState ?? r.task, false);
         e.assignedTask = r.task;
@@ -1479,9 +1556,13 @@ export class Engine {
     for (const u of s.units ?? []) {
       const unit = this.units.get(u.id)!;
       if (!unit.leader) continue;
-      if (u.plan) {
+      const dropped = !!u.plan && !!u.state && u.state.planIndex === undefined;
+      if (u.plan && !dropped) {
         this.assignPlan(u.id, u.plan);
         if (u.state?.planIndex !== undefined) unit.plan!.resume(u.state.planIndex, u.state.taskState);
+      } else if (dropped) {
+        unit.assignedPlan = u.plan;
+        if (u.state?.taskState) this.assignTask(u.id, u.state.taskState, false);
       } else if (u.task && !u.state?.taskDone) {
         this.assignTask(u.id, u.state?.taskState ?? u.task, false);
         unit.assignedTask = u.task;
@@ -1502,6 +1583,7 @@ export class Engine {
       if (weapon) this.shots.push({ ...r, weapon });
     }
     for (const r of s.entities ?? []) if (r.state?.sensorDue !== undefined) this.sensorDue.set(r.id, r.state.sensorDue);
+    if (s.df) this.df.restore(s.df);
     if (s.rngState !== undefined) this.rng.state = s.rngState;
     this.initialScenario = JSON.parse(JSON.stringify(s));
     for (const fn of this.listeners.reset) fn();
@@ -1535,11 +1617,28 @@ export class Engine {
     if (st.supplies !== undefined) e.supplies = st.supplies;
     if (st.ambient) this.life.adopt(e);
     if (st.jamming === false) e.jamming = false;
+    if (st.radioSilence) e.radioSilent = true;
+    if (st.radarOff) e.radarOff = true;
+    if (st.lastTransmitAt !== undefined) e.lastTransmitAt = st.lastTransmitAt;
+    if (st.apsLeft !== undefined) e.apsLeft = st.apsLeft;
+    if (st.decoysLeft !== undefined) e.decoysLeft = st.decoysLeft;
+    if (st.nav) e.nav = { since: st.nav.since, dir: st.nav.dir, spoofedBy: st.nav.spoofedBy };
     if (st.uxs) this.unmanned.restore(e, st.uxs);
   }
 
   private authoredState(e: Entity): EntityRecord['state'] {
-    const st = { destroyed: e.destroyed || undefined, mobilityKill: e.mobilityKill || undefined, firepowerKill: e.firepowerKill || undefined, embarkedIn: e.embarkedIn, uxs: this.unmanned.record(e, false) };
+    const st = {
+      destroyed: e.destroyed || undefined,
+      mobilityKill: e.mobilityKill || undefined,
+      firepowerKill: e.firepowerKill || undefined,
+      embarkedIn: e.embarkedIn,
+      // Emission control set when authoring the scenario.
+      radioSilence: e.radioSilent || undefined,
+      radarOff: e.radarOff || undefined,
+      jamming: e.type.jammer && !e.jamming ? (false as const) : undefined,
+      // Unmanned systems' operator and settings.
+      uxs: this.unmanned.record(e, false),
+    };
     return Object.values(st).some((v) => v !== undefined) ? st : undefined;
   }
 
@@ -1590,6 +1689,12 @@ export class Engine {
         prepared: e.prepared,
         ambient: e.ambient || undefined,
         jamming: e.type.jammer && !e.jamming ? false : undefined,
+        radioSilence: e.radioSilent || undefined,
+        radarOff: e.radarOff || undefined,
+        lastTransmitAt: this.time - e.lastTransmitAt < RADIO_HEARD_FOR ? e.lastTransmitAt : undefined,
+        apsLeft: e.type.aps && e.apsLeft !== e.type.aps.charges ? e.apsLeft : undefined,
+        decoysLeft: e.type.decoys && e.decoysLeft !== e.type.decoys.salvos ? e.decoysLeft : undefined,
+        nav: e.nav ? { ...e.nav } : undefined,
         supplies: e.type.supply && e.supplies !== e.type.supply.capacity ? e.supplies : undefined,
         uxs: this.unmanned.record(e, true),
       },
@@ -1681,6 +1786,7 @@ export class Engine {
         fireTime: sh.fireTime,
         impactTime: sh.impactTime,
         range: sh.range,
+        decoyed: sh.decoyed,
       })),
       rngState: this.time === 0 ? undefined : this.rng.state,
       rules: JSON.stringify(this.rules) === JSON.stringify(DEFAULT_RULES) ? undefined : { ...this.rules },
@@ -1692,6 +1798,8 @@ export class Engine {
       environment: JSON.stringify(this.environment) === JSON.stringify(DEFAULT_ENVIRONMENT) ? undefined : { ...this.environment },
       smoke: this.smoke.clouds.length ? this.smoke.clouds.map((c) => ({ ...c })) : undefined,
       aggregation: this.aggregates.policyRecord(),
+      commanders: this.commanders.save(this.time > 0),
+      df: this.time === 0 ? undefined : this.df.record(),
     };
   }
 
@@ -1700,6 +1808,7 @@ export class Engine {
   snapshotEntity(e: Entity, passengers?: Map<string, string[]>): EntitySnapshot {
     const running = e.task && e.task.status === 'running';
     const riders = (e.type.capacity ?? 0) > 0 ? (passengers ? passengers.get(e.id) : this.passengersOf(e.id).map((p) => p.id)) : undefined;
+    const radiates = emissions(this, e);
     return {
       id: e.id,
       name: e.name,
@@ -1740,6 +1849,12 @@ export class Engine {
       ambient: e.ambient || undefined,
       jamming: e.type.jammer ? e.jamming : undefined,
       jammed: this.ew.status(e),
+      emcon: e.radioSilent || e.radarOff ? { radioSilence: e.radioSilent || undefined, radarOff: e.radarOff || undefined } : undefined,
+      emitting: radiates.length ? radiates : undefined,
+      aps: e.type.aps ? { left: e.apsLeft, charges: e.type.aps.charges } : undefined,
+      decoys: e.type.decoys ? { left: e.decoysLeft, salvos: e.type.decoys.salvos } : undefined,
+      gnss: e.nav ? (e.nav.spoofedBy ? 'spoofed' : 'denied') : undefined,
+      navError: e.nav ? Math.round(this.nav.errorSize(e)) : undefined,
       link: this.unmanned.status(e),
       expended: e.uxs?.expended || undefined,
     };
@@ -1801,6 +1916,8 @@ export class Engine {
       schedule: this.schedule(),
       alerts: this.alerts.open().slice(0, 50),
       sync: this.sync.all().length ? this.sync.states() : undefined,
+      commanders: this.commanders.status(),
+      dfContacts: (dc => (dc.length ? dc : undefined))(this.df.contacts()),
       catalogVersion: this.catalogVersion,
     };
   }

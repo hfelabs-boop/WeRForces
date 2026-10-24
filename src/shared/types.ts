@@ -1,5 +1,7 @@
 // Shared, serializable types used by the simulation engine, the server API
 // and the browser front-end. Everything in here must be plain JSON data.
+
+import type { CommanderKind, CommanderOptions, CommanderSettings, CommanderStatus } from './commander.js';
 //
 // Coordinate conventions (local tangent plane around the terrain origin):
 //   x = metres east, y = metres north, z = metres above mean sea level.
@@ -28,7 +30,8 @@ export const FORCE_NAMES: Record<ForceId, string> = {
 };
 
 export type Domain = 'ground' | 'lifeform' | 'air' | 'surface';
-export type ArmorClass = 'lifeform' | 'soft' | 'light' | 'armored' | 'air' | 'ship';
+/** `drone`: small unmanned aircraft (quadcopters, FPV, small fixed-wing, loitering munitions): hard to hit, killed by one hit. */
+export type ArmorClass = 'lifeform' | 'soft' | 'light' | 'armored' | 'air' | 'ship' | 'drone';
 export type SymbolKind =
   | 'armor'
   | 'mech'
@@ -112,6 +115,14 @@ export interface WeaponDef {
   spreadMrad?: number;
   /** Unguided direct fire: one-sigma error of the range estimate used to set the sight, as a fraction (0.01 laser rangefinder, 0.1 by eye; default 0.05). */
   rangeError?: number;
+  /** Navigates to its aim point by satellite (GPS-guided shells, rockets, bombs): under enemy GNSS jamming it falls back on inertial guidance and misses by more. */
+  gnss?: boolean;
+  /** GNSS-guided munitions: inertial drift rate (m/s) once satellite navigation is lost (default 3). */
+  insDrift?: number;
+  /** Anti-radiation missile: fired at enemy radars and jammers its force has located by direction finding, and homes on their emissions; if the emitter falls silent it flies on to where it last heard it. */
+  antiRadiation?: boolean;
+  /** Whether active protection systems can defeat it (default: guided missiles and slow rockets fired at ground targets). */
+  apsDefeatable?: boolean;
 }
 
 export interface SensorDef {
@@ -132,6 +143,24 @@ export interface SensorDef {
   refRange?: number;
   /** Radar: the radar cross-section (m²) `refRange` is quoted for (default 1). */
   refRcs?: number;
+  /**
+   * Direction finding (ELINT/SIGINT): a passive receiver that takes bearings to enemy
+   * emitters within `maxRange` (and in line of sight) instead of seeing targets.
+   * `bearingError`: one-sigma bearing error in radians (default 2°); `bands`: what it
+   * listens to (default all).
+   */
+  df?: { bearingError?: number; bands?: EmissionBand[] };
+}
+
+/** What an entity radiates: radar, jamming, radio traffic, an unmanned system's control datalink. */
+export type EmissionBand = 'radar' | 'jammer' | 'radio' | 'datalink';
+
+/** Emission control: what a unit or entity keeps quiet. */
+export interface Emcon {
+  /** No radio transmissions: cannot be direction-found on the radio, but shares no contacts, calls no fire, hears no codewords, and orders reach it late. */
+  radioSilence?: boolean;
+  /** Radars switched off: they neither radiate nor detect. */
+  radarOff?: boolean;
 }
 
 /** What a jammer can deny: radios, radars, unmanned systems' datalinks, satellite navigation. */
@@ -224,13 +253,27 @@ export interface EntityTypeDef {
    * Electronic warfare: while switched on, jams within `range` m enemy radios, radars,
    * unmanned systems' control datalinks and/or satellite navigation (GNSS).
    */
-  jammer?: { range: number; radio?: boolean; radar?: boolean; datalink?: boolean; gnss?: boolean };
+  jammer?: { range: number; radio?: boolean; radar?: boolean; datalink?: boolean; gnss?: boolean; spoof?: boolean };
   /** Unmanned systems: how it is controlled, and what it does without its link. */
   unmanned?: UnmannedDef;
   /** Navigates by satellite (GNSS); denied, it falls back on inertial navigation. */
   gnss?: boolean;
-  /** Drone operators and ground control stations: unmanned systems' datalinks end here. */
-  controlStation?: boolean;
+  /** Inertial drift rate (m/s) of a GNSS navigator once satellite navigation is lost (default 1, a small drone's MEMS unit). */
+  insDrift?: number;
+  /**
+   * Ground control station for unmanned systems (drone operator teams, control vehicles):
+   * unmanned systems' datalinks end here, up to `range` m away; it radiates on the datalink
+   * while a friendly radio-linked unmanned system is within `range` m.
+   */
+  groundControl?: { range: number };
+  /**
+   * Active protection system (hard kill, e.g. Trophy, Arena): `charges` interceptions, each
+   * defeating an incoming missile, rocket or loitering munition with probability `pk`, from
+   * within `arc` degrees about the hull front (default 360); `top`: also against top attack.
+   */
+  aps?: { name?: string; charges: number; pk: number; arc?: number; top?: boolean };
+  /** Flares and chaff (aircraft): `salvos` released automatically on missile launch warning, each cutting that missile's kill chance by `pkFactor`. */
+  decoys?: { salvos: number; pkFactor: number };
   /** `legged`: a ground vehicle that walks (robot dog): it goes where troops on foot go, at its own speed. */
   mobility?: 'legged';
   /**
@@ -459,6 +502,20 @@ export interface TerrainData {
   buildings?: Building[];
   roads: Vec2[][];
   towns: Town[];
+  /** Tiled terrain (large datasets): the posts come in tiles and the base64 layers above are empty. */
+  tiles?: TerrainTilesInfo;
+}
+
+/** How to fetch a tiled terrain's tiles: GET /api/v1/terrain/tiles/{z}/{x}/{y}. */
+export interface TerrainTilesInfo {
+  /** Cells per tile side (tiles have one more post per side). */
+  tileSize: number;
+  /** The finest level; level 0 is one tile over the whole extent. */
+  maxZoom: number;
+  layers: { water: boolean; landCover: boolean; roads: boolean; urban: boolean };
+  elevation: { min: number; max: number };
+  /** URL template, relative to the API root. */
+  url: string;
 }
 
 /** A building: footprint as local x,y pairs in metres (x0, y0, x1, y1, ...) and height in metres. */
@@ -530,6 +587,16 @@ export interface EntityState {
   ambient?: boolean;
   /** Jammers switched off. */
   jamming?: false;
+  /** Emission control. */
+  radioSilence?: true;
+  radarOff?: true;
+  /** Simulation time of its last radio transmission. */
+  lastTransmitAt?: number;
+  /** Active protection charges and decoy salvos left. */
+  apsLeft?: number;
+  decoysLeft?: number;
+  /** Satellite navigation lost: since when, direction of the inertial error (radians), and the spoofer if spoofed. */
+  nav?: NavState;
   /** Unmanned systems: control, datalink and lost-link state. */
   uxs?: UnmannedState;
 }
@@ -558,6 +625,13 @@ export interface UnmannedState {
   tetherCut?: boolean;
   /** One-way munition that has delivered its warhead. */
   expended?: boolean;
+}
+
+/** A GNSS navigator's lost (or spoofed) fix. */
+export interface NavState {
+  since: number;
+  dir: number;
+  spoofedBy?: string;
 }
 
 export interface UnitRecord {
@@ -662,6 +736,42 @@ export interface ShotRecord {
   range: number;
   /** A smoke round. */
   smoke?: boolean;
+  /** The target fired flares or chaff at it. */
+  decoyed?: boolean;
+}
+
+/** Bearing to an emitter taken by a direction-finding station. */
+export interface DfBearing {
+  stationId: string;
+  x: number;
+  y: number;
+  /** Radians clockwise from north. */
+  bearing: number;
+  /** One-sigma bearing error (radians). */
+  sigma: number;
+  /** The station's own range estimate (m), from signal strength. */
+  range: number;
+  time: number;
+}
+
+/** An enemy emitter located by a force's direction finders. */
+export interface DfContact {
+  /** The emitter (an entity id). */
+  id: string;
+  /** The force that located it. */
+  force: ForceId;
+  /** What it was heard radiating. */
+  bands: EmissionBand[];
+  /** Best estimate of where it is. */
+  x: number;
+  y: number;
+  /** Uncertainty ellipse (about 86 % likely to hold the emitter): semi-axes in m, and bearing of the major axis (radians). */
+  major: number;
+  minor: number;
+  orientation: number;
+  /** Stations whose bearings went into the fix. */
+  stations: number;
+  lastSeen: number;
 }
 
 export interface ScenarioFile {
@@ -697,6 +807,10 @@ export interface ScenarioFile {
   syncMatrices?: (SyncMatrix & { started?: Record<string, number> })[];
   /** When aggregated units disaggregate and re-aggregate (defaults when missing). */
   aggregation?: AggregationPolicy;
+  /** Forces run by a commander (rule-based or LLM): settings only, never keys. */
+  commanders?: CommanderSettings[];
+  /** Checkpoint only: direction-finding bearings per force and emitter. */
+  df?: { force: ForceId; id: string; bands: EmissionBand[]; bearings: DfBearing[] }[];
 }
 
 /** Background civilians: cars on the roads and people in the towns (neutral, force 3). */
@@ -715,6 +829,8 @@ export interface SimulationRules {
   fuel?: boolean;
   /** Orders take time to pass down the chain of command (by echelon). Off by default. */
   orderDelay?: boolean;
+  /** Earth curvature and atmospheric refraction in line of sight and radar horizon (k = 4/3). */
+  curvature?: boolean;
 }
 
 /** An order on its way to an entity or unit (rules.orderDelay). */
@@ -854,7 +970,7 @@ export interface Explanation {
   unit?: Finding[];
 }
 
-export type AlertKind = 'taskFailed' | 'idle' | 'broken' | 'outOfFuel' | 'lowFuel' | 'outOfAmmo' | 'leaderLost' | 'losses' | 'underFire' | 'contact' | 'jammed' | 'linkLost';
+export type AlertKind = 'taskFailed' | 'idle' | 'broken' | 'outOfFuel' | 'lowFuel' | 'outOfAmmo' | 'leaderLost' | 'losses' | 'underFire' | 'contact' | 'jammed' | 'gnssDenied' | 'apsSpent' | 'linkLost';
 
 /** Something that needs the operator's attention: a unit idle, broken, out of fuel... */
 export interface Alert {
@@ -930,6 +1046,18 @@ export interface EntitySnapshot {
   jamming?: boolean;
   /** What enemy jamming denies it now. */
   jammed?: JamBand[];
+  /** Emission control in force. */
+  emcon?: Emcon;
+  /** What it radiates now. */
+  emitting?: EmissionBand[];
+  /** Active protection: charges left of `charges`. */
+  aps?: { left: number; charges: number };
+  /** Flare and chaff salvos left of `salvos`. */
+  decoys?: { left: number; salvos: number };
+  /** Satellite navigation lost: `denied` (it knows) or `spoofed` (it does not; exercise control only). */
+  gnss?: 'denied' | 'spoofed';
+  /** Its navigation error (m) while GNSS is denied or spoofed. */
+  navError?: number;
   /** Unmanned systems: the control datalink. */
   link?: LinkStatus;
   /** A one-way munition that has delivered its warhead (no longer on the map). */
@@ -1042,6 +1170,10 @@ export interface SimState {
   alerts?: Alert[];
   /** Synchronization matrices (global plans), per force. */
   sync?: SyncMatrixState[];
+  /** Forces run by a commander, with its latest decisions. */
+  commanders?: CommanderStatus[];
+  /** Enemy emitters located by direction finding (players: their own force's). */
+  dfContacts?: DfContact[];
   /** Changes when the catalog does (clients fetch it again). */
   catalogVersion?: number;
   /** Plan steps waiting for a set time, soonest first (for the timeline). */
@@ -1116,6 +1248,8 @@ export type Command =
   | { cmd: 'setJamming'; id: string; on: boolean }
   /** Unmanned systems (an entity, or every one in a unit): operator (null: any of its force), lost-link behaviour and autonomy (null: the type's). */
   | { cmd: 'setUnmanned'; id: string; controllerId?: string | null; lostLink?: LostLinkBehaviour | null; autonomy?: Autonomy | null }
+  /** Emission control for an entity, or a unit with its members and subordinate units: radio silence, radars off, jammers on or off. */
+  | { cmd: 'setEmcon'; targetId: string; radioSilence?: boolean; radarOff?: boolean; jamming?: boolean }
   /** Background civilians to keep on the map (0 for none). */
   | { cmd: 'setPatternOfLife'; vehicles?: number; pedestrians?: number }
   /** Replace a force's synchronization matrix (an empty list of phases removes it). */
@@ -1124,6 +1258,8 @@ export type Command =
   | { cmd: 'startPhase'; force: ForceId; phaseId: string }
   /** Send a codeword to a force (players: their own). Plans waiting for it go on. */
   | { cmd: 'sendCodeword'; force: ForceId; codeword: string }
+  /** Put a force under a commander ('rules' or 'llm'), or take it back ('none'). */
+  | { cmd: 'setCommander'; force: ForceId; kind: CommanderKind; options?: CommanderOptions }
   | { cmd: 'setReactions'; targetId: string; reactions: Reactions }
   /** Put infantry (entity or unit) into a carrier (entity or unit) instantly, e.g. when setting up a scenario. */
   | { cmd: 'embark'; passengerId: string; carrierId: string }

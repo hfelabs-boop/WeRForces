@@ -93,7 +93,8 @@ export function filterState(engine: Engine, s: SimState, force: ForceId): SimSta
   const seen = contactsOf(engine, force);
   const entities: EntitySnapshot[] = [];
   for (const e of s.entities) {
-    if (e.force === force) entities.push(e);
+    // A spoofed navigator does not know it is.
+    if (e.force === force) entities.push(e.gnss === 'spoofed' ? { ...e, gnss: undefined, navError: undefined } : e);
     else {
       const c = seen.get(e.id);
       if (c && !e.embarkedIn) entities.push(contactView(engine, e, c));
@@ -110,6 +111,9 @@ export function filterState(engine: Engine, s: SimState, force: ForceId): SimSta
     orders: s.orders?.filter((o) => forceOf(engine, o.targetId) === force),
     schedule: s.schedule?.filter((o) => forceOf(engine, o.targetId) === force),
     alerts: s.alerts?.filter((a) => a.force === force),
+    commanders: s.commanders?.filter((c) => c.force === force),
+    // Emitters this force's direction finders have located.
+    dfContacts: ((list) => (list.length ? list : undefined))((s.dfContacts ?? []).filter((c) => c.force === force)),
     dis: undefined,
   };
 }
@@ -181,8 +185,10 @@ const PLAYER_COMMANDS = new Set<Command['cmd']>([
   'sendCodeword',
   'setSyncMatrix',
   'startPhase',
+  'setCommander',
   'setJamming',
   'setUnmanned',
+  'setEmcon',
   'drive',
   'batch',
   'aggregate',
@@ -254,6 +260,7 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
     case 'stop':
     case 'setRoe':
     case 'setReactions':
+    case 'setEmcon':
       ownObject(c.targetId, 'object');
       return;
     case 'setFormation':
@@ -305,6 +312,11 @@ export function checkCommand(engine: Engine, role: Role, raw: unknown): void {
           condition(p?.trigger?.condition);
         }
       }
+      return;
+    case 'setCommander':
+      if (Number(c.force) !== force) throw new ForbiddenError('players hand their own force to a commander only');
+      // Model calls cost money: only exercise control starts an LLM commander.
+      if (c.kind === 'llm') throw new ForbiddenError('an LLM commander is set by exercise control');
       return;
     case 'ackAlert':
       // Players acknowledge their own force's alerts only.

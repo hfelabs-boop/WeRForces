@@ -176,7 +176,7 @@ export class Unmanned {
     if (!drones.length) return;
     const stations = new Map<ForceId, Entity[]>();
     for (const e of engine.entities.values()) {
-      if (!e.type.controlStation || !e.alive || e.remote || e.embarkedIn) continue;
+      if (!e.type.groundControl || !e.alive || e.remote || e.embarkedIn) continue;
       const list = stations.get(e.force);
       if (list) list.push(e);
       else stations.set(e.force, [e]);
@@ -241,7 +241,7 @@ export class Unmanned {
       key = `#${c.id}`;
     } else {
       const lead = d.unit?.leader;
-      const byLeader = lead && lead !== d && lead.alive && !lead.uxs && !lead.type.controlStation ? lead : undefined;
+      const byLeader = lead && lead !== d && lead.alive && !lead.uxs && !lead.type.groundControl ? lead : undefined;
       sources = byLeader ? [...stations, byLeader] : stations;
       key = `F${d.force}${byLeader ? `|${byLeader.id}` : ''}`;
     }
@@ -301,9 +301,10 @@ export class Unmanned {
     return out;
   }
 
-  /** One radio hop: within both ends' range, with line of sight (smoke does not stop radio). */
+  /** One radio hop: within both ends' range (a drone's link range, a ground control station's reach), with line of sight (smoke does not stop radio). */
   private hop(a: Entity, b: Entity): boolean {
-    const range = Math.min(a.uxs ? linkRangeOf(a) : Infinity, b.uxs ? linkRangeOf(b) : Infinity);
+    const reach = (e: Entity) => (e.uxs ? linkRangeOf(e) : (e.type.groundControl?.range ?? Infinity));
+    const range = Math.min(reach(a), reach(b));
     if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) > range) return false;
     return this.engine.lineOfSight(a.eye, b.eye, true);
   }
@@ -354,9 +355,13 @@ export class Unmanned {
     const st = e.uxs;
     if (!st || st.up || st.expended) return false;
     const busy = !!e.task && e.task.status === 'running';
-    if (busy && autonomyOf(e) !== 'remote') return false;
     let b = lostLinkOf(e);
-    if (busy && b === 'continue') return false;
+    if (busy && (autonomyOf(e) !== 'remote' || b === 'continue')) {
+      // Carrying on by itself: when it next falls back, it holds where it is then.
+      st.holdAt = undefined;
+      st.homing = null;
+      return false;
+    }
     const fixedWing = (e.type.minSpeed ?? 0) > 0;
     if (b === 'land' && fixedWing) b = 'return';
     if (b === 'return') {

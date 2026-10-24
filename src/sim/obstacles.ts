@@ -6,6 +6,7 @@ import { pointInPolygon } from '../shared/math.js';
 import type { ForceId, Graphic, Vec2 } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
+import { PostOverlay } from './postOverlay.js';
 
 export const LANE_WIDTH = 30;
 export const DEFAULT_DENSITY = 0.5;
@@ -43,7 +44,7 @@ function knows(g: Graphic, force: ForceId): boolean {
 export class Obstacles {
   /** Bumped whenever obstacles, lanes or knowledge of minefields change. */
   version = 0;
-  private overlays = new Map<string, Float32Array | null>();
+  private overlays = new Map<string, PostOverlay | null>();
 
   constructor(private readonly engine: Engine) {}
 
@@ -106,16 +107,16 @@ export class Obstacles {
    * Per-post route cost multipliers for a force and domain (null when nothing applies):
    * obstacles are impassable to vehicles and slow on foot; known minefields are avoided.
    */
-  overlay(force: ForceId | undefined, domain: string): Float32Array | null {
+  overlay(force: ForceId | undefined, domain: string): PostOverlay | null {
     if (domain === 'air' || domain === 'surface') return null;
     const key = `${force}:${domain}`;
     if (this.overlays.has(key)) return this.overlays.get(key)!;
     const t = this.engine.terrain;
     const cs = t.spec.cellSize;
-    let grid: Float32Array | null = null;
+    let grid: PostOverlay | null = null;
     const mark = (i: number, f: number) => {
-      grid ??= new Float32Array(t.cols * t.rows).fill(1);
-      grid[i] = Math.max(grid[i], f);
+      grid ??= new PostOverlay(t.cols, t.rows);
+      grid.max(i, f);
     };
     for (const g of this.list('obstacle')) {
       for (let k = 1; k < g.points.length; k++) {

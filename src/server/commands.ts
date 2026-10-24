@@ -340,6 +340,18 @@ export function executeCommand(runner: SimRunner, raw: unknown): CommandResult {
   return result;
 }
 
+/**
+ * Run a command straight on the engine, with no runner: no undo checkpoint and no time
+ * control. Commanders give their orders this way, after the same permission check as a player.
+ */
+export function applyCommand(engine: Engine, raw: unknown): CommandResult {
+  const refuse = () => {
+    throw new ValidationError('not available here');
+  };
+  const runner = { engine, recorder: null, setRunning: refuse, stepFor: refuse, setTimeScale: refuse, undo: refuse, redo: refuse } as unknown as SimRunner;
+  return runCommand(runner, raw);
+}
+
 function runCommand(runner: SimRunner, raw: unknown): CommandResult {
   const engine = runner.engine;
   return engine.safely(() => {
@@ -529,6 +541,16 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         engine.sync.start(f, id, 'started by hand');
         return;
       }
+      case 'setCommander': {
+        const kind = c.kind;
+        if (kind !== 'none' && kind !== 'rules' && kind !== 'llm') throw new ValidationError("kind must be 'none', 'rules' or 'llm'");
+        try {
+          engine.commanders.set(force(c.force), kind, c.options);
+        } catch (err) {
+          throw new ValidationError((err as Error).message);
+        }
+        return;
+      }
       case 'ackAlert': {
         const force = (c as { force?: ForceId }).force;
         if (c.all) {
@@ -602,6 +624,19 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         for (const d of drones) engine.unmanned.setControl(d, change);
         // Show the new link at once.
         engine.unmanned.update();
+        return;
+      }
+      case 'setEmcon': {
+        const id = str(c.targetId, 'targetId');
+        const t = engine.entities.get(id) ?? engine.units.get(id);
+        if (!t || ('remote' in t && t.remote)) throw new ValidationError(`unknown local entity or unit ${id}`);
+        const flag = (v: unknown, what: string) => {
+          if (v !== undefined && typeof v !== 'boolean') throw new ValidationError(`${what} must be true or false`);
+          return v as boolean | undefined;
+        };
+        const emcon = { radioSilence: flag(c.radioSilence, 'radioSilence'), radarOff: flag(c.radarOff, 'radarOff'), jamming: flag(c.jamming, 'jamming') };
+        if (emcon.radioSilence === undefined && emcon.radarOff === undefined && emcon.jamming === undefined) throw new ValidationError('give radioSilence, radarOff or jamming');
+        engine.setEmcon(id, emcon);
         return;
       }
       case 'setPatternOfLife': {

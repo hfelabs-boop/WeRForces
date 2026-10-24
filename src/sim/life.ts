@@ -17,6 +17,8 @@ const FLEE_DISTANCE = 1500;
 const FLEE_TIME = 120;
 /** How far people wander from their town's centre. */
 const WANDER = 250;
+/** Longest trip a car sets out on (only matters on large maps). */
+const MAX_TRIP = 25000;
 
 export const MAX_AMBIENT = 300;
 
@@ -153,15 +155,15 @@ export class Life {
   }
 
   private carDestination(e: Entity): Vec2 | null {
-    // Another town, or another stretch of road, at least a kilometre away.
-    const towns = this.engine.terrain.towns.filter((t) => Math.hypot(t.x - e.x, t.y - e.y) > 1000);
+    // Another town, or another stretch of road, at least a kilometre away (and on a large map, not too far).
+    const towns = this.engine.terrain.towns.filter((t) => Math.hypot(t.x - e.x, t.y - e.y) > 1000 && Math.hypot(t.x - e.x, t.y - e.y) < MAX_TRIP);
     if (towns.length && this.engine.rng.chance(0.6)) {
       const t = towns[Math.floor(this.engine.rng.next() * towns.length)];
       return this.reachable(e, t);
     }
     for (let tries = 0; tries < 5; tries++) {
       const p = this.roadPoint();
-      if (p && Math.hypot(p.x - e.x, p.y - e.y) > 1000) return p;
+      if (p && Math.hypot(p.x - e.x, p.y - e.y) > 1000 && Math.hypot(p.x - e.x, p.y - e.y) < MAX_TRIP) return p;
     }
     return null;
   }

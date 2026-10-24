@@ -5,6 +5,7 @@ import { dist2d } from '../shared/math.js';
 import { base64ToBytes, bytesToBase64, decodeHeights, LAND_COVER, TerrainGrid } from '../shared/terrainGrid.js';
 import type { Building, Domain, TerrainData, TerrainSpec, Town, Vec2, Vec3 } from '../shared/types.js';
 import { gridAStar, simplifyPolyline } from './pathfinding.js';
+import type { PostOverlay } from './postOverlay.js';
 import { Rng } from './rng.js';
 
 export const DEFAULT_TERRAIN: TerrainSpec = {
@@ -18,11 +19,11 @@ export const DEFAULT_TERRAIN: TerrainSpec = {
   towns: 7,
 };
 
-const CANOPY_HEIGHT = 15;
+export const CANOPY_HEIGHT = 15;
 /** Metres of forest a sight line can pass through before it is blocked. */
-const FOREST_SEE_THROUGH = 150;
+export const FOREST_SEE_THROUGH = 150;
 /** Metres of built-up area a sight line can pass through (streets, gaps) before buildings block it. */
-const URBAN_SEE_THROUGH = 25;
+export const URBAN_SEE_THROUGH = 25;
 /** A post counts as built-up when buildings cover at least this fraction of its cell. */
 export const URBAN_COVERAGE = 0.25;
 
@@ -38,11 +39,29 @@ const COVER_MOBILITY: Record<number, [number, number]> = {
 export interface TerrainLayers {
   landCover?: Uint8Array | null;
   buildings?: Building[];
+  /** Building cover per post (0-100 % of the cell, mean height in metres), when already rasterised. */
+  urban?: { cover: Uint8Array; height: Uint8Array };
 }
+/** Earth radius in metres. */
+export const EARTH_RADIUS = 6371000;
+/** Refraction coefficient: standard atmospheric refraction bends sight lines (and radar) round the earth as if it were 4/3 its size. */
+export const REFRACTION_K = 4 / 3;
+/** Below this range the earth's curvature lowers a sight line by under 6 cm, and is left out. */
+export const CURVATURE_MIN_RANGE = 2000;
+
+/**
+ * How far the earth's curvature (with refraction) drops a point at distance d below the
+ * observer's horizontal: d² / (2kR). A sight line of length d then clears the ground by
+ * curvatureDrop(d) * t * (1 - t) less at fraction t along it than on a flat earth.
+ */
+export function curvatureDrop(d: number): number {
+  return (d * d) / (2 * REFRACTION_K * EARTH_RADIUS);
+}
+
 /** Line-of-sight samples checked against the coarse obstacle grid at a time. */
-const LOS_CHUNK = 8;
+export const LOS_CHUNK = 8;
 /** Posts per side of a coarse obstacle-height block. */
-const LOS_BLOCK = 4;
+export const LOS_BLOCK = 4;
 const TOWN_NAMES = [
   'Alderford',
   'Brenham',
@@ -79,7 +98,7 @@ function valueNoise(x: number, y: number, seed: number): number {
   return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
 }
 
-function fbm(x: number, y: number, seed: number, octaves: number): number {
+export function fbm(x: number, y: number, seed: number, octaves: number): number {
   let sum = 0;
   let amp = 0.5;
   let freq = 1;
@@ -108,6 +127,8 @@ export class Terrain extends TerrainGrid {
   private readonly costGrids = new Map<string, Float32Array>();
 
   readonly buildings: Building[];
+  /** Earth curvature and refraction in line of sight (the engine sets it from rules.curvature). */
+  curvature = true;
   /** Per post: fraction (0-100) of the cell covered by buildings, and their mean height in metres. */
   private readonly urbanCover: Uint8Array | null;
   private readonly urbanHeight: Uint8Array | null;
@@ -118,8 +139,11 @@ export class Terrain extends TerrainGrid {
     this.towns = towns;
     this.buildings = layers.buildings ?? [];
     this.roadMask = new Uint8Array(heights.length);
-    for (const road of roads) this.rasterizeRoad(road);
-    if (this.buildings.length) {
+    if (heights.length) for (const road of roads) this.rasterizeRoad(road);
+    if (layers.urban) {
+      this.urbanCover = layers.urban.cover;
+      this.urbanHeight = layers.urban.height;
+    } else if (this.buildings.length) {
       this.urbanCover = new Uint8Array(heights.length);
       this.urbanHeight = new Uint8Array(heights.length);
       this.rasterizeBuildings();
@@ -131,51 +155,7 @@ export class Terrain extends TerrainGrid {
 
   /** Building cover per post: the share of each cell inside footprints (4x4 samples), and their height. */
   private rasterizeBuildings(): void {
-    const cs = this.spec.cellSize;
-    const cols = this.cols;
-    const hits = new Uint16Array(this.heights.length);
-    const hsum = new Float32Array(this.heights.length);
-    const S = 4;
-    for (const b of this.buildings) {
-      const n = b.pts.length / 2;
-      if (n < 3) continue;
-      let x0 = Infinity;
-      let x1 = -Infinity;
-      let y0 = Infinity;
-      let y1 = -Infinity;
-      for (let i = 0; i < n; i++) {
-        x0 = Math.min(x0, b.pts[2 * i]);
-        x1 = Math.max(x1, b.pts[2 * i]);
-        y0 = Math.min(y0, b.pts[2 * i + 1]);
-        y1 = Math.max(y1, b.pts[2 * i + 1]);
-      }
-      const c0 = Math.max(0, Math.round(x0 / cs - 0.5));
-      const c1 = Math.min(cols - 1, Math.round(x1 / cs + 0.5));
-      const r0 = Math.max(0, Math.round(y0 / cs - 0.5));
-      const r1 = Math.min(this.rows - 1, Math.round(y1 / cs + 0.5));
-      for (let r = r0; r <= r1; r++) {
-        for (let c = c0; c <= c1; c++) {
-          let k = 0;
-          for (let sy = 0; sy < S; sy++) {
-            for (let sx = 0; sx < S; sx++) {
-              const px = (c - 0.5 + (sx + 0.5) / S) * cs;
-              const py = (r - 0.5 + (sy + 0.5) / S) * cs;
-              if (px < x0 || px > x1 || py < y0 || py > y1) continue;
-              if (insideFlat(px, py, b.pts)) k++;
-            }
-          }
-          if (!k) continue;
-          const i = r * cols + c;
-          hits[i] += k;
-          hsum[i] += k * b.h;
-        }
-      }
-    }
-    for (let i = 0; i < hits.length; i++) {
-      if (!hits[i]) continue;
-      this.urbanCover![i] = Math.min(100, Math.round((hits[i] / (S * S)) * 100));
-      this.urbanHeight![i] = Math.min(255, Math.round(hsum[i] / hits[i]));
-    }
+    buildingCover(this.buildings, this.cols, this.rows, this.spec.cellSize, 0, 0, this.urbanCover!, this.urbanHeight!);
   }
 
   /** Building cover at a point: fraction of the area (0-1) and mean height (m). */
@@ -183,6 +163,11 @@ export class Terrain extends TerrainGrid {
     if (!this.urbanCover) return { cover: 0, height: 0 };
     const i = this.nearestPost(x, y);
     return { cover: this.urbanCover[i] / 100, height: this.urbanHeight![i] };
+  }
+
+  /** Fraction (0-1) of the area at a point covered by buildings. */
+  urbanCoverAt(x: number, y: number): number {
+    return this.urbanCover ? this.urbanCover[this.nearestPost(x, y)] / 100 : 0;
   }
 
   /** True where buildings (or built-up land cover) give cover and concealment. */
@@ -386,26 +371,8 @@ export class Terrain extends TerrainGrid {
     const water = this.isWater(x, y);
     if (domain === 'surface') return water ? 1 : 0;
     if (water) return 0;
-    const s = this.slope(x, y);
     const road = this.isRoad(x, y);
-    const cover = this.landCover && !road ? COVER_MOBILITY[this.coverAt(x, y)] : undefined;
-    const urban = this.urbanCover && !road ? this.urbanCover[this.nearestPost(x, y)] / 100 : 0;
-    if (domain === 'lifeform') {
-      if (s > 1.0) return 0;
-      let f = road ? 1 : offroadFactor;
-      if (this.isForest(x, y)) f *= 0.75;
-      if (cover) f *= cover[1];
-      if (urban >= URBAN_COVERAGE) f *= 0.8;
-      return f * Math.max(0.3, 1 - s * 0.8);
-    }
-    if (s > 0.6 && !road) return 0;
-    // Vehicles cannot drive through solid blocks of buildings.
-    if (urban >= 0.5) return 0;
-    let f = road ? 1 : offroadFactor;
-    if (!road && this.isForest(x, y)) f *= 0.45;
-    if (cover) f *= cover[0];
-    if (urban >= URBAN_COVERAGE) f *= 0.4;
-    return f * Math.max(0.2, 1 - s * 1.4);
+    return landMobility(domain, offroadFactor, this.slope(x, y), road, this.isForest(x, y), road ? LAND_COVER.none : this.coverAt(x, y), road ? 0 : this.urbanCoverAt(x, y));
   }
 
   /**
@@ -421,6 +388,7 @@ export class Terrain extends TerrainGrid {
     const stepLen = d / n;
     let underCanopy = 0;
     let amongBuildings = 0;
+    const bulge = this.bulge(d);
     const tops = this.obstacleTops();
     const cs = this.spec.cellSize;
     const cols = this.cols;
@@ -431,7 +399,7 @@ export class Terrain extends TerrainGrid {
       // neither terrain nor canopy can touch it, so the result is exactly the same.
       if ((k - 1) % LOS_CHUNK === 0) {
         const k1 = Math.min(n - 1, k + LOS_CHUNK - 1);
-        if (this.clearAbove(a, b, k / n, k1 / n, tops)) {
+        if (this.clearAbove(a, b, k / n, k1 / n, tops, bulge)) {
           k = k1;
           continue;
         }
@@ -439,7 +407,7 @@ export class Terrain extends TerrainGrid {
       const t = k / n;
       const x = a.x + (b.x - a.x) * t;
       const y = a.y + (b.y - a.y) * t;
-      const z = a.z + (b.z - a.z) * t;
+      const z = a.z + (b.z - a.z) * t - bulge * t * (1 - t);
       // Inlined surfaceHeight(x, y): the same arithmetic as TerrainGrid.elevation.
       const fx = Math.min(Math.max(x / cs, 0), maxF);
       const fy = Math.min(Math.max(y / cs, 0), maxF);
@@ -477,11 +445,12 @@ export class Terrain extends TerrainGrid {
     const stepLen = d / n;
     let underCanopy = 0;
     let amongBuildings = 0;
+    const bulge = this.bulge(d);
     for (let k = 1; k < n; k++) {
       const t = k / n;
       const x = a.x + (b.x - a.x) * t;
       const y = a.y + (b.y - a.y) * t;
-      const z = a.z + (b.z - a.z) * t;
+      const z = a.z + (b.z - a.z) * t - bulge * t * (1 - t);
       const ground = this.surfaceHeight(x, y);
       const at = { x: Math.round(x), y: Math.round(y) };
       if (ground > z) return { cause: 'terrain', ...at };
@@ -489,12 +458,10 @@ export class Terrain extends TerrainGrid {
         underCanopy += stepLen;
         if (underCanopy > FOREST_SEE_THROUGH) return { cause: 'forest', ...at };
       }
-      if (this.urbanCover) {
-        const p = this.nearestPost(x, y);
-        if (this.urbanCover[p] >= URBAN_COVERAGE * 100 && ground + this.urbanHeight![p] > z) {
-          amongBuildings += stepLen;
-          if (amongBuildings > URBAN_SEE_THROUGH) return { cause: 'buildings', ...at };
-        }
+      const urban = this.urbanAt(x, y);
+      if (urban.cover >= URBAN_COVERAGE && ground + urban.height > z) {
+        amongBuildings += stepLen;
+        if (amongBuildings > URBAN_SEE_THROUGH) return { cause: 'buildings', ...at };
       }
     }
     return null;
@@ -523,14 +490,24 @@ export class Terrain extends TerrainGrid {
     return this.tops;
   }
 
+  /**
+   * Curvature term for a sight line of length d: the line is lowered by bulge * t * (1 - t)
+   * at fraction t (0 when the rule is off or the line is short).
+   */
+  protected bulge(d: number): number {
+    return this.curvature && d > CURVATURE_MIN_RANGE ? curvatureDrop(d) : 0;
+  }
+
   /** True when the sight line between fractions t0..t1 of a-b is above every obstacle beneath it. */
-  private clearAbove(a: Vec3, b: Vec3, t0: number, t1: number, tops: { cols: number; max: Float32Array }): boolean {
+  private clearAbove(a: Vec3, b: Vec3, t0: number, t1: number, tops: { cols: number; max: Float32Array }, bulge: number): boolean {
     const cs = this.spec.cellSize;
     const xa = a.x + (b.x - a.x) * t0;
     const xb = a.x + (b.x - a.x) * t1;
     const ya = a.y + (b.y - a.y) * t0;
     const yb = a.y + (b.y - a.y) * t1;
-    const zMin = Math.min(a.z + (b.z - a.z) * t0, a.z + (b.z - a.z) * t1);
+    // The lowest the line gets here: the lower end, less the most curvature takes off in the stretch.
+    const tm = Math.min(Math.max(0.5, t0), t1);
+    const zMin = Math.min(a.z + (b.z - a.z) * t0, a.z + (b.z - a.z) * t1) - bulge * tm * (1 - tm);
     // Posts that can influence samples in this stretch (bilinear corners and nearest post).
     const c0 = Math.max(0, Math.floor(Math.min(xa, xb) / cs));
     const c1 = Math.min(this.cols - 1, Math.ceil(Math.max(xa, xb) / cs));
@@ -576,12 +553,12 @@ export class Terrain extends TerrainGrid {
    * time (so they prefer roads) and avoid water and steep slopes.
    * Returns waypoints excluding the start point, or null if unreachable.
    */
-  planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number, overlay: Float32Array | null = null): Vec2[] | null {
+  planRoute(from: Vec2, to: Vec2, domain: Domain, offroadFactor: number, overlay: PostOverlay | null = null): Vec2[] | null {
     if (domain === 'air') return [to];
     const cs = this.spec.cellSize;
     const grid = this.costGrid(domain, offroadFactor);
     const cols = this.cols;
-    const cost = overlay ? (c: number, r: number) => grid[r * cols + c] * overlay[r * cols + c] : (c: number, r: number) => grid[r * cols + c];
+    const cost = overlay ? (c: number, r: number) => grid[r * cols + c] * overlay.get(r * cols + c) : (c: number, r: number) => grid[r * cols + c];
     // Short hops with a clear straight line do not need a grid search.
     if (dist2d(from, to) < cs * 6 && Number.isFinite(this.segmentCost(from, to, domain, offroadFactor, overlay))) {
       return [to];
@@ -620,7 +597,7 @@ export class Terrain extends TerrainGrid {
   }
 
   /** Time-cost of a straight segment, Infinity if any sample is impassable. */
-  segmentCost(a: Vec2, b: Vec2, domain: Domain, offroadFactor: number, overlay: Float32Array | null = null): number {
+  segmentCost(a: Vec2, b: Vec2, domain: Domain, offroadFactor: number, overlay: PostOverlay | null = null): number {
     const d = dist2d(a, b);
     const step = this.spec.cellSize / 2;
     const n = Math.max(1, Math.ceil(d / step));
@@ -631,7 +608,7 @@ export class Terrain extends TerrainGrid {
       const y = a.y + (b.y - a.y) * t;
       const f = this.mobilityFactor(x, y, domain, offroadFactor);
       if (f <= 0.01) return Infinity;
-      const extra = overlay ? overlay[this.nearestPost(x, y)] : 1;
+      const extra = overlay ? overlay.get(this.nearestPost(x, y)) : 1;
       if (!Number.isFinite(extra)) return Infinity;
       cost += extra / f;
     }
@@ -639,7 +616,7 @@ export class Terrain extends TerrainGrid {
   }
 
   /** Greedy string pulling: skip nodes when a straight segment is not slower. */
-  private smoothPath(pts: Vec2[], domain: Domain, offroadFactor: number, overlay: Float32Array | null): Vec2[] {
+  protected smoothPath(pts: Vec2[], domain: Domain, offroadFactor: number, overlay: PostOverlay | null): Vec2[] {
     if (pts.length <= 2) return pts;
     const prefix: number[] = [0];
     for (let i = 1; i < pts.length; i++) {
@@ -660,6 +637,81 @@ export class Terrain extends TerrainGrid {
       i = best;
     }
     return out;
+  }
+}
+
+/**
+ * Speed factor on land (0 = impassable) for a domain, from the slope and what is there:
+ * a road, forest, a land cover class and the share of the area covered by buildings.
+ */
+export function landMobility(domain: Domain, offroadFactor: number, s: number, road: boolean, forest: boolean, coverClass: number, urban: number): number {
+  const cover = COVER_MOBILITY[coverClass];
+  if (domain === 'lifeform') {
+    if (s > 1.0) return 0;
+    let f = road ? 1 : offroadFactor;
+    if (forest) f *= 0.75;
+    if (cover) f *= cover[1];
+    if (urban >= URBAN_COVERAGE) f *= 0.8;
+    return f * Math.max(0.3, 1 - s * 0.8);
+  }
+  if (s > 0.6 && !road) return 0;
+  // Vehicles cannot drive through solid blocks of buildings.
+  if (urban >= 0.5) return 0;
+  let f = road ? 1 : offroadFactor;
+  if (!road && forest) f *= 0.45;
+  if (cover) f *= cover[0];
+  if (urban >= URBAN_COVERAGE) f *= 0.4;
+  return f * Math.max(0.2, 1 - s * 1.4);
+}
+
+/**
+ * Rasterise building footprints onto a grid of posts (cols x rows, cellSize apart, the first
+ * at ox, oy): per post, the share (0-100) of its cell inside footprints, from 4 x 4 samples,
+ * and the footprints' mean height in metres.
+ */
+export function buildingCover(buildings: Building[], cols: number, rows: number, cs: number, ox: number, oy: number, cover: Uint8Array, height: Uint8Array): void {
+  const hits = new Uint16Array(cols * rows);
+  const hsum = new Float32Array(cols * rows);
+  const S = 4;
+  for (const b of buildings) {
+    const n = b.pts.length / 2;
+    if (n < 3) continue;
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let y0 = Infinity;
+    let y1 = -Infinity;
+    for (let i = 0; i < n; i++) {
+      x0 = Math.min(x0, b.pts[2 * i]);
+      x1 = Math.max(x1, b.pts[2 * i]);
+      y0 = Math.min(y0, b.pts[2 * i + 1]);
+      y1 = Math.max(y1, b.pts[2 * i + 1]);
+    }
+    const c0 = Math.max(0, Math.round((x0 - ox) / cs - 0.5));
+    const c1 = Math.min(cols - 1, Math.round((x1 - ox) / cs + 0.5));
+    const r0 = Math.max(0, Math.round((y0 - oy) / cs - 0.5));
+    const r1 = Math.min(rows - 1, Math.round((y1 - oy) / cs + 0.5));
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        let k = 0;
+        for (let sy = 0; sy < S; sy++) {
+          for (let sx = 0; sx < S; sx++) {
+            const px = ox + (c - 0.5 + (sx + 0.5) / S) * cs;
+            const py = oy + (r - 0.5 + (sy + 0.5) / S) * cs;
+            if (px < x0 || px > x1 || py < y0 || py > y1) continue;
+            if (insideFlat(px, py, b.pts)) k++;
+          }
+        }
+        if (!k) continue;
+        const i = r * cols + c;
+        hits[i] += k;
+        hsum[i] += k * b.h;
+      }
+    }
+  }
+  for (let i = 0; i < hits.length; i++) {
+    if (!hits[i]) continue;
+    cover[i] = Math.min(100, Math.round((hits[i] / (S * S)) * 100));
+    height[i] = Math.min(255, Math.round(hsum[i] / hits[i]));
   }
 }
 

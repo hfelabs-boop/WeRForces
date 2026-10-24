@@ -29,6 +29,22 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | `ru-2s19` | 2S19 Msta-S — Russian 152mm self-propelled howitzer | 59 / 36 km/h | light | 20 / 15 / 13 / 10 | 152mm 2A64 howitzer (OF-45 HE)<br>12.7mm heavy machine gun (burst) | Unaided eye | 1.1.222.4.1.3.0 |
 | `us-m1150` | M1150 Assault Breacher Vehicle — US armoured breacher with mine plough and line charges (about 90 s per lane) | 65 / 32 km/h | armored | 600 / 250 / 80 / 50 | 12.7mm heavy machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.7.2.1.0 |
 | `civ-car` | Civilian Car — Neutral civilian sedan | 108 / 50 km/h | soft | — | — | — | 1.1.0.81.1.0.0 |
+| `us-m1a2-sepv3` | M1A2 SEPv3 Abrams (Trophy) — US main battle tank with the Trophy active protection system: defeats incoming ATGMs, RPGs and loitering munitions from any side (not from above) while its charges last | 65 / 40 km/h | armored | 700 / 300 / 100 / 60 | 120mm M256 smoothbore (APFSDS)<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.225.1.1.4.0 |
+| `ru-t72b3-arena` | T-72B3 with Arena-M — Russian main battle tank with the Arena-M active protection system, covering the front and sides | 58 / 36 km/h | armored | 550 / 150 / 60 / 40 | 125mm 2A46 smoothbore<br>7.62mm machine gun (burst) | Vehicle thermal sight<br>Unaided eye | 1.1.222.1.2.7.0 |
+| `us-lmadis` | L-MADIS counter-drone (JLTV) — US vehicle-mounted counter-drone system: its radar finds small drones, its jammer cuts their datalinks and satellite navigation within 3 km | 112 / 65 km/h | light | 15 / 10 / 10 / 5 | 12.7mm heavy machine gun (burst) | Counter-drone radar (RPS-42 class)<br>Vehicle thermal sight | 1.1.225.6.20.0.0 |
+| `ru-silok` | Silok counter-drone jammer — Russian vehicle-mounted counter-drone EW system: cuts drone datalinks and satellite navigation within 4 km | 90 / 50 km/h | soft | — | — | Counter-drone radar (RPS-42 class)<br>Unaided eye | 1.1.222.7.43.0.0 |
+| `ru-shipovnik` | Shipovnik-Aero counter-drone EW (spoofing) — Russian counter-drone EW system: cuts drone datalinks within 10 km and spoofs their satellite navigation, walking them off course without them knowing | 90 / 50 km/h | soft | — | — | Unaided eye | 1.1.222.7.42.0.0 |
+| `ru-pole21` | Pole-21 GNSS jammer — Russian satellite-navigation jammer: denies GNSS to drones and GNSS-guided munitions within 25 km | 90 / 50 km/h | soft | — | — | Unaided eye | 1.1.222.7.44.0.0 |
+| `us-mshorad` | Stryker M-SHORAD (30mm, Stinger) — US short-range air defence Stryker: a radar that sees small drones, a 30 mm proximity-fuzed cannon and Stinger missiles | 97 / 58 km/h | light | 30 / 20 / 15 / 10 | 30mm XM914 (proximity airburst)<br>FIM-92 Stinger | Counter-drone radar (RPS-42 class)<br>Vehicle thermal sight | 1.1.225.28.10.0.0 |
+| `ru-tunguska` | 2K22 Tunguska (30mm, 9M311) — Russian self-propelled anti-aircraft gun and missile system: radar, twin 30 mm guns and 9M311 missiles, effective against helicopters and drones | 65 / 40 km/h | light | 20 / 12 / 10 / 8 | 30mm 2A38M twin anti-aircraft guns (burst)<br>9M311 SAM (Tunguska) | SPAAG search/track radar<br>Vehicle thermal sight | 1.1.222.28.2.0.0 |
+| `us-coyote` | Coyote interceptor launcher (KuRFS radar) — US counter-drone launcher: its radar tracks drones and it fires Coyote interceptors at them out to 10 km | 90 / 50 km/h | soft | — | Coyote Block 2 interceptor | Counter-drone radar (RPS-42 class)<br>Unaided eye | 1.1.225.28.11.0.0 |
+| `us-prophet` | Prophet Enhanced (SIGINT/DF) — US signals-intelligence vehicle: takes bearings to enemy radios, drone datalinks, radars and jammers out to 30 km; two of them cross bearings into a tight fix, and it calls for fire on good fixes | 90 / 50 km/h | light | 15 / 10 / 10 / 5 | — | SIGINT direction finder (radio, datalink, radar, jammer)<br>Unaided eye | 1.1.225.31.1.0.0 |
+| `ru-r381t` | R-381T Taran (radio DF) — Russian radio-intelligence and direction-finding vehicle: takes bearings to enemy radios, drone datalinks, radars and jammers out to 30 km; it calls for fire on good fixes | 90 / 50 km/h | soft | — | — | SIGINT direction finder (radio, datalink, radar, jammer)<br>Unaided eye | 1.1.222.31.1.0.0 |
+| `us-uas-gcs` | US UAS ground control station — US ground control station: radiates on the datalink while it flies a radio-linked drone within 50 km (and can be direction-found) | 90 / 50 km/h | soft | — | — | Unaided eye | 1.1.225.29.20.0.0 |
+| `ru-uas-gcs` | RU UAS ground control station — Russian ground control station: radiates on the datalink while it flies a radio-linked drone within 50 km (and can be direction-found) | 90 / 50 km/h | soft | — | — | Unaided eye | 1.1.222.29.20.0.0 |
+| `us-m109a7-excalibur` | M109A7 Paladin (Excalibur) — US self-propelled howitzer firing GPS-guided Excalibur rounds (a few metres off with GPS, far more under GNSS jamming), and HE | 61 / 36 km/h | light | 30 / 25 / 20 / 20 | 155mm M982 Excalibur (GPS-guided)<br>155mm M284 howitzer (M795 HE) | Unaided eye | 1.1.225.4.1.8.0 |
+| `us-himars` | M142 HIMARS (GMLRS) — US wheeled rocket launcher firing GPS-guided GMLRS rockets 15-70 km | 83 / 50 km/h | light | 15 / 10 / 10 / 5 | M31 GMLRS unitary rocket (GPS-guided) | Unaided eye | 1.1.225.4.20.0.0 |
+| `ru-tornado-s` | 9A54 Tornado-S (9M544) — Russian 300 mm multiple rocket launcher firing GLONASS-corrected rockets 20-120 km | 61 / 50 km/h | soft | — | 9M544 300mm rocket (GLONASS-corrected) | Unaided eye | 1.1.222.4.20.0.0 |
 | `us-themis` | THeMIS UGV (armed) — Tracked unmanned ground vehicle (Milrem THeMIS class) with a remote 12.7 mm weapon station | 20 / 14 km/h | light | 12 / 8 / 8 / 5 | 12.7mm heavy machine gun (burst) | UGV remote weapon sight (EO/IR) | 1.1.225.50.1.1.0 |
 | `us-smet` | S-MET logistics UGV — US small multipurpose equipment transport: a robotic mule that follows a squad and carries its water, batteries and ammunition | 14 / 7 km/h | soft | — | — | Robot sensor head (EO/IR) | 1.1.225.50.2.1.0 |
 | `ru-uran9` | Uran-9 — Russian tracked combat UGV with a 30 mm cannon and Ataka anti-tank missiles, driven from a control vehicle up to 3 km away | 35 / 14 km/h | light | 25 / 15 / 10 / 8 | 30mm 2A42 autocannon (burst)<br>9K114 Shturm ATGM | UGV remote weapon sight (EO/IR) | 1.1.222.50.1.1.0 |
@@ -52,6 +68,9 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | `us-engineer` | US Combat Engineer — Sapper: breaches minefields and obstacles (about 4 minutes per lane) | 14 / 6 km/h | lifeform | 5.56mm rifle | Binoculars<br>Night-vision goggles | 3.1.225.1.8.0.0 |
 | `ru-sapper` | RU Sapper — Russian combat engineer: breaches minefields and obstacles (about 4 minutes per lane) | 14 / 6 km/h | lifeform | 5.45mm rifle | Binoculars | 3.1.222.1.8.0.0 |
 | `civ-person` | Civilian — Neutral civilian pedestrian | 11 / 5 km/h | lifeform | — | — | 3.1.0.0.0.0.0 |
+| `us-dronebuster-team` | Infantry with DroneBuster (handheld C-UAS) — US infantry team with a handheld counter-drone jammer: cuts drone datalinks and GNSS within 1 km | 14 / 5 km/h | lifeform | 5.56mm rifle | Binoculars | 3.1.225.1.9.0.0 |
+| `ru-stupor-team` | Infantry with Stupor anti-drone rifle — Russian infantry team with a rifle-shaped counter-drone jammer: cuts drone datalinks and GNSS within 1.5 km | 14 / 5 km/h | lifeform | 5.45mm rifle | Binoculars | 3.1.222.1.9.0.0 |
+| `ru-interceptor-team` | Interceptor-drone team — Russian team launching FPV interceptor drones against enemy drones they can see, out to 3 km | 14 / 5 km/h | lifeform | FPV interceptor drone<br>5.45mm rifle | Binoculars | 3.1.222.1.10.0.0 |
 | `us-uas-operator` | UAS Operator Team — US small unmanned aircraft and robot operators with their ground control station | 14 / 5 km/h | lifeform | 5.56mm rifle | Binoculars<br>Night-vision goggles | 3.1.225.1.9.0.0 |
 | `ru-uas-operator` | Drone Operator Team — Russian drone and robot operators with their ground control station | 14 / 5 km/h | lifeform | 5.45mm rifle | Binoculars | 3.1.222.1.9.0.0 |
 
@@ -65,17 +84,21 @@ DIS enumerations are representative values in the SISO-REF-010 layout (kind.doma
 | `us-mq9` | MQ-9 Reaper — US armed reconnaissance UAV | 432 / 270 km/h, 2500 m AGL | air | 1 | AGM-114 Hellfire | EO/IR turret | 1.2.225.50.2.1.0 |
 | `ru-mi24` | Mi-24V Hind — Russian attack helicopter | 306 / 216 km/h, 80 m AGL | air | 15 | 9K114 Shturm ATGM<br>12.7mm heavy machine gun (burst) | Binoculars | 1.2.222.20.3.0.0 |
 | `ru-su27` | Su-27 Flanker — Russian air-superiority fighter | 1512 / 828 km/h, 3500 m AGL | air | 15 | R-73 air-to-air missile | Fire-control radar<br>Unaided eye | 1.2.222.1.9.0.0 |
-| `us-quadcopter` | Short-range recon quadcopter — US small reconnaissance quadcopter (Skydio X10D class), EO/IR camera, 40 min | 58 / 40 km/h, 80 m AGL | air | 0.01 | — | Small UAV gimbal camera (EO/IR) | 1.2.225.50.10.1.0 |
-| `ru-quadcopter` | Recon quadcopter (Mavic class) — Commercial-type reconnaissance quadcopter used by Russian units, camera, 30 min | 68 / 43 km/h, 100 m AGL | air | 0.01 | — | Small UAV gimbal camera (EO/IR) | 1.2.222.50.10.1.0 |
-| `us-fpv` | FPV attack drone — US first-person-view one-way attack quadcopter with an anti-armour warhead, flown by a pilot over a radio link | 144 / 90 km/h, 30 m AGL | air | 0.01 | — | FPV camera | 1.2.225.50.11.1.0 |
-| `ru-fpv` | FPV attack drone — Russian first-person-view one-way attack quadcopter with an RPG-type warhead, flown by a pilot over a radio link | 144 / 90 km/h, 30 m AGL | air | 0.01 | — | FPV camera | 1.2.222.50.11.1.0 |
-| `ru-fpv-fiber` | FPV attack drone (fibre-optic) — Russian FPV one-way attack drone controlled through a 10 km fibre-optic cable: it cannot be jammed, but cannot fly further than its spool | 108 / 72 km/h, 30 m AGL | air | 0.01 | — | FPV camera | 1.2.222.50.11.2.0 |
-| `us-swarm-drone` | Swarm attack drone — US small autonomous attack quadcopter for swarms: mesh datalink, onboard target recognition, small top-attack warhead | 108 / 72 km/h, 60 m AGL | air | 0.01 | — | Small UAV gimbal camera (EO/IR) | 1.2.225.50.12.1.0 |
-| `us-switchblade300` | Switchblade 300 — US tube-launched loitering munition against troops and light vehicles, 10 km, 15 min | 158 / 101 km/h, 150 m AGL | air | 0.01 | — | Loitering munition EO/IR seeker | 1.2.225.50.20.1.0 |
-| `us-switchblade600` | Switchblade 600 — US anti-armour loitering munition with a top-attack HEAT warhead, 40 km, 40 min | 184 / 112 km/h, 200 m AGL | air | 0.05 | — | Loitering munition EO/IR seeker | 1.2.225.50.21.1.0 |
-| `ru-lancet3` | Lancet-3 — Russian loitering munition with a top-attack warhead, against armour and artillery, 40 km, 40 min | 299 / 108 km/h, 300 m AGL | air | 0.05 | — | Loitering munition EO/IR seeker | 1.2.222.50.21.1.0 |
-| `us-raven` | RQ-11B Raven — US hand-launched reconnaissance UAV, EO/IR, 10 km, 90 min | 79 / 47 km/h, 150 m AGL | air | 0.05 | — | Small UAV gimbal camera (EO/IR) | 1.2.225.50.3.1.0 |
-| `ru-orlan10` | Orlan-10 — Russian reconnaissance and artillery-spotting UAV; also relays other drones’ datalinks. 120 km, 16 h | 148 / 90 km/h, 1000 m AGL | air | 0.3 | — | UAV EO/IR turret | 1.2.222.50.3.1.0 |
+| `us-ah64e` | AH-64E Apache Guardian (flares, chaff) — US attack helicopter with missile warning and flare/chaff dispensers, released automatically when a missile is fired at it | 288 / 216 km/h, 60 m AGL | air | 3 | AGM-114 Hellfire<br>30mm M230 chain gun (burst) | Mast-mounted sight | 1.2.225.20.1.4.0 |
+| `ru-mi24p` | Mi-24P Hind (flares) — Russian attack helicopter with flare dispensers, released automatically when a missile is fired at it | 306 / 216 km/h, 80 m AGL | air | 15 | 9K114 Shturm ATGM<br>12.7mm heavy machine gun (burst) | Binoculars | 1.2.222.20.3.1.0 |
+| `us-f16cj` | F-16CJ Wild Weasel (HARM) — US suppression-of-air-defence fighter: its HARM targeting receiver locates radars and jammers, and it fires HARMs at them; flares and chaff | 1440 / 828 km/h, 3000 m AGL | air | 1.2 | AGM-88 HARM anti-radiation missile<br>AIM-120 AMRAAM<br>AIM-9X Sidewinder | Fire-control radar<br>ARM targeting receiver (radar and jammer bands)<br>Unaided eye | 1.2.225.1.3.4.0 |
+| `ru-su34` | Su-34 Fullback (Kh-31P) — Russian strike aircraft in the anti-radiation role: an ELINT receiver locates radars and jammers for its Kh-31P missiles; flares and chaff | 1512 / 828 km/h, 3500 m AGL | air | 15 | Kh-31P anti-radiation missile<br>R-73 air-to-air missile | Fire-control radar<br>ARM targeting receiver (radar and jammer bands)<br>Unaided eye | 1.2.222.1.10.0.0 |
+| `us-quadcopter` | Short-range recon quadcopter — US small reconnaissance quadcopter (Skydio X10D class), EO/IR camera, 40 min | 58 / 40 km/h, 80 m AGL | drone | 0.01 | — | Small UAV gimbal camera (EO/IR) | 1.2.225.50.10.1.0 |
+| `ru-quadcopter` | Recon quadcopter (Mavic class) — Commercial-type reconnaissance quadcopter used by Russian units, camera, 30 min | 68 / 43 km/h, 100 m AGL | drone | 0.01 | — | Small UAV gimbal camera (EO/IR) | 1.2.222.50.10.1.0 |
+| `us-fpv` | FPV attack drone — US first-person-view one-way attack quadcopter with an anti-armour warhead, flown by a pilot over a radio link | 144 / 90 km/h, 30 m AGL | drone | 0.01 | — | FPV camera | 1.2.225.50.11.1.0 |
+| `ru-fpv` | FPV attack drone — Russian first-person-view one-way attack quadcopter with an RPG-type warhead, flown by a pilot over a radio link | 144 / 90 km/h, 30 m AGL | drone | 0.01 | — | FPV camera | 1.2.222.50.11.1.0 |
+| `ru-fpv-fiber` | FPV attack drone (fibre-optic) — Russian FPV one-way attack drone controlled through a 10 km fibre-optic cable: it cannot be jammed, but cannot fly further than its spool | 108 / 72 km/h, 30 m AGL | drone | 0.01 | — | FPV camera | 1.2.222.50.11.2.0 |
+| `us-swarm-drone` | Swarm attack drone — US small autonomous attack quadcopter for swarms: mesh datalink, onboard target recognition, small top-attack warhead | 108 / 72 km/h, 60 m AGL | drone | 0.01 | — | Small UAV gimbal camera (EO/IR) | 1.2.225.50.12.1.0 |
+| `us-switchblade300` | Switchblade 300 — US tube-launched loitering munition against troops and light vehicles, 10 km, 15 min | 158 / 101 km/h, 150 m AGL | drone | 0.01 | — | Loitering munition EO/IR seeker | 1.2.225.50.20.1.0 |
+| `us-switchblade600` | Switchblade 600 — US anti-armour loitering munition with a top-attack HEAT warhead, 40 km, 40 min | 184 / 112 km/h, 200 m AGL | drone | 0.05 | — | Loitering munition EO/IR seeker | 1.2.225.50.21.1.0 |
+| `ru-lancet3` | Lancet-3 — Russian loitering munition with a top-attack warhead, against armour and artillery, 40 km, 40 min | 299 / 108 km/h, 300 m AGL | drone | 0.05 | — | Loitering munition EO/IR seeker | 1.2.222.50.21.1.0 |
+| `us-raven` | RQ-11B Raven — US hand-launched reconnaissance UAV, EO/IR, 10 km, 90 min | 79 / 47 km/h, 150 m AGL | drone | 0.05 | — | Small UAV gimbal camera (EO/IR) | 1.2.225.50.3.1.0 |
+| `ru-orlan10` | Orlan-10 — Russian reconnaissance and artillery-spotting UAV; also relays other drones’ datalinks. 120 km, 16 h | 148 / 90 km/h, 1000 m AGL | drone | 0.3 | — | UAV EO/IR turret | 1.2.222.50.3.1.0 |
 
 ### Surface vessels
 
@@ -110,7 +133,52 @@ How each unmanned type is controlled (see [Concepts](../concepts.md#unmanned-sys
 | `us-robot-dog-armed` | rf | 1.0 km | 20 % | no | hover | remote | — | 0.9 m |
 | `ru-robot-dog` | rf | 0.8 km | — | no | hover | remote | — | 0.8 m |
 
-Drone operators and ground control stations (datalinks end at them): `us-uas-operator`, `ru-uas-operator`. Legged (they move as troops on foot do): `us-robot-dog`, `us-robot-dog-armed`, `ru-robot-dog`.
+Drone operators and ground control stations (datalinks end at them): `us-uas-gcs`, `ru-uas-gcs`, `us-uas-operator`, `ru-uas-operator`. Legged (they move as troops on foot do): `us-robot-dog`, `us-robot-dog-armed`, `ru-robot-dog`.
+
+## Electronic warfare and protection
+
+Jammers, ground control stations, active protection, flares and chaff, and satellite navigation (see [Concepts](../concepts.md#electronic-warfare)).
+
+| Id | Name | Jams (reach) | Protection | Navigation and control |
+| --- | --- | --- | --- | --- |
+| `us-mq9` | MQ-9 Reaper | — | — | unmanned (rf), GNSS |
+| `ru-r330zh` | R-330Zh Zhitel jammer | radios (15 km) | — | — |
+| `ru-krasukha` | 1L269 Krasukha-2 radar jammer | radars (25 km) | — | — |
+| `us-mfew` | M1133 Stryker EW (MFEW) | radios (10 km) | — | — |
+| `us-m1a2-sepv3` | M1A2 SEPv3 Abrams (Trophy) | — | Trophy: 8 charges, 0.9 | — |
+| `ru-t72b3-arena` | T-72B3 with Arena-M | — | Arena-M: 22 charges, 0.75, 270° arc | — |
+| `us-ah64e` | AH-64E Apache Guardian (flares, chaff) | — | flares/chaff: 12 salvos, pk × 0.35 | — |
+| `ru-mi24p` | Mi-24P Hind (flares) | — | flares/chaff: 16 salvos, pk × 0.4 | — |
+| `us-f16cj` | F-16CJ Wild Weasel (HARM) | — | flares/chaff: 10 salvos, pk × 0.4 | — |
+| `ru-su34` | Su-34 Fullback (Kh-31P) | — | flares/chaff: 10 salvos, pk × 0.4 | — |
+| `us-lmadis` | L-MADIS counter-drone (JLTV) | datalinks, GNSS (3 km) | — | — |
+| `ru-silok` | Silok counter-drone jammer | datalinks, GNSS (4 km) | — | — |
+| `ru-shipovnik` | Shipovnik-Aero counter-drone EW (spoofing) | datalinks, GNSS (spoofing) (10 km) | — | — |
+| `ru-pole21` | Pole-21 GNSS jammer | GNSS (25 km) | — | — |
+| `us-dronebuster-team` | Infantry with DroneBuster (handheld C-UAS) | datalinks, GNSS (1 km) | — | — |
+| `ru-stupor-team` | Infantry with Stupor anti-drone rifle | datalinks, GNSS (1.5 km) | — | — |
+| `us-uas-gcs` | US UAS ground control station | — | — | ground control station (50 km) |
+| `ru-uas-gcs` | RU UAS ground control station | — | — | ground control station (50 km) |
+| `us-uas-operator` | UAS Operator Team | — | — | ground control station (50 km) |
+| `ru-uas-operator` | Drone Operator Team | — | — | ground control station (50 km) |
+| `us-quadcopter` | Short-range recon quadcopter | — | — | unmanned (rf), GNSS |
+| `ru-quadcopter` | Recon quadcopter (Mavic class) | — | — | unmanned (rf), GNSS |
+| `us-fpv` | FPV attack drone | — | — | unmanned (rf), GNSS |
+| `ru-fpv` | FPV attack drone | — | — | unmanned (rf), GNSS |
+| `ru-fpv-fiber` | FPV attack drone (fibre-optic) | — | — | unmanned (fiber) |
+| `us-swarm-drone` | Swarm attack drone | — | — | unmanned (rf), GNSS |
+| `us-switchblade300` | Switchblade 300 | — | — | unmanned (rf), GNSS |
+| `us-switchblade600` | Switchblade 600 | — | — | unmanned (rf), GNSS |
+| `ru-lancet3` | Lancet-3 | — | — | unmanned (rf), GNSS |
+| `us-raven` | RQ-11B Raven | — | — | unmanned (rf), GNSS |
+| `ru-orlan10` | Orlan-10 | — | — | unmanned (rf), GNSS |
+| `us-themis` | THeMIS UGV (armed) | — | — | unmanned (rf), GNSS |
+| `us-smet` | S-MET logistics UGV | — | — | unmanned (rf) |
+| `ru-uran9` | Uran-9 | — | — | unmanned (rf), GNSS |
+| `ru-ugv-cargo` | Logistics UGV (tracked) | — | — | unmanned (rf) |
+| `us-robot-dog` | Quadruped robot (Vision 60 class) | — | — | unmanned (rf), GNSS |
+| `us-robot-dog-armed` | Quadruped robot (armed) | — | — | unmanned (rf), GNSS |
+| `ru-robot-dog` | Quadruped robot (armed) | — | — | unmanned (rf), GNSS |
 
 ## Weapons
 
@@ -125,7 +193,7 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `atgm-tow` | BGM-71 TOW ATGM | 65–3750 m | 280 m/s | 20 s | 7 | yes | ground, surface | armored 0.8, light 0.9, soft 0.9, ship 0.3 | 900 mm | — |
 | `atgm-konkurs` | 9M113 Konkurs ATGM | 75–4000 m | 200 m/s | 25 s | 4 | yes | ground, surface | armored 0.7, light 0.9, soft 0.9, ship 0.3 | 650 mm | — |
 | `mg-762` | 7.62mm machine gun (burst) | 0–900 m | 850 m/s | 2 s | 100 | no | lifeform, ground | lifeform 0.25, soft 0.08, light 0.01 | — | — |
-| `mg-127` | 12.7mm heavy machine gun (burst) | 0–1500 m | 890 m/s | 2.5 s | 60 | no | lifeform, ground, surface, air | lifeform 0.3, soft 0.25, light 0.06, air 0.05, ship 0.04 | 20 mm | — |
+| `mg-127` | 12.7mm heavy machine gun (burst) | 0–1500 m | 890 m/s | 2.5 s | 60 | no | lifeform, ground, surface, air | lifeform 0.3, soft 0.25, light 0.06, air 0.05, ship 0.04, drone 0.08 | 20 mm | — |
 | `rifle-556` | 5.56mm rifle | 0–500 m | 900 m/s | 2 s | 70 | no | lifeform, ground | lifeform 0.15, soft 0.02 | — | — |
 | `rifle-545` | 5.45mm rifle | 0–500 m | 880 m/s | 2 s | 70 | no | lifeform, ground | lifeform 0.15, soft 0.02 | — | — |
 | `at4` | AT4 84mm anti-armor | 20–300 m | 290 m/s | 15 s | 2 | no | ground | armored 0.25, light 0.6, soft 0.7 | 420 mm | 1.5 mrad / 10 % |
@@ -134,17 +202,27 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `hellfire` | AGM-114 Hellfire | 500–8000 m | 425 m/s | 8 s | 8 | yes (top attack) | ground, surface | armored 0.85, light 0.9, soft 0.9, ship 0.4 | 1200 mm | — |
 | `gun-30mm-m230` | 30mm M230 chain gun (burst) | 0–1700 m | 805 m/s | 3 s | 40 | no | ground, lifeform, surface | light 0.35, soft 0.6, lifeform 0.5, armored 0.02 | 25 mm | 1 mrad / 1 % |
 | `shturm` | 9K114 Shturm ATGM | 400–5000 m | 400 m/s | 12 s | 4 | yes | ground, surface | armored 0.75, light 0.9, soft 0.9, ship 0.35 | 650 mm | — |
-| `aim120` | AIM-120 AMRAAM | 1000–40000 m | 1200 m/s | 10 s | 4 | yes | air | air 0.7 | — | — |
-| `aim9` | AIM-9X Sidewinder | 300–15000 m | 900 m/s | 6 s | 2 | yes | air | air 0.75 | — | — |
-| `r73` | R-73 air-to-air missile | 300–20000 m | 850 m/s | 6 s | 4 | yes | air | air 0.7 | — | — |
-| `stinger` | FIM-92 Stinger | 200–4800 m | 750 m/s | 15 s | 3 | yes | air | air 0.6 | — | — |
-| `sam-osa` | 9K33 Osa SAM | 1500–10000 m | 800 m/s | 10 s | 6 | yes | air | air 0.6 | — | — |
+| `aim120` | AIM-120 AMRAAM | 1000–40000 m | 1200 m/s | 10 s | 4 | yes | air | air 0.7, drone 0.4 | — | — |
+| `aim9` | AIM-9X Sidewinder | 300–15000 m | 900 m/s | 6 s | 2 | yes | air | air 0.75, drone 0.5 | — | — |
+| `r73` | R-73 air-to-air missile | 300–20000 m | 850 m/s | 6 s | 4 | yes | air | air 0.7, drone 0.45 | — | — |
+| `stinger` | FIM-92 Stinger | 200–4800 m | 750 m/s | 15 s | 3 | yes | air | air 0.6, drone 0.5 | — | — |
+| `sam-osa` | 9K33 Osa SAM | 1500–10000 m | 800 m/s | 10 s | 6 | yes | air | air 0.6, drone 0.45 | — | — |
 | `naval-127mm` | 127mm Mk 45 naval gun | 200–15000 m | 800 m/s | 3 s | 600 | no | surface, ground, lifeform | ship 0.15, light 0.3, soft 0.5, armored 0.1, lifeform 0.3 | — | — |
-| `sm2` | RIM-66 SM-2 SAM | 2000–70000 m | 1100 m/s | 5 s | 32 | yes | air | air 0.75 | — | — |
+| `sm2` | RIM-66 SM-2 SAM | 2000–70000 m | 1100 m/s | 5 s | 32 | yes | air | air 0.75, drone 0.4 | — | — |
 | `how-155mm` | 155mm M284 howitzer (M795 HE) | 2000–22000 m | 320 m/s | 15 s | 39 | no | ground, lifeform, surface | armored 0.3, light 0.65, soft 0.85, lifeform 0.75, ship 0.1 | 120 mm | — |
 | `how-152mm` | 152mm 2A64 howitzer (OF-45 HE) | 2000–24700 m | 320 m/s | 12 s | 50 | no | ground, lifeform, surface | armored 0.28, light 0.6, soft 0.85, lifeform 0.75, ship 0.1 | 110 mm | — |
 | `mortar-81mm` | 81mm M252 mortar (M821 HE) | 80–5600 m | 200 m/s | 5 s | 30 | no | ground, lifeform | armored 0.02, light 0.2, soft 0.65, lifeform 0.7 | 25 mm | — |
 | `mortar-120mm` | 120mm 2B11 mortar (OF-843 HE) | 480–7100 m | 220 m/s | 6 s | 24 | no | ground, lifeform | armored 0.06, light 0.35, soft 0.75, lifeform 0.75 | 45 mm | — |
+| `agm88` | AGM-88 HARM anti-radiation missile | 2000–110000 m | 680 m/s | 10 s | 2 | yes (anti-radiation) | ground, surface | soft 0.9, light 0.8, armored 0.3, ship 0.3 | — | — |
+| `kh31p` | Kh-31P anti-radiation missile | 3000–110000 m | 1000 m/s | 10 s | 2 | yes (anti-radiation) | ground, surface | soft 0.9, light 0.8, armored 0.3, ship 0.3 | — | — |
+| `gun-30mm-xm914` | 30mm XM914 (proximity airburst) | 0–3000 m | 1080 m/s | 2 s | 60 | no | air, ground, lifeform | drone 0.45, air 0.3, light 0.3, soft 0.6, lifeform 0.45 | 40 mm | — |
+| `gun-30mm-2a38` | 30mm 2A38M twin anti-aircraft guns (burst) | 0–4000 m | 960 m/s | 2 s | 50 | no | air, ground, lifeform | drone 0.4, air 0.4, light 0.3, soft 0.6, lifeform 0.45 | 35 mm | — |
+| `sam-9m311` | 9M311 SAM (Tunguska) | 2500–8000 m | 900 m/s | 8 s | 8 | yes | air | air 0.65, drone 0.5 | — | — |
+| `coyote` | Coyote Block 2 interceptor | 200–10000 m | 150 m/s | 6 s | 12 | yes | air | drone 0.85, air 0.5 | — | — |
+| `interceptor-drone` | FPV interceptor drone | 50–3000 m | 60 m/s | 30 s | 4 | yes | air | drone 0.6, air 0.2 | — | — |
+| `how-155mm-excalibur` | 155mm M982 Excalibur (GPS-guided) | 3000–38000 m | 300 m/s | 20 s | 12 | no (GNSS) | ground, lifeform, surface | armored 0.3, light 0.65, soft 0.85, lifeform 0.75, ship 0.1 | 120 mm | — |
+| `gmlrs` | M31 GMLRS unitary rocket (GPS-guided) | 15000–70000 m | 900 m/s | 10 s | 6 | no (GNSS) | ground, lifeform, surface | armored 0.45, light 0.8, soft 0.9, lifeform 0.85, ship 0.2 | 150 mm | — |
+| `rocket-9m544` | 9M544 300mm rocket (GLONASS-corrected) | 20000–120000 m | 1000 m/s | 4 s | 12 | no (GNSS) | ground, lifeform, surface | armored 0.4, light 0.8, soft 0.9, lifeform 0.85, ship 0.2 | 120 mm | — |
 | `wh-fpv-heat` | FPV drone warhead (RPG-type HEAT) | 0–2000 m | 40 m/s | 1 s | 1 | yes | ground, lifeform, surface | armored 0.55, light 0.85, soft 0.9, lifeform 0.45, ship 0.1 | 500 mm | — |
 | `wh-switchblade300` | Switchblade 300 warhead (fragmentation) | 0–2000 m | 45 m/s | 1 s | 1 | yes (top attack) | ground, lifeform, surface | lifeform 0.7, soft 0.6, light 0.15, armored 0.02 | 20 mm | — |
 | `wh-switchblade600` | Switchblade 600 warhead (HEAT) | 0–2000 m | 55 m/s | 1 s | 1 | yes (top attack) | ground, lifeform, surface | armored 0.8, light 0.9, soft 0.9, lifeform 0.4, ship 0.3 | 750 mm | — |
@@ -165,6 +243,10 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `sam-radar` | Search/track radar | 30000 m (25000 m against 5 m²) | 360° | air | yes |
 | `observer-optics` | Observer optics (thermal, laser rangefinder) | 6000 m | 360° | ground, lifeform, surface | no |
 | `naval-radar` | Naval surface/air radar | 80000 m (60000 m against 1 m²) | 360° | air, surface | yes |
+| `cuas-radar` | Counter-drone radar (RPS-42 class) | 10000 m (3500 m against 0.01 m²) | 360° | air | yes |
+| `spaag-radar` | SPAAG search/track radar | 18000 m (4000 m against 0.01 m²) | 360° | air | yes |
+| `df-ground` | SIGINT direction finder (radio, datalink, radar, jammer) | 30000 m | 360° | emitters: radar, jammer, radio, datalink (bearing ±1.5°) | no |
+| `arm-elint` | ARM targeting receiver (radar and jammer bands) | 120000 m | 360° | emitters: radar, jammer (bearing ±1°) | no |
 | `uav-camera` | Small UAV gimbal camera (EO/IR) | 2500 m | 360° | ground, lifeform, surface, air | no |
 | `fpv-camera` | FPV camera | 1500 m | 100° | ground, lifeform, surface | no |
 | `lm-seeker` | Loitering munition EO/IR seeker | 3000 m | 120° | ground, lifeform, surface | no |
@@ -199,6 +281,10 @@ Pk is the probability of a catastrophic kill per shot at short range against eac
 | `ru-supply-section` | RU Supply Section | section | 2× Ural-4320 supply truck | column | 40 m |
 | `ru-tank-company` | RU Tank Company | company | HQ 1× T-72B3; 3× `ru-tank-platoon` | wedge | 500 m |
 | `ru-flanker-flight` | Su-27 Flight | flight | 2× Su-27 Flanker | echelonRight | 600 m |
+| `us-cuas-section` | US Counter-UAS Section | section | 1× Stryker M-SHORAD (30mm, Stinger), 1× L-MADIS counter-drone (JLTV), 1× Infantry with DroneBuster (handheld C-UAS) | line | 150 m |
+| `us-df-team` | US Direction-Finding Team | team | 2× Prophet Enhanced (SIGINT/DF) | line | 5000 m |
+| `ru-cuas-section` | RU Counter-UAS Section | section | 1× 2K22 Tunguska (30mm, 9M311), 1× Silok counter-drone jammer, 1× Infantry with Stupor anti-drone rifle | line | 150 m |
+| `ru-df-team` | RU Direction-Finding Team | team | 2× R-381T Taran (radio DF) | line | 5000 m |
 | `us-uas-team` | US Recon Quadcopter Team | team | 2× Short-range recon quadcopter; operated by UAS Operator Team (placed with it) | line | 150 m |
 | `us-raven-team` | US Raven Team | team | 1× RQ-11B Raven; operated by UAS Operator Team (placed with it) | line | 300 m |
 | `us-fpv-team` | US FPV Strike Team | team | 4× FPV attack drone; operated by UAS Operator Team (placed with it) | line | 40 m |

@@ -7,12 +7,16 @@ src/shared        Types and helpers used by both the server and the browser (no 
   types.ts          every JSON shape: snapshots, tasks, plans, scenario file, commands
   math.ts           angles, bearings, polygons
   terrainGrid.ts    terrain sampling (elevation, water mask, forest, land cover, buildings) + base64 helpers
+  terrainTiles.ts   tiled terrain: tile pyramid layout, manifest, binary tile encoding
   recording.ts      recording format, state-at-time interpolation, after-action report
   symbology.ts      MIL-STD-2525 symbol codes (SIDCs) for entities and units
   orders.ts         typed orders: parser and completions (runs in the browser and on the server)
 src/sim           The simulation engine; no I/O, usable as a library
   engine.ts         Engine: object store, tasking API, step loop, scenarios, snapshots
-  terrain.ts        procedural or imported terrain, mobility, line of sight, A* route planning (cached cost grids)
+  terrain.ts        procedural or imported terrain, mobility, line of sight (with earth curvature),
+                    A* route planning (cached cost grids)
+  tiledTerrain.ts   large terrain read tile by tile into an LRU cache: the same queries, coarse-then-fine routes
+  postOverlay.ts    route cost multipliers per post (minefields, obstacles, threats), stored in blocks
   pathfinding.ts    grid A* and polyline simplification
   catalog.ts        default entity types, weapons, sensors, unit templates
   entity.ts         Entity state
@@ -25,7 +29,7 @@ src/sim           The simulation engine; no I/O, usable as a library
   aggregate.ts      aggregate level: units as one object, Lanchester attrition, (dis)aggregation
   sensors.ts        detection
   combat.ts         target and weapon selection, fly-out, damage, indirect fire and blast
-  models.ts         swappable hit/kill (armour by aspect), ballistic and radar models
+  models.ts         swappable hit/kill (armour by aspect), ballistic, radar and navigation models
   fires.ts          automatic call for fire
   morale.ts         suppression, pinning, unit morale, breaking and rallying
   environment.ts    sun, light level, weather, sensor range at night
@@ -35,7 +39,10 @@ src/sim           The simulation engine; no I/O, usable as a library
   threats.ts        threat map for covered routes
   batch.ts          Monte Carlo replications and their statistics (no I/O)
   sync.ts           synchronization matrices: phases, triggers, phase orders
-  ew.ts             electronic warfare: who is radio- or radar-jammed
+  ew.ts             electronic warfare: who is jammed (radio, radar, datalink, GNSS), radio silence
+  navigation.ts     GNSS navigators and GNSS-guided munitions under jamming and spoofing
+  emcon.ts          what entities radiate, direction finding (DF contacts), anti-radiation missiles
+  protection.ts     active protection systems and flares/chaff on the shot flow
   life.ts           pattern of life: background civilian cars and pedestrians
   explain.ts        "Why?" explanations for entities and units (read-only)
   alerts.ts         the attention queue (read-only)
@@ -43,6 +50,9 @@ src/sim           The simulation engine; no I/O, usable as a library
   viewshed.ts       viewshed grids for the map overlay
   catalogEdit.ts    validation of catalog entries made in the editor
   wizard.ts         quick battle generator
+  commander/        commanders that run a force: manager.ts (when to decide, carrying orders out as
+                    the force's player), situation.ts (the force's view), rules.ts (rule-based),
+                    llm.ts (the LLM tool loop; the transport is passed in), options.ts, types.ts
   spatial.ts        per-force uniform grid for neighbourhood queries (sensors, blasts)
   recorder.ts       continuous recording for playback and AAR
   rng.ts            seeded PRNG
@@ -51,19 +61,23 @@ src/server        CLI, real-time runner (time-sliced, undo checkpoints), command
                   REST v1 router, OpenAPI, HTTP/WS server with sessions (server.ts),
                   fog.ts (roles, per-force views, command permissions), oidc.ts (sign-in),
                   batch.ts + batchWorker.ts (batch jobs in worker threads),
-                  reports.ts + pdf.ts (AAR as CSV and PDF)
+                  reports.ts + pdf.ts (AAR as CSV and PDF), llm.ts (Messages API transport for
+                  LLM commanders, configured from the environment), tileServer.ts (terrain tiles
+                  over HTTP)
 src/terrain       real terrain import (GeoTIFF + GeoJSON/OSM → dataset), landcover.ts (WorldCover),
-                  osm.ts (OSM XML, Overpass) and the dataset store
+                  osm.ts (OSM XML, Overpass), the dataset store, tiles.ts (tiled datasets on disk),
+                  importTiled.ts (large DEMs as tiled datasets), synthetic.ts (synthetic large terrain)
 hla               HLA bridge federate (Java, IEEE 1516e, RPR FOM subset) and its scripts
 src/mcp           MCP tools (over the REST routes) and the stdio bridge
 src/integrations  Cursor-on-Target, webhooks, GeoJSON/KML, and the hub that wires them up
 web               Browser app: main.ts (UI), map.ts (2D), view3d.ts (3D, lazy-loaded), aar.ts (replay),
+                  tiledGrid.ts (tiles of large terrain fetched for the view),
                   timeline.ts, symbols.ts (2525 and simple symbols), api.ts, planeditor.ts (block
                   plan editor), orderline.ts, quickbar.ts, syncmatrix.ts, drive.ts, quickbattle.ts,
                   catalogeditor.ts
 scenarios         Sample scenarios (generated by scripts/make-scenarios.ts)
 terrains          Imported real-world terrain datasets
-scripts           build-web.mjs, make-scenarios.ts, docs-gen.ts, bench.ts, golden-update.ts
+scripts           build-web.mjs, make-scenarios.ts, docs-gen.ts, bench.ts, bench-terrain.ts, golden-update.ts
 test              vitest suites; test/golden holds the recorded golden runs
 e2e               Playwright browser tests
 deploy            Caddyfile for the TLS front end (docker-compose.yml)
@@ -88,6 +102,8 @@ docs              this documentation (served at /docs)
 5. **Tasks:** each running task sets the entity's `steer` command (a target
    point, a speed, whether to stop there). An entity halted by its on-contact
    reaction, or pinned down by suppression, stops instead, keeping its task.
+   A GNSS navigator that has lost its fix runs its task from where it thinks
+   it is, and the steer point is shifted back by the navigation error.
 6. **Movement:** `stepMovement` turns `steer` into heading, speed and position
    changes, and applies terrain and weather effects. Vehicles out of fuel stay
    put. Ground movement is checked against obstacles and minefields (mine
@@ -98,9 +114,12 @@ docs              this documentation (served at /docs)
    order a full scan would visit them, so results do not depend on the grid.
 8. **Once per second:** the light and weather are updated, smoke drifts and
    expires, observers request fire missions, unit morale is updated, supply
-   vehicles resupply, jamming is worked out, the pattern of life tops up and
-   moves its civilians, alerts are checked, and synchronization-matrix
-   triggers are checked (starting phases).
+   vehicles resupply, jamming is worked out, GNSS navigators lose or regain
+   their fix, direction finders take bearings (and call for fire on good
+   fixes), anti-radiation missiles home on their emitters, the pattern of life tops up and
+   moves its civilians, alerts are checked, synchronization-matrix
+   triggers are checked (starting phases), and commanders decide or carry out
+   orders that have arrived from a model.
 9. **Combat:** pick a target and weapon, fire, and put the shot in flight.
 10. **Impacts:** shots that arrive this tick are resolved into damage (area
    damage for indirect fire, smoke clouds for smoke rounds) and suppression.
@@ -230,6 +249,11 @@ npm run docs:gen      # regenerate docs/reference/catalog.md and mcp-tools.md
 | `terrain-import.test.ts` | GeoTIFF (geographic and UTM) and GeoJSON import, lakes, rivers and bridges, high terrain |
 | `spatial.test.ts` | the spatial grid |
 | `los.test.ts` | the max-height pyramid line of sight against a sample-by-sample reference |
+| `curvature.test.ts` | earth curvature and refraction: horizons, 30 km over flat ground, radar, the rule |
+| `tiled-terrain.test.ts` | tiles against the whole grid: every query and sight line across tile edges, LRU eviction, coarse-then-fine routes |
+| `tiled-dataset.test.ts` | tiled datasets written, listed, loaded and served (tile routes) |
+| `terrain-import-tiled.test.ts` | the tiled import against the single-file import, post by post |
+| `large-terrain.test.ts` | a synthetic 200 km terrain: a scenario in bounded memory, a 100 km route, small route overlays |
 | `morale.test.ts` | suppression, pinning, morale, breaking and rallying |
 | `environment.test.ts` | sun and light through the day, night sensors, weather |
 | `obstacles.test.ts` | obstacles, minefields, breaching, smoke |
@@ -253,11 +277,14 @@ npm run docs:gen      # regenerate docs/reference/catalog.md and mcp-tools.md
 | `sync.test.ts` | synchronization matrices: triggers, phase orders, per-force state |
 | `viewshed.test.ts` | viewshed grids |
 | `life.test.ts` | pattern of life: civilians kept topped up, fleeing |
-| `ew.test.ts` | radio and radar jamming |
+| `ew.test.ts` | radio, radar, datalink and GNSS jamming |
+| `countermeasures.test.ts` | GNSS denial and spoofing, GNSS-guided munitions, counter-UAS jammers, guns and interceptors, emission control, direction finding and triangulation, DF calls for fire, active protection, decoys, anti-radiation missiles, save/load, fog of war, REST and MCP |
 | `fidelity.test.ts` | armour by aspect, ballistics of unguided rounds, the radar range equation, swapping models |
 | `drive.test.ts` | direct control |
 | `catalog-edit.test.ts` | catalog editor validation and per-scenario entries |
 | `wizard.test.ts` | quick battles |
+| `commander.test.ts` | commanders: settings and checkpoints, hold-off, determinism, the LLM tool loop with a scripted transport (permissions, failures, limits), REST and MCP |
+| `commander-battles.test.ts` | the rule-based commander against idle and attacking forces in quick battles, over 10 seeds |
 | `docs.test.ts` | the generated references are current; internal doc links resolve |
 
 **Golden runs** pin the model's behaviour: Calloway Crossroads and Lakeside

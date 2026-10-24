@@ -30,6 +30,7 @@ The WeRForces window has five areas:
 | **Integrations** | API and MCP connection details, TAK output, webhooks, GIS feeds |
 | **?** | This documentation |
 | **Phases** | The [synchronization matrix](#synchronization-matrix). The button shows the phase in progress (*Phase: Assault*), or *Phases (not started)* |
+| **Commander** | The [Commander dialog](#commanders): hand a force to the rule-based or an LLM commander and follow its decisions. The button names the forces that have one (*Commander: Red*; *…* while an LLM thinks, *!* on an error) |
 | **Alerts** | The [attention queue](#alerts), with the number of open alerts (red when one is critical) |
 | Role pill | *Blue player · fog of war* when you joined with a player key (see [below](#playing-one-force-fog-of-war)) |
 | DIS pill | DIS status when started with `--dis`: exercise, site:application, PDUs sent and received, remote entities |
@@ -109,7 +110,11 @@ Effects: shots appear as yellow tracer lines from shooter to target. Detonations
 appear as an orange flash for a hit and a grey puff for a miss. Smoke clouds are
 grey discs that drift with the wind. At night and in twilight the map darkens.
 A jammer that is switched on has its reach drawn as a faint purple dashed
-circle. With **Layers → Planned paths**, the selection's path ends in its
+circle. An enemy emitter located by [direction finding](concepts.md#direction-finding)
+is a yellow diamond at the best estimate, labelled with what it radiates and
+how good the fix is (*DF radar ±450 m (2 stations)*), inside a dashed
+uncertainty ellipse in the colour of the force that found it; it fades as the
+fix goes stale. With **Layers → Planned paths**, the selection's path ends in its
 arrival time (*ETA 10:04*).
 
 Over the map:
@@ -122,6 +127,10 @@ Over the map:
 
 Imported terrain can show land cover (built-up grey, wetland, shrub, bare,
 snow) and, when zoomed in, building footprints.
+
+Large (tiled) terrain is drawn a view at a time: the whole map from an overview,
+sharpening as the tiles for what is on screen arrive, so a 200 km map opens as
+fast as a small one.
 
 The readout in the bottom-right corner shows the cursor position as grid
 (km east/north), latitude/longitude, elevation, and whether the ground is open,
@@ -159,6 +168,9 @@ Click **3D** (or **Split** for 2D and 3D side by side). The 3D view shows:
 - objective areas, minefields and obstacles drawn as translucent curtains, and
   breached lanes as white lines;
 - extruded buildings on imported terrain;
+- on large (tiled) terrain, the whole map from the overview and, when you come
+  closer than about 20 km, the full-detail ground (with roads and buildings)
+  for some 23 km around the point you look at;
 - smoke clouds, and a darker sky and closer haze at night or in poor visibility;
 - tracers and detonations.
 
@@ -185,12 +197,17 @@ scale up close. The 3D code is downloaded the first time you open the view.
 - **Grid, Lat/Lon, Altitude** (aircraft also show height above ground),
   **Heading, Speed, Damage**, **Suppression** (a bar), **Morale** (entities not
   in a unit), **Fuel** (a gauge), **Supplies** (supply vehicles: vehicle loads
-  left), and the **Unit** it belongs to (click to select the unit).
+  left), **Protection** (active protection charges and flare/chaff salvos left,
+  e.g. *Trophy 6/8*), **Navigation** (GNSS navigators: *GNSS*, or *inertial,
+  error ~120 m* while satellite navigation is jammed) and the **Unit** it
+  belongs to (click to select the unit).
 - **Current activity**: the running plan step and task, e.g. *Seize OBJ 2/4:
   Follow route IRON — Follow route IRON (wp 3/28)*. It also shows *PINNED*,
   *BROKEN*, *DUG IN* / *HULL-DOWN*, *HALTED (contact)*, *ORDER IN n s* (an
   order still on its way, with the order-delay rule), *RADIO JAMMED*, *RADAR
-  JAMMED*, *JAMMING* (a jammer that is on) and, while it moves along a planned
+  JAMMED*, *JAMMING* (a jammer that is on), *RADIO SILENCE*, *RADAR OFF*,
+  *GNSS DENIED (~120 m)* (*GNSS SPOOFED* for exercise control only),
+  *DATALINK JAMMED* and, while it moves along a planned
   path, the travel estimate: *1.4 km to go, ETA 10:04 local (in 3 min)*, or
   *stalled: out of fuel*.
 - **Why?**: one line on what it is doing and the main thing in its way.
@@ -228,6 +245,9 @@ scale up close. The 3D code is downloaded the first time you open the view.
   target.
 - **Jamming** (jammers only): what it jams and how far, and **Switch on** /
   **Switch off**.
+- **Emission control**: **Radio silence** and, for radars, **Radar off** (see
+  [Concepts](concepts.md#emission-control)), and what it radiates now
+  (*Radiating: radar, radio*), which is what enemy direction finders can hear.
 - **Center**, **Viewshed** (see [below](#viewshed)), **Drive** (see
   [below](#drive-mode)) and **Delete**.
 
@@ -235,7 +255,9 @@ A passenger's activity reads *MOUNTED in …*.
 
 ### Unit
 
-The same as an entity (with its own **Why?** and travel estimate), plus **Strength** (alive/total), **Morale**,
+The same as an entity (with its own **Why?** and travel estimate, and
+**Emission control** for all its members and subordinate units, with
+**Jamming** when it has jammers), plus **Strength** (alive/total), **Morale**,
 **Leader**, a **Formation** picker (column, line, wedge, vee, echelonRight), a
 **Superior** picker (chain of command), **Subordinates**, and a **Members** list
 (★ = leader).
@@ -452,6 +474,8 @@ loose entity:
 | losses | a member was destroyed (counted: *×3*) | warning |
 | under fire, contact | first fire or first enemy contact after a quiet minute | info |
 | jammed | its radio is jammed | warning |
+| GNSS denied | a member navigating by satellite has lost its fix to jamming (not when spoofed: it does not know) | warning |
+| APS spent | a member's active protection has used its last charge | warning |
 
 Critical alerts also pop up once. Click an alert to select and centre what it
 is about, ✓ to acknowledge it, or **Acknowledge all**. **N** jumps to the next
@@ -490,6 +514,35 @@ and press **Send codeword** to send it to the force now: phases and plans
 waiting for it go on. A started phase shows *started 00:05:01*.
 Exercise control picks the force at the top; a player plans for their own.
 See [Concepts](concepts.md#synchronization-matrix).
+
+## Commanders
+
+**Commander** in the toolbar opens a force's commander (exercise control picks
+Blue or Red; a player sees their own):
+
+- **Commander**: *None* (people and plans run the force), *Rule-based*
+  (the offline doctrinal commander) or *Language model* (only when the server
+  has one [configured](deployment.md#llm-commanders), and only for exercise
+  control).
+- **Aggressiveness** (0 cautious … 1 bold): how strong the force must feel
+  before it attacks.
+- **Decide every (s)**: the interval between decisions. Contact, losses, a new
+  phase or a unit done with its order bring a decision forward.
+- **Leave others' orders (s)**: how long an order the commander did not give
+  is left alone. Order a unit yourself (by hand, on the order line, in a plan
+  or the synchronization matrix) and the commander works around it for this
+  long, then takes it back once the order is done or the time is up.
+- **Intent (LLM)**: the commander's intent in a sentence, for a language model.
+
+**Apply** sets it (one edit: **Undo** takes it back); **Decide now** asks for a
+decision at the next simulated second (the clock must run). Below, the latest
+decisions, newest first: the time, what brought it on, the rationale (*Attack
+(3 contacts, enemy power 2.4 against our 6.1); concentrating on BMP-2 (E15)*),
+the orders given and any refused, with the reason. The same lines appear in the
+[event log](#event-log) as *Red commander: …*, for that force only. With an
+LLM commander the dialog also shows the model calls and tokens used. A quick
+battle can give either side a rule-based commander (*Run by* in the side's
+box). See [Concepts](concepts.md#commanders).
 
 ## Viewshed
 
@@ -574,8 +627,8 @@ situation, the inspector is read-only, and editing and orders are disabled.
 
 File → **Simulation settings…** (or click the time-of-day chip):
 
-- **Models**: suppression, morale and fuel (on by default) and order delay (off
-  by default). Turning one off is useful for comparison runs. See
+- **Models**: suppression, morale, fuel and earth curvature (on by default) and
+  order delay (off by default). Turning one off is useful for comparison runs. See
   [Concepts](concepts.md#optional-models).
 - **Time and weather** at the scenario start: date, time of day, visibility,
   precipitation and wind. See [Concepts](concepts.md#night-and-weather).
@@ -609,7 +662,9 @@ scenario:
 3. **Time** (dawn, day, dusk or night), **Weather** (clear, haze, fog, rain),
    **Distance** between the sides (automatic: 3 km, or 5 km with a company),
    **Terrain** (the current one or a new generated one), **Civilians**, and a
-   **Seed**. The same seed and choices give the same battle; leave it empty for
+   **Seed**. **Run by** in each side's box: its *Phase plan*, or the
+   *Rule-based commander* (that side then gets no synchronization matrix: the
+   [commander](#commanders) runs it from the graphics). The same seed and choices give the same battle; leave it empty for
    a random one.
 
 **Build battle** places both forces on land either side of an objective (a town
@@ -676,6 +731,9 @@ When the server has player keys (`--player blue:KEY`), opening
   as contacts, at the position last seen, named by type (*T-72B3 (E15)*), and
   fade as the contact goes stale. Selecting one shows when it was last seen;
 - the event log only shows events involving your force;
+- emitters located by your force's direction finders are drawn with their
+  uncertainty ellipse (only yours); you are not told when one of your
+  navigators is being spoofed;
 - you can give orders and draw graphics for your force. The clock, the File
   menu, the Create palette, AAR and Integrations belong to exercise control
   (the `--api-key` holder) and are hidden.

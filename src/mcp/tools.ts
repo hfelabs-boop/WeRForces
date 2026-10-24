@@ -257,6 +257,28 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'set_commander',
+    'Hand a force to a commander, or take it back. "rules": the offline doctrinal commander (attacks when strong enough, defends or delays when weak, calls fire on groups of contacts, resupplies, pulls back broken units, sends scouts first). "llm": a language model configured on the server. Either sees only what the force sees and orders through the same commands as a player; orders it did not give are left alone for holdOff seconds. Its decisions and reasons go to the event log and get_commander. "none" stands it down.',
+    {
+      force: z.enum(['blue', 'red', 'neutral']),
+      kind: z.enum(['none', 'rules', 'llm']),
+      aggressiveness: z.number().min(0).max(1).optional().describe('0 cautious .. 1 bold (default 0.5)'),
+      interval: z.number().min(10).max(600).optional().describe('simulated seconds between decisions (default 45)'),
+      holdOff: z.number().min(0).max(3600).optional().describe('seconds an order it did not give is left alone (default 300)'),
+      intent: z.string().max(500).optional().describe("LLM: the commander's intent"),
+    },
+    async ({ force, kind, ...options }) => api('PUT', `/api/v1/forces/${force}/commander`, { kind, options }),
+  );
+
+  tool(
+    'get_commander',
+    "A force's commander: its kind, settings, state and latest decisions with their rationale and orders.",
+    { force: z.enum(['blue', 'red', 'neutral']) },
+    async ({ force }) => api('GET', `/api/v1/forces/${force}/commander`),
+    { readOnlyHint: true },
+  );
+
+  tool(
     'get_alerts',
     'The attention queue: what needs looking at now (units idle after finishing their orders, broken, out of fuel or ammunition, leader lost, losses, failed tasks, under fire, first contact), newest first. Pass acknowledge: true to clear them once handled.',
     { acknowledge: z.boolean().optional().describe('Acknowledge all open alerts after reading them') },
@@ -551,8 +573,8 @@ export function createMcpServer(call: ApiCaller): McpServer {
 
   tool(
     'set_simulation_rules',
-    'Turn optional parts of the model on or off for this scenario. Suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel) are on by default; orderDelay (orders take 5-60 s to pass down the chain of command, by echelon) is off by default. Useful for comparison runs.',
-    { suppression: z.boolean().optional(), morale: z.boolean().optional(), fuel: z.boolean().optional(), orderDelay: z.boolean().optional() },
+    'Turn optional parts of the model on or off for this scenario. Suppression (fire pins and degrades the target), morale (units become shaken and break under losses) and fuel (vehicles and aircraft burn fuel) are on by default; orderDelay (orders take 5-60 s to pass down the chain of command, by echelon) is off by default; curvature (earth curvature and refraction in line of sight beyond 2 km) is on. Useful for comparison runs.',
+    { suppression: z.boolean().optional(), morale: z.boolean().optional(), fuel: z.boolean().optional(), orderDelay: z.boolean().optional(), curvature: z.boolean().optional() },
     async (rules) => api('PUT', '/api/v1/simulation/rules', rules),
     { idempotentHint: true },
   );
@@ -603,6 +625,31 @@ export function createMcpServer(call: ApiCaller): McpServer {
   );
 
   tool(
+    'set_emcon',
+    'Emission control for an entity, or a unit with its members and subordinate units. radioSilence: it transmits nothing, so enemy direction finders cannot locate it by its radio, but it shares no contacts, cannot call for fire or hear codewords, and orders reach it a minute late. radarOff: its radars neither radiate nor detect, and anti-radiation missiles lose them. jamming: switch its jammers on or off. Settings left out stay as they are.',
+    { id: z.string().describe('entity or unit id'), radioSilence: z.boolean().optional(), radarOff: z.boolean().optional(), jamming: z.boolean().optional() },
+    async ({ id, ...emcon }) => {
+      // An entity, else a unit.
+      const asEntity = await call('PATCH', `/api/v1/entities/${encodeURIComponent(id)}`, { emcon });
+      if (asEntity.status >= 400 && asEntity.status !== 404) throw new Error((asEntity.json as { error?: { message?: string } })?.error?.message ?? `HTTP ${asEntity.status}`);
+      const r = asEntity.status === 404 ? await api<{ name: string }>('PATCH', `/api/v1/units/${encodeURIComponent(id)}`, { emcon }) : (asEntity.json as { name: string });
+      const said = Object.entries(emcon)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => `${k} ${v ? 'on' : 'off'}`);
+      return `${r.name}: ${said.join(', ') || 'unchanged'}`;
+    },
+    { idempotentHint: true },
+  );
+
+  tool(
+    'get_df_contacts',
+    'Enemy emitters located by direction finding (SIGINT/ELINT stations such as Prophet or R-381T, and anti-radiation targeting receivers): radars, jammers, radios that transmitted in the last 10 s, drone datalinks and their ground control stations. Each has an estimated position with an uncertainty ellipse (semi-axes in m): one station gives a long ellipse along its bearing, two or more stations cross bearings into a tight fix. Fire a fire mission at a good fix (or let a DF station with call-for-fire do it).',
+    { force: force.optional().describe('exercise control: only this force\'s contacts') },
+    async ({ force: f }) => api('GET', `/api/v1/df-contacts${f !== undefined ? `?force=${f}` : ''}`),
+    { readOnlyHint: true },
+  );
+
+  tool(
     'quick_battle',
     'Replace the scenario with a generated, ready-to-run battle: pick the mission (from Blue\'s side), each force\'s nation, composition, size and support, time and weather. Both forces are placed on land either side of an objective (a town near the middle when there is one), with the mission\'s graphics and a synchronization matrix per force; start the simulation to fight it. Returns the mission brief.',
     {
@@ -613,6 +660,7 @@ export function createMcpServer(call: ApiCaller): McpServer {
       weather: z.enum(['clear', 'haze', 'fog', 'rain']).optional(),
       distance: z.number().min(1000).max(20000).optional().describe('metres between the sides at the start'),
       civilians: z.boolean().optional(),
+      commander: z.object({ blue: z.enum(['none', 'rules']).optional(), red: z.enum(['none', 'rules']).optional() }).optional().describe('sides run by the rule-based commander instead of a phase plan, e.g. {red: "rules"}'),
       seed: z.number().int().optional().describe('same seed and options, same battle'),
       name: z.string().max(80).optional(),
     },

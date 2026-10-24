@@ -1,7 +1,7 @@
 // Checking catalog entries made in the catalog editor or sent through the API: every
 // field the simulation relies on is there and in range. Only known fields are kept.
 
-import type { ArmorClass, Autonomy, Catalog, DisEntityType, Domain, EntityTypeDef, Formation, LostLinkBehaviour, SensorDef, SymbolKind, UnitTemplate, WeaponDef } from '../shared/types.js';
+import type { ArmorClass, Autonomy, Catalog, DisEntityType, Domain, EmissionBand, EntityTypeDef, Formation, LostLinkBehaviour, SensorDef, SymbolKind, UnitTemplate, WeaponDef } from '../shared/types.js';
 
 export class CatalogError extends Error {}
 
@@ -9,7 +9,8 @@ export type CatalogSection = 'entityTypes' | 'weapons' | 'sensors' | 'unitTempla
 export const CATALOG_SECTIONS: CatalogSection[] = ['entityTypes', 'weapons', 'sensors', 'unitTemplates'];
 
 const DOMAINS: Domain[] = ['ground', 'lifeform', 'air', 'surface'];
-const ARMOR: ArmorClass[] = ['lifeform', 'soft', 'light', 'armored', 'air', 'ship'];
+const ARMOR: ArmorClass[] = ['lifeform', 'soft', 'light', 'armored', 'air', 'ship', 'drone'];
+const EMISSION_BANDS: EmissionBand[] = ['radar', 'jammer', 'radio', 'datalink'];
 const SYMBOLS: SymbolKind[] = ['armor', 'mech', 'infantry', 'recon', 'wheeled', 'air-defense', 'artillery', 'engineer', 'supply', 'ew', 'rotary', 'fixed-wing', 'uav', 'ugv', 'legged', 'ship', 'boat', 'generic'];
 const FORMATIONS: Formation[] = ['column', 'line', 'wedge', 'vee', 'echelonRight'];
 const ECHELONS: UnitTemplate['echelon'][] = ['team', 'section', 'platoon', 'company', 'flight', 'group'];
@@ -89,6 +90,9 @@ export function validateEntityType(v: unknown): EntityTypeDef {
   const jammer = t.jammer === undefined ? undefined : obj(t.jammer, 'jammer');
   if (jammer && !jammer.radio && !jammer.radar && !jammer.datalink && !jammer.gnss) throw new CatalogError('jammer: jams at least one of radio, radar, datalink, gnss');
   const unmanned = t.unmanned === undefined ? undefined : obj(t.unmanned, 'unmanned');
+  const groundControl = t.groundControl === undefined ? undefined : obj(t.groundControl, 'groundControl');
+  const aps = t.aps === undefined ? undefined : obj(t.aps, 'aps');
+  const decoys = t.decoys === undefined ? undefined : obj(t.decoys, 'decoys');
   const protection = t.protection === undefined ? undefined : obj(t.protection, 'protection');
   if (t.sidc !== undefined && (typeof t.sidc !== 'string' || !/^[A-Z*-]{10,15}$/.test(t.sidc))) throw new CatalogError('sidc: a MIL-STD-2525C letter code such as S-G-UCFM--');
   return tidy({
@@ -126,6 +130,7 @@ export function validateEntityType(v: unknown): EntityTypeDef {
           radar: bool(jammer.radar, 'jammer.radar'),
           datalink: bool(jammer.datalink, 'jammer.datalink'),
           gnss: bool(jammer.gnss, 'jammer.gnss'),
+          spoof: bool(jammer.spoof, 'jammer.spoof'),
         })
       : undefined,
     unmanned: unmanned
@@ -142,7 +147,18 @@ export function validateEntityType(v: unknown): EntityTypeDef {
         })
       : undefined,
     gnss: bool(t.gnss, 'gnss'),
-    controlStation: bool(t.controlStation, 'controlStation'),
+    insDrift: num(t.insDrift, 'insDrift (m/s)', 0, 100, true),
+    groundControl: groundControl ? { range: num(groundControl.range, 'groundControl.range', 10, 1e6)! } : undefined,
+    aps: aps
+      ? tidy({
+          name: text(aps.name, 'aps.name', 60, true),
+          charges: num(aps.charges, 'aps.charges', 1, 1000)!,
+          pk: num(aps.pk, 'aps.pk', 0, 1)!,
+          arc: num(aps.arc, 'aps.arc (degrees)', 1, 360, true),
+          top: bool(aps.top, 'aps.top'),
+        })
+      : undefined,
+    decoys: decoys ? { salvos: num(decoys.salvos, 'decoys.salvos', 1, 1000)!, pkFactor: num(decoys.pkFactor, 'decoys.pkFactor', 0, 1)! } : undefined,
     mobility: t.mobility === undefined ? undefined : oneOf(t.mobility, 'mobility', ['legged'] as const),
     size: num(t.size, 'size (m)', 0.01, 1000, true),
   } as EntityTypeDef);
@@ -177,12 +193,17 @@ export function validateWeapon(v: unknown): WeaponDef {
     topAttack: bool(w.topAttack, 'topAttack'),
     spreadMrad: num(w.spreadMrad, 'spreadMrad', 0, 100, true),
     rangeError: num(w.rangeError, 'rangeError', 0, 1, true),
+    gnss: bool(w.gnss, 'gnss'),
+    insDrift: num(w.insDrift, 'insDrift (m/s)', 0, 100, true),
+    antiRadiation: bool(w.antiRadiation, 'antiRadiation'),
+    apsDefeatable: w.apsDefeatable === undefined ? undefined : typeof w.apsDefeatable === 'boolean' ? w.apsDefeatable : (bool(w.apsDefeatable, 'apsDefeatable') as never),
   } as WeaponDef);
 }
 
 export function validateSensor(v: unknown): SensorDef {
   const s = obj(v, 'sensor');
   const key = id(s.id);
+  const df = s.df === undefined ? undefined : obj(s.df, 'df');
   return tidy({
     id: key,
     name: text(s.name, 'name')!,
@@ -194,6 +215,7 @@ export function validateSensor(v: unknown): SensorDef {
     nightVision: bool(s.nightVision, 'nightVision'),
     refRange: num(s.refRange, 'refRange', 1, 1e6, true),
     refRcs: num(s.refRcs, 'refRcs (m²)', 0.0001, 1e6, true),
+    df: df ? tidy({ bearingError: num(df.bearingError, 'df.bearingError (rad)', 0.0001, 1, true), bands: df.bands === undefined ? undefined : list(df.bands, 'df.bands', EMISSION_BANDS) }) : undefined,
   } as SensorDef);
 }
 

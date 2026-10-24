@@ -7,6 +7,8 @@ import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import type { Aspect } from './models.js';
 import { accuracyFactor, exposureFactor, reloadFactor, suppress } from './morale.js';
+import { fireAntiRadiation, resolveAntiRadiation } from './emcon.js';
+import { decoyFactor, interceptShot } from './protection.js';
 
 export interface Shot {
   eventNumber: number;
@@ -21,6 +23,8 @@ export interface Shot {
   range: number;
   /** A smoke round: makes a cloud where it lands instead of a blast. */
   smoke?: boolean;
+  /** The target released flares or chaff against it. */
+  decoyed?: boolean;
 }
 
 export type DetonationOutcome = 'kill' | 'mobility' | 'firepower' | 'miss' | 'noEffect';
@@ -39,6 +43,10 @@ export interface Detonation {
   armourHeld?: boolean;
   /** Area-effect rounds: every local entity damaged by the blast. */
   effects?: { entityId: string; outcome: Exclude<DetonationOutcome, 'miss' | 'noEffect'> }[];
+  /** Defeated by the target's active protection system. */
+  intercepted?: boolean;
+  /** An anti-radiation missile whose emitter fell silent: it burst where it last heard it. */
+  emitterLost?: boolean;
 }
 
 /** What a shot's kill chance is made of: hitting, and defeating the armour on the face it strikes. */
@@ -93,6 +101,8 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
     shooter.engagingId = undefined;
     return;
   }
+  // Anti-radiation missiles go at emitters located by direction finding, not at contacts.
+  if (fireAntiRadiation(engine, shooter)) return;
   const now = engine.time;
   const candidates: Entity[] = [];
   const explicit = shooter.attackTargetId ? engine.entities.get(shooter.attackTargetId) : undefined;
@@ -135,7 +145,7 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
     for (const wid of shooter.type.weapons) {
       if ((shooter.ammo.get(wid) ?? 0) <= 0) continue;
       const w = engine.catalog.weapon(wid);
-      if (w.indirect || !w.targets.includes(target.domain) || range < w.minRange || range > w.maxRange) continue;
+      if (w.indirect || w.antiRadiation || !w.targets.includes(target.domain) || range < w.minRange || range > w.maxRange) continue;
       const pk = effectivePk(engine, shooter, target, w, range);
       // Conserve missiles: prefer guns unless the missile is clearly better.
       const score = pk - (w.guided ? 0.15 : 0);
@@ -247,7 +257,7 @@ export function applyBlast(engine: Engine, w: WeaponDef, at: Vec3, shooterId?: s
   return effects;
 }
 
-const KILL_ONLY: ArmorClass[] = ['lifeform', 'air'];
+const KILL_ONLY: ArmorClass[] = ['lifeform', 'air', 'drone'];
 
 /** Adjudicate damage on a local target. Returns the outcome applied. */
 export function applyDamage(engine: Engine, target: Entity, pk: number): DetonationOutcome {
@@ -278,7 +288,10 @@ export function resolveImpact(engine: Engine, shot: Shot): Detonation {
   if (shot.weapon.indirect || !shot.targetId) {
     // Ballistic error grows with range.
     const w = shot.weapon;
-    const sigma = (w.dispersion ?? 0) * (0.5 + 0.5 * Math.min(1, shot.range / w.maxRange));
+    // GNSS-guided rounds that lost their fix on the way add their inertial error.
+    const spread = (w.dispersion ?? 0) * (0.5 + 0.5 * Math.min(1, shot.range / w.maxRange));
+    const nav = w.gnss ? engine.nav.munitionError(shot) : 0;
+    const sigma = nav > 0 ? Math.hypot(spread, nav) : spread;
     const x = shot.to.x + gaussian(engine) * sigma;
     const y = shot.to.y + gaussian(engine) * sigma;
     const location = { x, y, z: engine.terrain.surfaceHeight(x, y) };
@@ -303,13 +316,25 @@ export function resolveImpact(engine: Engine, shot: Shot): Detonation {
       return { shot, location: scatter(engine, target.position), hit: false, outcome: 'miss', guidanceLost: true };
     }
   }
+  // Anti-radiation missiles whose emitter fell silent burst where they last heard it.
+  if (shot.weapon.antiRadiation) {
+    const lost = resolveAntiRadiation(engine, shot);
+    if (lost) return lost;
+  }
+  // Active protection: a charge fired at the incoming missile or rocket.
+  if (!target.remote && interceptShot(engine, shot, target)) {
+    const d = Math.hypot(shot.from.x - target.x, shot.from.y - target.y) || 1;
+    const location = { x: target.x + ((shot.from.x - target.x) / d) * 10, y: target.y + ((shot.from.y - target.y) / d) * 10, z: target.z + 1.5 };
+    return { shot, location, hit: false, outcome: 'miss', intercepted: true };
+  }
   // Guided munitions track the target; ballistic rounds land at the (led) aim point, so a
   // target that changed speed or turned while the round was in flight is missed.
   const moved = dist2d(target, shot.to);
   const tracked = shot.weapon.guided || moved < 6;
   const parts = pkParts(engine, shooter, target, shot.weapon, shot.range, shot.from);
   // Hitting does not depend on the armour; defeating it does.
-  const base = tracked ? parts.base : 0;
+  // Flares and chaff, and a GNSS-guided munition's navigation error, cut the kill chance.
+  const base = tracked ? parts.base * decoyFactor(shot, target) * (shot.weapon.gnss ? engine.nav.munitionFactor(shot, target) : 1) : 0;
   const hitChance = Math.min(1, base * 1.8);
   const hit = engine.rng.chance(hitChance);
   if (target.remote) {

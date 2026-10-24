@@ -1591,3 +1591,36 @@ body.player [data-controller-only] {
   font-family: ui-monospace, Menlo, monospace;
   font-size: 12px;
 }
+
+/* ------------------------------------------------ commander dialog */
+
+.commander textarea {
+  width: 100%;
+  font: inherit;
+}
+
+.commander-decisions {
+  max-height: 40vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+.commander-decisions .decision {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.commander-decisions .decision-head {
+  color: var(--muted);
+}
+
+.commander-decisions ul {
+  margin: 2px 0 0 16px;
+  padding: 0;
+}
+
+.commander-decisions ul.rejected,
+.commander .error {
+  color: #e05252;
+}
