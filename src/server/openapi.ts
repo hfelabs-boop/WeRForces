@@ -67,6 +67,26 @@ export function buildOpenApi(baseUrl: string): Schema {
       '/api/v1/scenario/new': {
         post: op('Scenario', 'Start an empty scenario', body({ type: 'object', properties: { name: { type: 'string' }, terrain: { type: 'object', description: 'generation settings (seed, size, cellSize, relief, waterFraction, forestFraction, towns, origin) or {"dataset": name} for imported terrain' } } })),
       },
+      '/api/v1/scenario/quick-battle': {
+        get: op('Scenario', 'The choices a quick battle takes: missions, force compositions and sizes, support, weather'),
+        post: op('Scenario', 'Replace the scenario with a generated battle: both forces placed on land either side of an objective (a town near the middle when there is one), the graphics for the mission, and a synchronization matrix per force, so it runs when started. Same seed and options, same battle', {
+          ...body({
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              seed: { type: 'integer', description: 'random when left out (returned)' },
+              mission: { type: 'string', enum: ['meeting', 'attack', 'defend', 'delay', 'recon'], description: 'attack, defend, delay and recon are from Blue\'s side (default attack)' },
+              blue: { $ref: '#/components/schemas/QuickBattleSide' },
+              red: { $ref: '#/components/schemas/QuickBattleSide' },
+              terrain: { type: 'object', description: 'as for POST /scenario/new; the current terrain when left out' },
+              distance: { type: 'number', minimum: 1000, maximum: 20000, description: 'metres between the sides at the start (default 3000, or 5000 with a company)' },
+              time: { type: 'number', minimum: 0, maximum: 24, description: 'local time at the start, hours (default 10)' },
+              weather: { type: 'string', enum: ['clear', 'haze', 'fog', 'rain'] },
+              civilians: { type: 'boolean', description: 'civilian traffic and pedestrians' },
+            },
+          }),
+        }),
+      },
       '/api/v1/scenario/undo': { post: op('Scenario', 'Take back the last edit (anything but run, pause, step and time scale); up to 30 steps') },
       '/api/v1/scenario/redo': { post: op('Scenario', 'Redo an edit taken back with undo') },
       '/api/v1/scenarios': { get: op('Scenario', 'List scenarios stored on the server') },
@@ -327,6 +347,15 @@ export function buildOpenApi(baseUrl: string): Schema {
         apiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
       },
       schemas: {
+        QuickBattleSide: {
+          type: 'object',
+          properties: {
+            nation: { type: 'string', enum: ['us', 'ru'], description: 'default us for blue, ru for red' },
+            composition: { type: 'string', enum: ['armor', 'mech', 'infantry', 'combined'], description: 'default mech; combined is tanks with mechanised infantry' },
+            size: { type: 'string', enum: ['platoon', 'company'], description: 'a company is three platoons and an HQ (default platoon)' },
+            support: { type: 'array', items: { type: 'string', enum: ['artillery', 'recon', 'engineers', 'supply', 'air', 'airDefense'] }, description: 'artillery: mortars with a platoon, howitzers with a company; engineers: a minefield in front of a defence, or sappers with an attack' },
+          },
+        },
         Error: { type: 'object', properties: { error: { type: 'object', properties: { status: { type: 'integer' }, message: { type: 'string' } } } } },
         Position: {
           description: 'A location: local metres, geodetic degrees, or a town name',

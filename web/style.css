@@ -793,6 +793,64 @@ aside {
   width: 92vw;
 }
 
+.qb-missions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.qb-mission {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  padding: 6px 8px;
+  height: auto;
+}
+
+.qb-mission span {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: normal;
+}
+
+.qb-mission.selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.qb-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.qb-side {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.qb-side h4 {
+  margin: 0 0 4px;
+}
+
+.qb-blue h4 {
+  color: #4a90e2;
+}
+
+.qb-red h4 {
+  color: #e05252;
+}
+
+.qb-support {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 8px;
+}
+
 .int-section {
   border-top: 1px solid var(--border);
   padding: 10px 0;

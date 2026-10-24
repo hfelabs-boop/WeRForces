@@ -5,6 +5,7 @@ import { FORCE_NAMES } from '../shared/types.js';
 import type { Engine } from '../sim/engine.js';
 import { MAX_AMBIENT } from '../sim/life.js';
 import { CATALOG_SECTIONS, VALIDATORS } from '../sim/catalogEdit.js';
+import { generateBattle, WizardError, type WizardOptions } from '../sim/wizard.js';
 import type { SimRunner } from './runner.js';
 
 const FORCES = new Set([0, 1, 2, 3]);
@@ -330,6 +331,18 @@ function runCommand(runner: SimRunner, raw: unknown): CommandResult {
         runner.setRunning(false);
         engine.newScenario(typeof c.name === 'string' ? c.name : 'Untitled', c.terrain ?? {});
         return;
+      case 'quickBattle': {
+        runner.setRunning(false);
+        if (!c.options || typeof c.options !== 'object') throw new ValidationError('options must be an object');
+        const backup = engine.toScenario();
+        try {
+          return generateBattle(engine, c.options as WizardOptions).blueId;
+        } catch (err) {
+          engine.loadScenario(backup);
+          if (err instanceof WizardError) throw new ValidationError(err.message);
+          throw err;
+        }
+      }
       case 'loadScenario': {
         runner.setRunning(false);
         // Restore the previous state if the file is rejected part-way through.

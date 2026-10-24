@@ -41,6 +41,7 @@ import { Timeline } from './timeline.js';
 import { QuickBar } from './quickbar.js';
 import { PlanEditor } from './planeditor.js';
 import { SyncMatrixDialog } from './syncmatrix.js';
+import { QuickBattleDialog } from './quickbattle.js';
 import { DriveMode } from './drive.js';
 import { CatalogEditor } from './catalogeditor.js';
 import { OrderLine } from './orderline.js';
@@ -522,6 +523,7 @@ class App {
       const action = (e.target as HTMLElement).dataset.action;
       fileMenu.classList.remove('open');
       if (action === 'new') this.newScenarioDialog();
+      if (action === 'quick-battle') void this.quickBattle();
       if (action === 'open-sample') this.openScenarioDialog();
       if (action === 'import') ($('#file-input') as HTMLInputElement).click();
       if (action === 'export') this.exportScenario();
@@ -979,6 +981,34 @@ class App {
     close = this.modal(
       h('div', {}, h('h3', { text: 'Open scenario' }), cards.length ? cards : h('p', { class: 'hint', text: 'No scenarios found in ./scenarios' }), h('div', { class: 'row' }, h('button', { text: 'Cancel', onclick: () => close() }))),
     );
+  }
+
+  private async quickBattle(): Promise<void> {
+    await new QuickBattleDialog({
+      v1: (m, path, body) => this.api.v1(m, path, body),
+      modal: (c) => this.modal(c),
+      toast: (m, info) => this.toast(m, info),
+      hasDataset: () => this.grid?.spec.dataset,
+      built: (b) => {
+        this.select(null);
+        let close = () => {};
+        close = this.modal(
+          h(
+            'div',
+            { class: 'quick-battle-brief' },
+            h('h3', { text: b.name }),
+            h('p', { text: b.description }),
+            h(
+              'div',
+              { class: 'row' },
+              h('button', { class: 'primary', text: 'Start', onclick: () => (close(), void this.cmd({ cmd: 'run' })) }),
+              h('button', { text: 'Show phases', onclick: () => (close(), void this.syncDialog.open()) }),
+              h('button', { text: 'Close', onclick: () => close() }),
+            ),
+          ),
+        );
+      },
+    }).open();
   }
 
   private async newScenarioDialog(): Promise<void> {

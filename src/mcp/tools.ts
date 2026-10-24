@@ -32,6 +32,12 @@ const position = z
 
 const force = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(0)]).describe('1 Blue, 2 Red, 3 Neutral, 0 Other');
 const roe = z.enum(['fireAtWill', 'returnFire', 'holdFire']);
+const side = z.object({
+  nation: z.enum(['us', 'ru']).optional().describe('default us for blue, ru for red'),
+  composition: z.enum(['armor', 'mech', 'infantry', 'combined']).optional().describe('default mech; combined: tanks and mechanised infantry'),
+  size: z.enum(['platoon', 'company']).optional().describe('default platoon; a company is three platoons and an HQ'),
+  support: z.array(z.enum(['artillery', 'recon', 'engineers', 'supply', 'air', 'airDefense'])).optional(),
+});
 
 function text(value: unknown) {
   return { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 1) }] };
@@ -526,6 +532,26 @@ export function createMcpServer(call: ApiCaller): McpServer {
     async ({ id, on }) => {
       const e = await api<{ name: string; jamming?: boolean }>('PATCH', `/api/v1/entities/${encodeURIComponent(id)}`, { jamming: on });
       return `${e.name}: jamming ${e.jamming ? 'on' : 'off'}`;
+    },
+  );
+
+  tool(
+    'quick_battle',
+    'Replace the scenario with a generated, ready-to-run battle: pick the mission (from Blue\'s side), each force\'s nation, composition, size and support, time and weather. Both forces are placed on land either side of an objective (a town near the middle when there is one), with the mission\'s graphics and a synchronization matrix per force; start the simulation to fight it. Returns the mission brief.',
+    {
+      mission: z.enum(['meeting', 'attack', 'defend', 'delay', 'recon']).optional().describe('default attack'),
+      blue: side.optional(),
+      red: side.optional(),
+      time: z.number().min(0).max(24).optional().describe('local time at the start, hours (default 10)'),
+      weather: z.enum(['clear', 'haze', 'fog', 'rain']).optional(),
+      distance: z.number().min(1000).max(20000).optional().describe('metres between the sides at the start'),
+      civilians: z.boolean().optional(),
+      seed: z.number().int().optional().describe('same seed and options, same battle'),
+      name: z.string().max(80).optional(),
+    },
+    async (a) => {
+      const r = await api<{ seed: number; description: string }>('POST', '/api/v1/scenario/quick-battle', a);
+      return `${r.description}`;
     },
   );
 

@@ -880,6 +880,8 @@ export type Command =
   /** Acknowledge an alert, or all of them (players: their own force's). */
   | { cmd: 'ackAlert'; id?: string; all?: boolean }
   /** Add or change a catalog entry (validated), or remove a custom one. */
+  /** Replace the scenario with a generated quick battle (see sim/wizard.ts for the options). */
+  | { cmd: 'quickBattle'; options: unknown }
   | { cmd: 'setCatalogEntry'; section: 'entityTypes' | 'weapons' | 'sensors' | 'unitTemplates'; entry: unknown }
   | { cmd: 'removeCatalogEntry'; section: 'entityTypes' | 'weapons' | 'sensors' | 'unitTemplates'; id: string }
   /** Direct control: drive an entity and pick its target. Starts manual control if it is not under it. */

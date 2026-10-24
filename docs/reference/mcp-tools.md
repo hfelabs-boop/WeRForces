@@ -285,6 +285,22 @@ Switch a jammer (an electronic warfare entity, e.g. R-330Zh Zhitel, Krasukha-2, 
 | `id` | string | yes |  |
 | `on` | boolean | yes |  |
 
+## `quick_battle`
+
+Replace the scenario with a generated, ready-to-run battle: pick the mission (from Blue's side), each force's nation, composition, size and support, time and weather. Both forces are placed on land either side of an objective (a town near the middle when there is one), with the mission's graphics and a synchronization matrix per force; start the simulation to fight it. Returns the mission brief.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `mission` | `"meeting"` \| `"attack"` \| `"defend"` \| `"delay"` \| `"recon"` |  | default attack |
+| `blue` | {nation, composition, size, support} |  |  |
+| `red` | {nation, composition, size, support} |  |  |
+| `time` | number (0–24) |  | local time at the start, hours (default 10) |
+| `weather` | `"clear"` \| `"haze"` \| `"fog"` \| `"rain"` |  |  |
+| `distance` | number (1000–20000) |  | metres between the sides at the start |
+| `civilians` | boolean |  |  |
+| `seed` | integer (-9007199254740991–9007199254740991) |  | same seed and options, same battle |
+| `name` | string |  |  |
+
 ## `set_pattern_of_life`
 
 Fill the map with background civilians: cars driving between towns along the roads and people walking about the towns (neutral, force 3). They run from shots and blasts nearby; any killed are logged. Set both to 0 to remove them.

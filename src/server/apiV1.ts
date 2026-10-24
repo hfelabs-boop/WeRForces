@@ -21,6 +21,7 @@ import { executeCommand } from './commands.js';
 import { buildOpenApi } from './openapi.js';
 import { HttpError, Router, type RouteRequest } from './router.js';
 import type { SimRunner } from './runner.js';
+import { COMPOSITIONS, MISSION_TEXT, MISSIONS, SIZES, SUPPORTS, WEATHERS } from '../sim/wizard.js';
 
 export interface ApiContext {
   runner: SimRunner;
@@ -297,6 +298,13 @@ export class ApiV1 {
       const b = obj(req.body);
       this.run({ cmd: 'newScenario', name: typeof b.name === 'string' ? b.name : 'Untitled', terrain: b.terrain as never });
       return { status: 201, json: this.simulationSummary() };
+    });
+    r.get(`${P}/scenario/quick-battle`, () => ({ json: { missions: MISSIONS.map((id) => ({ id, text: MISSION_TEXT[id] })), compositions: COMPOSITIONS, sizes: SIZES, support: SUPPORTS, weather: WEATHERS, nations: ['us', 'ru'] } }));
+    r.post(`${P}/scenario/quick-battle`, (req) => {
+      const b = obj(req.body);
+      const seed = b.seed === undefined ? Math.floor(Math.random() * 1e6) : b.seed;
+      this.run({ cmd: 'quickBattle', options: { ...b, seed } });
+      return { status: 201, json: { ...this.simulationSummary(), seed } };
     });
     r.post(`${P}/scenario/undo`, () => (this.run({ cmd: 'undo' }), { json: this.history() }));
     r.post(`${P}/scenario/redo`, () => (this.run({ cmd: 'redo' }), { json: this.history() }));
