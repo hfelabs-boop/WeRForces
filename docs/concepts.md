@@ -1347,8 +1347,8 @@ contact, suppression or traffic. It appears on entity and unit snapshots
   - headless `--duration`.
 
 A 40-minute engagement with about 35 entities computes in roughly a second.
-`npm run bench` measures larger scenes: on a typical laptop core, 1000 moving
-and fighting entities run about 20× faster than real time. Sensor scans use a
+`npm run bench` measures larger scenes: on one server core, a mixed battle of
+1,000 entities runs about 10× faster than real time and 5,000 about 1.3×. Sensor scans use a
 spatial grid, so their cost grows with how crowded the battlefield is, not with
 the square of the entity count.
 

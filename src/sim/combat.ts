@@ -107,7 +107,12 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
   const candidates: Entity[] = [];
   const explicit = shooter.attackTargetId ? engine.entities.get(shooter.attackTargetId) : undefined;
   if (explicit && explicit.alive) candidates.push(explicit);
-  if (shooter.roe !== 'holdFire' && mode === 'free') {
+  // Nothing within reach of a loaded direct-fire weapon means no shot: a shortcut with the
+  // same outcome (with a metre to spare, so rounding never skips a possible shot).
+  const reach = candidates.length || shooter.contacts.size ? directReach(engine, shooter) : 0;
+  const reach2 = (reach + 1) * (reach + 1);
+  let inReach = candidates.length > 0 && near(shooter, candidates[0], reach2);
+  if (shooter.roe !== 'holdFire' && mode === 'free' && reach > 0) {
     for (const c of shooter.contacts.values()) {
       const t = engine.entities.get(c.id);
       if (!t || t.destroyed || t.embarkedIn || t === explicit || !engine.isHostile(shooter.force, t.force)) continue;
@@ -116,9 +121,10 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
         if (last === undefined || now - last > 60) continue;
       }
       candidates.push(t);
+      if (!inReach) inReach = near(shooter, t, reach2);
     }
   }
-  if (candidates.length === 0) {
+  if (candidates.length === 0 || !inReach) {
     shooter.engagingId = undefined;
     return;
   }
@@ -169,6 +175,21 @@ export function updateCombat(engine: Engine, shooter: Entity): void {
     return;
   }
   shooter.engagingId = undefined;
+}
+
+function near(a: Entity, b: Entity, range2: number): boolean {
+  return (b.x - a.x) ** 2 + (b.y - a.y) ** 2 + (b.z - a.z) ** 2 <= range2;
+}
+
+/** Longest range of the direct-fire weapons a shooter has rounds for (0: none). */
+function directReach(engine: Engine, shooter: Entity): number {
+  let reach = 0;
+  for (const wid of shooter.type.weapons) {
+    if ((shooter.ammo.get(wid) ?? 0) <= 0) continue;
+    const w = engine.catalog.weapon(wid);
+    if (!w.indirect && w.maxRange > reach) reach = w.maxRange;
+  }
+  return reach;
 }
 
 function fire(engine: Engine, shooter: Entity, target: Entity, w: WeaponDef, range: number): void {

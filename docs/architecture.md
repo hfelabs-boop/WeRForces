@@ -57,6 +57,7 @@ src/sim           The simulation engine; no I/O, usable as a library
                     the force's player), situation.ts (the force's view), rules.ts (rule-based),
                     llm.ts (the LLM tool loop; the transport is passed in), options.ts, types.ts
   spatial.ts        per-force uniform grid for neighbourhood queries (sensors, blasts)
+  sightcache.ts     sensor sight lines reused while neither end has moved far
   recorder.ts       continuous recording for playback and AAR
   rng.ts            seeded PRNG
 src/dis           DIS: geodesy (WGS-84/ECEF, Euler angles), PDU codecs, UDP gateway
@@ -118,6 +119,8 @@ docs              this documentation (served at /docs)
 7. **Sensors:** once per second per entity, staggered. Each scan asks the
    spatial grid for other forces' entities within sensor range, in the same
    order a full scan would visit them, so results do not depend on the grid.
+   A sight line traced in the last few seconds is reused while neither end has
+   moved far (see [Performance](#performance)).
 8. **Once per second:** the light and weather are updated, smoke drifts and
    expires, observers request fire missions, unit morale is updated, supply
    vehicles resupply, jamming is worked out, unmanned systems' datalinks are
@@ -230,6 +233,69 @@ Write a module in `src/integrations/` that listens to engine events
 `runner.state()`. Wire it into `IntegrationHub`, and add configuration routes in
 `apiV1.ts`.
 
+## Performance
+
+The target is 5,000 entities at 1x real time or better on one server core.
+`npm run bench` measures it on a mixed scenario (`scripts/bench-scenario.ts`:
+platoons and squads in formation advancing into each other across 24 km, about
+2% aircraft, 12% civilians, a fifth of the units holding ground) with the
+recorder attached and state serialised as the server sends it to a GUI. It
+reports simulated seconds per wall second and charges CPU profile samples to
+subsystems; `--callers <subsystem>` lists the call chains behind one of them,
+`--sim-only` leaves out the recorder and state, and `--min <x>` fails below x
+times real time (CI runs 2,000 entities with `--min 1`, and 5,000 for the record).
+
+At 5,000 entities in the middle of the battle (about 10 contacts per entity),
+one step's time goes roughly like this:
+
+| Subsystem | Share |
+| --- | --- |
+| line of sight (sensors, threat maps) | 23% |
+| sensor scans and the spatial grid | 21% |
+| combat (target and weapon choice) | 12% |
+| movement, tasks, units and the step loop | 19% |
+| once-a-second updates (morale, smoke, jamming, alerts, threat maps) | 8% |
+| garbage collection | 7% |
+| state snapshots and their JSON | 7% |
+
+What keeps it fast, and the knobs (constants in the files named):
+
+- **Sensor scheduling.** Each entity scans once a second (`SENSOR_INTERVAL`,
+  `sensors.ts`), staggered across ticks. Candidates come from a per-force grid
+  of 500 m cells, leaving out cells beyond the sensor's reach (`spatial.ts`).
+  A target's sight line is traced once per scan, not once per sensor.
+- **Sight line reuse.** A sensor's sight line is reused for up to
+  `SIGHT_REUSE_TIME` (5 s) while neither end has moved more than
+  `SIGHT_REUSE_SHARE` (2%) of the range, and never more than `SIGHT_REUSE_MAX`
+  (25 m) (`sightcache.ts`); smoke is always checked afresh. This saves about
+  three quarters of the tracing; about 0.4% of reused answers differ from a
+  fresh trace, by lagging a second behind a target cresting a ridge. Setting
+  `SIGHT_REUSE_TIME` to 0 traces every line. Line of sight itself skips
+  stretches that pass above a max-height pyramid (`terrain.ts`), and combat
+  reuses a line exactly while neither end moves (`Engine.losCached`).
+- **Route planning.** A\* reuses its search arrays, path smoothing stops costing
+  a segment once it is over budget, and a smoothed route is remembered by start
+  and goal post for each cost overlay (`terrain.ts`, `pathfinding.ts`).
+- **Threat maps** (covered routes) remember which ground each threat position
+  sees. A large set of threats is sampled more coarsely so a rebuild traces at
+  most `LOS_BUDGET` sight lines, and a map built from `LARGE_SET` (50) or more
+  threats is kept for its `REBUILD_EVERY` seconds when at most a tenth changed
+  (`threats.ts`).
+- **State to clients.** The server sends state at `stateRate` (10 Hz), but no
+  more often than keeps broadcasting under `STATE_BUDGET` (10%) of its time
+  (`server.ts`): at 5,000 entities a state is about 3 MB and goes out about
+  twice a second. The recorder samples every entity once a second.
+- **The 2D map** draws each distinct symbol once into a bitmap and copies it,
+  culls to the view first, leaves labels out while more than `MAX_LABELS` (400)
+  would show, and draws entities as dots while more than `MAX_SYMBOLS` (2,500)
+  are in view (`web/map.ts`, `web/symbols.ts`). Above `TREE_FULL` (1,500)
+  entities the object tree lists units, and their members on selection or a
+  name filter (`web/main.ts`).
+
+All of this is deterministic: the same seed gives the same events. Only sight
+line reuse changes outcomes compared with tracing every line (the golden runs
+were re-recorded for it).
+
 ## Testing
 
 ```bash
@@ -255,6 +321,7 @@ npm run docs:gen      # regenerate docs/reference/catalog.md and mcp-tools.md
 | `roles.test.ts` | fog of war views and events, player command limits, player keys over REST, WebSocket and MCP |
 | `terrain-import.test.ts` | GeoTIFF (geographic and UTM) and GeoJSON import, lakes, rivers and bridges, high terrain |
 | `spatial.test.ts` | the spatial grid |
+| `scale.test.ts` | 1,000 entities run well ahead of real time; the same seed gives the same events |
 | `los.test.ts` | the max-height pyramid line of sight against a sample-by-sample reference |
 | `curvature.test.ts` | earth curvature and refraction: horizons, 30 km over flat ground, radar, the rule |
 | `tiled-terrain.test.ts` | tiles against the whole grid: every query and sight line across tile edges, LRU eviction, coarse-then-fine routes |

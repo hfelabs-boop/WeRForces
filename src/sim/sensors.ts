@@ -6,8 +6,10 @@ import type { EntityTypeDef, SensorDef } from '../shared/types.js';
 import type { Engine } from './engine.js';
 import type { Entity } from './entity.js';
 import { LAND_COVER } from '../shared/terrainGrid.js';
+import type { Vec3 } from '../shared/types.js';
 import { sensorRange } from './environment.js';
 import { spotFactor } from './morale.js';
+import { sensorSight } from './sightcache.js';
 
 export const SENSOR_INTERVAL = 1;
 const CONTACT_TIMEOUT = 15;
@@ -78,6 +80,10 @@ export function updateSensors(engine: Engine, observer: Entity): void {
       if (range2 > reach * reach) continue;
       const range = Math.sqrt(range2);
       const flash = now - target.lastFiredAt < 5;
+      // Line of sight is the same for every sensor of a kind: trace it at most once each.
+      let aim: Vec3 | undefined;
+      let sight: boolean | undefined;
+      let radarSight: boolean | undefined;
       for (const { s, jam, range: dark, flashRange } of sensors) {
         // Radars see big targets further than small ones (the radar range equation).
         const maxRange = s.radar && s.refRange ? radarRange(engine, s, target.type) * jam : (flash ? flashRange : dark) * (s.radar ? 1 : sizeFactor(target.type));
@@ -86,8 +92,10 @@ export function updateSensors(engine: Engine, observer: Entity): void {
           const off = Math.abs(angleDiff(observer.heading, bearing(observer, target)));
           if (off > s.fov / 2) continue;
         }
-        const aim = { x: target.x, y: target.y, z: target.z + Math.min(2, target.type.sensorHeight || 2) };
-        if (!engine.lineOfSight(eye, aim, !!s.radar)) continue;
+        aim ??= { x: target.x, y: target.y, z: target.z + Math.min(2, target.type.sensorHeight || 2) };
+        if (s.radar) radarSight ??= sensorSight(engine, observer, target, eye, aim, true, range);
+        else sight ??= sensorSight(engine, observer, target, eye, aim, false, range);
+        if (!(s.radar ? radarSight : sight)) continue;
         if (!engine.rng.chance(detectionProbability(engine, observer, target, range, maxRange, !!s.radar))) continue;
         recordContact(engine, observer, target, now);
         break;
@@ -103,17 +111,19 @@ export function updateSensors(engine: Engine, observer: Entity): void {
 function recordContact(engine: Engine, observer: Entity, target: Entity, now: number): void {
   const isNew = !observer.contacts.has(target.id);
   // Contacts go round the unit on the radio, unless it is jammed.
-  const share = observer.unit && !engine.ew.radioJammed(observer) && (!observer.uxs || engine.unmanned.linked(observer)) ? observer.unit.alive() : [observer];
+  const share = observer.unit && !engine.ew.radioJammed(observer) && (!observer.uxs || engine.unmanned.linked(observer)) ? observer.unit.memberList : [observer];
   for (const m of share) {
+    if (!m.alive) continue;
     const existing = m.contacts.get(target.id);
-    m.contacts.set(target.id, {
-      id: target.id,
-      firstSeen: existing?.firstSeen ?? now,
-      lastSeen: now,
-      x: target.x,
-      y: target.y,
-      z: target.z,
-    });
+    if (existing) {
+      // Updated in place: contacts are re-seen every scan.
+      existing.lastSeen = now;
+      existing.x = target.x;
+      existing.y = target.y;
+      existing.z = target.z;
+    } else {
+      m.contacts.set(target.id, { id: target.id, firstSeen: now, lastSeen: now, x: target.x, y: target.y, z: target.z });
+    }
   }
   if (isNew && engine.isHostile(observer.force, target.force)) {
     engine.log('detected', `${observer.name} detected ${target.name}`, observer.id, target.id);

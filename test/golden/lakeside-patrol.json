@@ -2,13 +2,12 @@
   "scenario": "lakeside-patrol",
   "seconds": 900,
   "alive": {
-    "1": "11/12",
+    "1": "12/12",
     "2": "2/3"
   },
   "kills": [
-    "234.8 PB 101 destroyed by Hind 21",
-    "261.8 Hind 21 destroyed by Stinger 1"
+    "228.1 Hind 21 destroyed by PB 102"
   ],
-  "events": 108,
-  "digest": "6da729309bc9f92332347f849b261cc54428cd19cf1bee13709e411b8907f9e1"
+  "events": 39,
+  "digest": "dc2469c3933767af8511fbdc11bb50980331d5eccbe391f9923b5b7b70a0da16"
 }

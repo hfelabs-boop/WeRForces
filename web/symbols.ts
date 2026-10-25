@@ -229,6 +229,9 @@ export interface SymbolOptions {
   sidc?: string;
 }
 
+/** Rendered symbols (frame, icon, echelon and damage marks) by look and size, with their anchor. */
+const bitmaps = new Map<string, { canvas: HTMLCanvasElement; ax: number; ay: number; w: number; h: number }>();
+
 /** Draw a symbol centred at (x, y) in screen pixels. `s` is the half-height. */
 export function drawSymbol(
   ctx: CanvasRenderingContext2D,
@@ -240,13 +243,9 @@ export function drawSymbol(
   kind: SymbolKind,
   opts: SymbolOptions = {},
 ): void {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.globalAlpha = opts.alpha ?? 1;
-  const c = FORCE_COLORS[force];
   if (opts.selected) {
     ctx.beginPath();
-    ctx.arc(0, 0, s * 1.9, 0, Math.PI * 2);
+    ctx.arc(x, y, s * 1.9, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255,255,255,0.18)';
     ctx.fill();
     ctx.strokeStyle = '#fff';
@@ -255,11 +254,52 @@ export function drawSymbol(
     ctx.stroke();
     ctx.setLineDash([]);
   }
-  if (style === '2525') {
-    // milsymbol sizes the icon's frame; ~1.9x the simple style's half-height matches it.
-    const sym = milSymbol(sidcFor(force, domain, kind, opts.sidc, opts.echelon), Math.round(s * 1.9));
-    if (opts.destroyed) ctx.globalAlpha *= 0.55;
+  // Thousands of symbols a frame: each distinct one is drawn once into a bitmap, then copied.
+  const size = Math.round(s * 2) / 2;
+  const key = `${style}|${force}|${domain}|${kind}|${size}|${opts.sidc ?? ''}|${opts.echelon ?? ''}|${opts.destroyed ? 1 : 0}${opts.damaged ? 1 : 0}${opts.remote ? 1 : 0}`;
+  let bmp = bitmaps.get(key);
+  if (!bmp) {
+    bmp = renderBitmap(size, force, domain, kind, opts);
+    if (bitmaps.size > 3000) bitmaps.clear();
+    bitmaps.set(key, bmp);
+  }
+  const alpha = ctx.globalAlpha;
+  ctx.globalAlpha = opts.alpha ?? 1;
+  // On whole pixels, the copy is a plain blit rather than a resampling.
+  ctx.drawImage(bmp.canvas, Math.round(x - bmp.ax), Math.round(y - bmp.ay), bmp.w, bmp.h);
+  ctx.globalAlpha = alpha;
+}
+
+function renderBitmap(s: number, force: ForceId, domain: Domain, kind: SymbolKind, opts: SymbolOptions): { canvas: HTMLCanvasElement; ax: number; ay: number; w: number; h: number } {
+  const dpr = window.devicePixelRatio || 1;
+  // Just big enough (every transparent pixel costs when thousands are drawn): the frame
+  // or 2525 symbol, plus echelon marks, the damage bar or cross and the remote ring.
+  const sym = style === '2525' ? milSymbol(sidcFor(force, domain, kind, opts.sidc, opts.echelon), Math.round(s * 1.9)) : null;
+  let x0 = sym ? -sym.ax : -s * 1.4 - 2;
+  let x1 = sym ? sym.w - sym.ax : s * 1.4 + 2;
+  let y0 = sym ? -sym.ay : -s * (opts.echelon ? 2.4 : 1.25) - 2;
+  let y1 = sym ? sym.h - sym.ay : s * 1.2 + 2;
+  const grow = (r: number, ry = r) => {
+    x0 = Math.min(x0, -r);
+    x1 = Math.max(x1, r);
+    y0 = Math.min(y0, -ry);
+    y1 = Math.max(y1, ry);
+  };
+  if (opts.damaged) grow(s + 2, s * 1.15 + 2);
+  if (opts.destroyed) grow(s * 1.4 + 2, s * 1.1 + 2);
+  if (opts.remote && sym) grow(s * 1.6 + 2);
+  const w = Math.ceil(x1 - x0);
+  const h = Math.ceil(y1 - y0);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil(w * dpr));
+  canvas.height = Math.max(1, Math.ceil(h * dpr));
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(dpr, dpr);
+  ctx.translate(-x0, -y0);
+  if (sym) {
+    if (opts.destroyed) ctx.globalAlpha = 0.55;
     ctx.drawImage(sym.canvas, -sym.ax, -sym.ay, sym.w, sym.h);
+    ctx.globalAlpha = 1;
     if (opts.remote) {
       ctx.beginPath();
       ctx.arc(0, 0, s * 1.6, 0, Math.PI * 2);
@@ -270,9 +310,15 @@ export function drawSymbol(
       ctx.setLineDash([]);
     }
     damageMarks(ctx, s, opts);
-    ctx.restore();
-    return;
+  } else {
+    paintSimple(ctx, s, force, domain, kind, opts);
   }
+  return { canvas, ax: -x0, ay: -y0, w: canvas.width / dpr, h: canvas.height / dpr };
+}
+
+/** The simplified style, centred on the origin. */
+function paintSimple(ctx: CanvasRenderingContext2D, s: number, force: ForceId, domain: Domain, kind: SymbolKind, opts: SymbolOptions): void {
+  const c = FORCE_COLORS[force];
   frame(ctx, force, domain, s);
   ctx.fillStyle = opts.destroyed ? '#555' : c.fill;
   ctx.fill();
@@ -298,7 +344,6 @@ export function drawSymbol(
     ctx.fillText(ECHELON_DOTS[opts.echelon], 0, top - 1);
   }
   damageMarks(ctx, s, opts);
-  ctx.restore();
 }
 
 /** Damage bar under the symbol, or a red cross when destroyed. */
@@ -336,4 +381,23 @@ export function symbolCanvas(force: ForceId, domain: Domain, kind: SymbolKind, s
   ctx.scale(dpr, dpr);
   drawSymbol(ctx, size * 0.7, size * (echelon ? 0.6 : 0.5), size * 0.3, force, domain, kind, { echelon, sidc });
   return cv;
+}
+
+/** Symbol images by style, look and size, for long lists (one canvas per distinct symbol). */
+const icons = new Map<string, string>();
+
+/** The same picture as symbolCanvas, as an image whose bitmap is shared with every other use. */
+export function symbolIcon(force: ForceId, domain: Domain, kind: SymbolKind, size = 28, echelon?: UnitTemplate['echelon'], sidc?: string): HTMLImageElement {
+  const key = `${style}|${force}|${domain}|${kind}|${size}|${echelon ?? ''}|${sidc ?? ''}|${window.devicePixelRatio || 1}`;
+  let url = icons.get(key);
+  if (!url) {
+    url = symbolCanvas(force, domain, kind, size, echelon, sidc).toDataURL();
+    if (icons.size > 500) icons.clear();
+    icons.set(key, url);
+  }
+  const img = document.createElement('img');
+  img.src = url;
+  img.width = size * 1.4;
+  img.height = size;
+  return img;
 }

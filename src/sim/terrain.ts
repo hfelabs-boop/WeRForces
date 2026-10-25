@@ -20,6 +20,8 @@ export const DEFAULT_TERRAIN: TerrainSpec = {
 };
 
 export const CANOPY_HEIGHT = 15;
+/** Route memo key for routes planned without a cost overlay. */
+const NO_OVERLAY = {};
 /** Metres of forest a sight line can pass through before it is blocked. */
 export const FOREST_SEE_THROUGH = 150;
 /** Metres of built-up area a sight line can pass through (streets, gaps) before buildings block it. */
@@ -125,6 +127,8 @@ export class Terrain extends TerrainGrid {
   private tops: { cols: number; max: Float32Array } | null = null;
   /** A* node costs per domain and off-road factor, computed on first use. */
   private readonly costGrids = new Map<string, Float32Array>();
+  /** Smoothed A* routes by start and goal post, per route-cost overlay (the result depends on nothing else). */
+  private readonly routeMemo = new WeakMap<object, Map<string, Vec2[] | null>>();
 
   readonly buildings: Building[];
   /** Earth curvature and refraction in line of sight (the engine sets it from rules.curvature). */
@@ -566,10 +570,18 @@ export class Terrain extends TerrainGrid {
     const start = this.nearestPassable(from, cost);
     const goal = this.nearestPassable(to, cost);
     if (start < 0 || goal < 0) return null;
-    const res = gridAStar(this.cols, this.rows, start, goal, cost, 1);
-    if (!res) return null;
-    const pts = res.nodes.map((i) => this.postPosition(i));
-    const smoothed = this.smoothPath(pts, domain, offroadFactor, overlay);
+    const memoKey = overlay ?? NO_OVERLAY;
+    let memo = this.routeMemo.get(memoKey);
+    if (!memo || memo.size > 5000) this.routeMemo.set(memoKey, (memo = new Map()));
+    const key = `${domain}:${offroadFactor}:${start}:${goal}`;
+    let route = memo.get(key);
+    if (route === undefined) {
+      const res = gridAStar(this.cols, this.rows, start, goal, cost, 1);
+      route = res ? this.smoothPath(res.nodes.map((i) => this.postPosition(i)), domain, offroadFactor, overlay) : null;
+      memo.set(key, route);
+    }
+    if (!route) return null;
+    const smoothed = route.map((p) => ({ x: p.x, y: p.y }));
     smoothed.shift(); // drop the start node; the entity is already there
     const last = smoothed[smoothed.length - 1];
     if (!last || dist2d(last, to) > 1) {
@@ -596,8 +608,11 @@ export class Terrain extends TerrainGrid {
     return grid;
   }
 
-  /** Time-cost of a straight segment, Infinity if any sample is impassable. */
-  segmentCost(a: Vec2, b: Vec2, domain: Domain, offroadFactor: number, overlay: PostOverlay | null = null): number {
+  /**
+   * Time-cost of a straight segment, Infinity if any sample is impassable. With `limit`,
+   * also Infinity as soon as the cost is sure to exceed it (the sum only grows).
+   */
+  segmentCost(a: Vec2, b: Vec2, domain: Domain, offroadFactor: number, overlay: PostOverlay | null = null, limit = Infinity): number {
     const d = dist2d(a, b);
     const step = this.spec.cellSize / 2;
     const n = Math.max(1, Math.ceil(d / step));
@@ -611,6 +626,7 @@ export class Terrain extends TerrainGrid {
       const extra = overlay ? overlay.get(this.nearestPost(x, y)) : 1;
       if (!Number.isFinite(extra)) return Infinity;
       cost += extra / f;
+      if ((cost / (n + 1)) * d > limit) return Infinity;
     }
     return (cost / (n + 1)) * d;
   }
@@ -627,8 +643,8 @@ export class Terrain extends TerrainGrid {
     while (i < pts.length - 1) {
       let best = i + 1;
       for (let j = Math.min(pts.length - 1, i + 60); j > i + 1; j--) {
-        const direct = this.segmentCost(pts[i], pts[j], domain, offroadFactor, overlay);
-        if (direct <= (prefix[j] - prefix[i]) * 1.02) {
+        const budget = (prefix[j] - prefix[i]) * 1.02;
+        if (this.segmentCost(pts[i], pts[j], domain, offroadFactor, overlay, budget) <= budget) {
           best = j;
           break;
         }

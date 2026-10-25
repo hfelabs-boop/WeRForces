@@ -25,6 +25,8 @@ export interface SteerCommand {
   finalHeading?: number;
 }
 
+let entitySeq = 0;
+
 export class Entity {
   x: number;
   y: number;
@@ -118,6 +120,8 @@ export class Entity {
   remoteDis?: { site: number; application: number; entity: number };
   remoteLastUpdate = 0;
   remoteVelocity: Vec3 = { x: 0, y: 0, z: 0 };
+  /** Creation order in this process: a cheap key for caches kept per pair of entities. */
+  readonly seq = ++entitySeq;
 
   constructor(
     readonly id: string,

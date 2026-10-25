@@ -24,4 +24,27 @@ describe('spatial index', () => {
       for (const e of want) expect(got).toContain(e);
     }
   });
+
+  it('copes with entities spread very far apart (coarser cells) and finds every one in range', () => {
+    const engine = new Engine();
+    engine.newScenario('far');
+    const rng = new Rng(11);
+    for (let i = 0; i < 200; i++) {
+      const p = engine.findValidPosition({ x: rng.range(0, 16000), y: rng.range(0, 16000) }, 'ground');
+      if (p) engine.createEntity({ typeId: 'us-hmmwv', force: (1 + (i % 3)) as 1 | 2 | 3, x: p.x, y: p.y });
+    }
+    const all = [...engine.entities.values()];
+    // A remote-style entity thousands of kilometres off the map.
+    all[0].x = 5e6;
+    all[0].y = -3e6;
+    const index = new SpatialIndex();
+    index.build(all, 0);
+    for (const [x, y, r] of [[8000, 8000, 3000], [0, 0, 1500], [5e6, -3e6, 10], [8000, 8000, 1e8]]) {
+      const got = index.query(x, y, r);
+      const want = all.filter((e) => Math.hypot(e.x - x, e.y - y) <= r);
+      for (const e of want) expect(got).toContain(e);
+      const order = got.map((e) => all.indexOf(e));
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+    }
+  });
 });
